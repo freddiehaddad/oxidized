@@ -227,7 +227,7 @@ fn test_file_sizes() {
     let small_content = "small";
     let large_content = "a".repeat(1000);
 
-    fs::write(temp_path.join("small.txt"), &small_content).unwrap();
+    fs::write(temp_path.join("small.txt"), small_content).unwrap();
     fs::write(temp_path.join("large.txt"), &large_content).unwrap();
 
     let file_manager = FileManager::new().unwrap();

@@ -3,8 +3,7 @@ use oxidized::features::search::{SearchEngine, SearchResult};
 #[test]
 fn test_search_engine_creation() {
     let _engine = SearchEngine::new();
-    // Test that it can be created without panicking
-    assert!(true);
+    // Creation should not panic
 }
 
 #[test]

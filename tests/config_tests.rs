@@ -121,8 +121,7 @@ fn test_theme_integration_editor_to_themes() {
     ui.set_theme(&editor_config.display.color_scheme);
 
     // Test that the theme was applied (by checking it doesn't panic and colors are set)
-    // Note: We can't easily test the colors directly without more introspection
-    assert!(true); // If we get here without panicking, the integration works
+    // Note: If we reached here, applying the theme didn't panic.
 }
 
 #[test]
@@ -188,8 +187,8 @@ fn test_editor_config_parsing() {
 
     // Should match the values in editor.toml
     assert_eq!(config.display.color_scheme, "default");
-    assert_eq!(config.display.show_line_numbers, false);
-    assert_eq!(config.display.show_relative_numbers, true);
-    assert_eq!(config.display.show_cursor_line, true);
-    assert_eq!(config.display.syntax_highlighting, true);
+    assert!(!config.display.show_line_numbers);
+    assert!(config.display.show_relative_numbers);
+    assert!(config.display.show_cursor_line);
+    assert!(config.display.syntax_highlighting);
 }

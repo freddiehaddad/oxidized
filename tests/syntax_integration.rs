@@ -36,7 +36,7 @@ fn test_highlight_style_creation() {
 
 #[test]
 fn test_highlight_range_creation() {
-    let highlights = vec![
+    let highlights = [
         HighlightRange {
             start: 0,
             end: 5,
@@ -108,7 +108,7 @@ fn test_rust_language_support() {
 
 #[test]
 fn test_semantic_categories() {
-    let categories = vec![
+    let categories = [
         SemanticCategory::Keyword,
         SemanticCategory::Function,
         SemanticCategory::Variable,
