@@ -62,21 +62,26 @@ impl SearchEngine {
             }
         } else {
             // Simple string search with proper UTF-8 handling
+            // Precompute pattern chars once
+            let pattern_chars: Vec<char> = pattern.chars().collect();
+            let pattern_search_chars: Vec<char> = if self.case_sensitive {
+                pattern_chars.clone()
+            } else {
+                pattern.to_lowercase().chars().collect()
+            };
+
             for (line_num, line) in text.iter().enumerate() {
+                // Original chars for correct column indices and matched_text extraction
                 let line_chars: Vec<char> = line.chars().collect();
-                let pattern_chars: Vec<char> = pattern.chars().collect();
 
-                // Convert to lowercase if needed for comparison
-                let search_chars: Vec<char> = if self.case_sensitive {
-                    line_chars.clone()
+                // Create a search view depending on case sensitivity
+                let search_chars: std::borrow::Cow<'_, [char]> = if self.case_sensitive {
+                    // Borrow without cloning in case-sensitive mode
+                    std::borrow::Cow::Borrowed(&line_chars)
                 } else {
-                    line.to_lowercase().chars().collect()
-                };
-
-                let pattern_search_chars: Vec<char> = if self.case_sensitive {
-                    pattern_chars.clone()
-                } else {
-                    pattern.to_lowercase().chars().collect()
+                    // Lowercase allocation once per line (keep semantics identical to previous version)
+                    let lower: Vec<char> = line.to_lowercase().chars().collect();
+                    std::borrow::Cow::Owned(lower)
                 };
 
                 let mut char_start = 0;
