@@ -1,17 +1,12 @@
 [advisories]
-# Treat vulnerabilities as errors; others as warnings by default
-vulnerability = "deny"
-unmaintained = "warn"
+# Use current cargo-deny schema. All vulnerabilities are errors by default.
+# Fail only when unmaintained applies to a direct workspace dependency.
+unmaintained = "workspace"
 yanked = "warn"
-notice = "warn"
 ignore = []
 
 [licenses]
-# Require every crate to have a license we allow
-unlicensed = "deny"
-copyleft = "deny"
-default = "deny"
-# Common permissive licenses allowed in this project
+# Explicit allowlist of licenses permitted in the dependency graph.
 allow = [
     "Apache-2.0",
     "MIT",
@@ -23,14 +18,17 @@ allow = [
     "Unicode-DFS-2016",
     "CC0-1.0",
 ]
-# Explicitly deny strong copyleft and SSPL
-deny = ["GPL-3.0", "AGPL-3.0", "LGPL-3.0", "LGPL-2.1", "SSPL-1.0"]
+# Warn if an allowed license isn't actually used (helps keep allowlist lean)
+unused-allowed-license = "warn"
 # Confidence for text license detection
 confidence-threshold = 0.8
 # Per-crate exceptions can be added here if needed
 exceptions = [
-    # { name = "some-crate", version = "=1.2.3", allow = ["LicenseRef-custom"] },
+    # { crate = "some-crate@=1.2.3", allow = ["LicenseRef-custom"] },
 ]
+# Optionally ignore license checks for unpublished/private workspace crates
+[licenses.private]
+ignore = true
 
 [bans]
 # Warn on multiple versions to keep tree tidy, but don't fail builds
