@@ -107,7 +107,9 @@ jobs:
 
   bench:
     name: Quick Benches
+    if: github.event_name == 'push'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
