@@ -96,65 +96,14 @@ impl UI {
         }
     }
 
-    /// Calculate line selection range for visual selection
+    /// Calculate line selection range for visual selection using core helper
     fn calculate_line_selection_range(
         &self,
         line: &str,
         line_number: usize,
         selection: Option<crate::core::mode::Selection>,
     ) -> Option<(usize, usize)> {
-        if let Some(sel) = selection {
-            use crate::core::mode::SelectionType;
-
-            let (start, end) = if sel.start.row <= sel.end.row {
-                (sel.start, sel.end)
-            } else {
-                (sel.end, sel.start)
-            };
-
-            match sel.selection_type {
-                SelectionType::Character => {
-                    if line_number >= start.row && line_number <= end.row {
-                        if start.row == end.row {
-                            Some((start.col, end.col))
-                        } else if line_number == start.row {
-                            Some((start.col, line.len()))
-                        } else if line_number == end.row {
-                            Some((0, end.col))
-                        } else {
-                            Some((0, line.len()))
-                        }
-                    } else {
-                        None
-                    }
-                }
-                SelectionType::Line => {
-                    if line_number >= start.row && line_number <= end.row {
-                        Some((0, line.len()))
-                    } else {
-                        None
-                    }
-                }
-                SelectionType::Block => {
-                    if line_number >= start.row && line_number <= end.row {
-                        let left_col = start.col.min(end.col);
-                        let right_col = start.col.max(end.col) + 1; // +1 to make it inclusive
-                        let line_length = line.chars().count();
-                        let actual_right = right_col.min(line_length);
-
-                        if left_col <= line_length {
-                            Some((left_col, actual_right.max(left_col + 1)))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                }
-            }
-        } else {
-            None
-        }
+        selection.and_then(|sel| sel.highlight_span_for_line(line_number, line.chars().count()))
     }
 
     pub fn render(

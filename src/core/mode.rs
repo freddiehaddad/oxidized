@@ -88,4 +88,62 @@ impl Selection {
             selection_type: SelectionType::Line,
         }
     }
+
+    /// Compute the highlight span (start_col, end_col_exclusive) for a given line.
+    /// Returns None if the selection does not cover the line.
+    ///
+    /// This centralizes inclusive/exclusive semantics so UI and core stay consistent:
+    /// - Character: end is exclusive; multi-line spans cover start->EOL and BOL->end
+    /// - Line: full line when within [start.row, end.row]
+    /// - Block: rectangular selection inclusive of the cursor column; returns [left, right+1)
+    pub fn highlight_span_for_line(
+        &self,
+        line_number: usize,
+        line_length: usize,
+    ) -> Option<(usize, usize)> {
+        let (start, end) = if self.start.row <= self.end.row {
+            (self.start, self.end)
+        } else {
+            (self.end, self.start)
+        };
+
+        match self.selection_type {
+            SelectionType::Character => {
+                if line_number < start.row || line_number > end.row {
+                    return None;
+                }
+                if start.row == end.row {
+                    // Single-line character selection uses an exclusive end
+                    Some((start.col, end.col))
+                } else if line_number == start.row {
+                    Some((start.col, line_length))
+                } else if line_number == end.row {
+                    Some((0, end.col))
+                } else {
+                    Some((0, line_length))
+                }
+            }
+            SelectionType::Line => {
+                if line_number >= start.row && line_number <= end.row {
+                    Some((0, line_length))
+                } else {
+                    None
+                }
+            }
+            SelectionType::Block => {
+                if line_number < start.row || line_number > end.row {
+                    return None;
+                }
+                let left_col = start.col.min(end.col);
+                // +1 to make selection inclusive of the cursor column; return exclusive end
+                let right_inclusive = start.col.max(end.col) + 1;
+                let actual_right = right_inclusive.min(line_length);
+                if left_col <= line_length {
+                    Some((left_col, actual_right.max(left_col + 1)))
+                } else {
+                    None
+                }
+            }
+        }
+    }
 }
