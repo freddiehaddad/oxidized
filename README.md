@@ -132,6 +132,7 @@ cargo install --path .
 - `/pattern` - Search forward
 - `?pattern` - Search backward
 - `n/N` - Next/previous search result
+  - Case options: configure `ignore_case` and `smart_case` in `editor.toml`
 
 **Visual Modes Tip:**
 
@@ -222,6 +223,11 @@ default_language = "text"
 "txt" = "text"
 "json" = "json"
 ```
+
+#### Search behavior
+
+- ignore_case (ic): When true, searches are case-insensitive by default.
+- smart_case (scs): When true and the search pattern contains any uppercase letter, the search becomes case-sensitive for that query only; otherwise it follows ignore_case.
 
 ### Keymap Customization (`keymaps.toml`)
 
@@ -701,6 +707,8 @@ cargo bench --bench search_bench               # full run with reports
 ```
 
 Benchmark reports are generated under `target/criterion/` (open the `report/index.html` inside each benchmark folder).
+
+CI also runs quick benches on push and weekly (Mon 06:00 UTC) across Ubuntu, macOS, and Windows. HTML reports are uploaded as artifacts named `criterion-<os>` on each run.
 
 ```bash
 # Linux/macOS - Run all tests (108+ comprehensive tests)
