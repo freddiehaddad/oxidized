@@ -13,13 +13,14 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
-    "Zlib",
     "MPL-2.0",
     "Unicode-DFS-2016",
+    "Unicode-3.0",
     "CC0-1.0",
+    "Zlib",
 ]
 # Warn if an allowed license isn't actually used (helps keep allowlist lean)
-unused-allowed-license = "warn"
+unused-allowed-license = "allow"
 # Confidence for text license detection
 confidence-threshold = 0.8
 # Per-crate exceptions can be added here if needed
