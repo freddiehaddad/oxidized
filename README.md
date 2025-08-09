@@ -11,6 +11,8 @@
 - [🏗️ Architecture Overview](#️-architecture-overview)
 - [📋 Feature Status](#-feature-status)
 - [🛠️ Development & Debugging](#️-development--debugging)
+  - [Testing](#testing)
+  - [Benchmarking](#benchmarking)
 - [🔧 Troubleshooting](#-troubleshooting)
 - [🧰 Dependencies](#-dependencies)
 - [🤝 Contributing](#-contributing)
