@@ -1,0 +1,19 @@
+# Normalize line endings for source files to LF
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.gitignore text eol=lf
+
+# Keep binary files untouched
+*.exe binary
+*.dll binary
+*.pdb binary
+*.png binary
+*.jpg binary
+*.ico binary
+
+# Allow Windows scripts to use CRLF if desired
+*.ps1 text eol=crlf
+*.bat text eol=crlf
