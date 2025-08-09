@@ -342,6 +342,7 @@ punctuation = "#839496"  # Gray for punctuation
 - **Background Processing**: Syntax highlighting and file operations run asynchronously
 - **Memory Management**: Rust's ownership system ensures memory safety without garbage collection
 - **Optimized Data Structures**: Efficient text manipulation with gap buffers and rope structures
+- **Fast Search Path (ASCII)**: Case-insensitive search uses an ASCII fast path to avoid per-line lowercase allocations when possible; Unicode-insensitive search preserves exact matching semantics
 
 ## 📋 Feature Status
 
@@ -671,6 +672,24 @@ cargo test macro_tests
 # Run with detailed output
 cargo test -- --nocapture --test-threads=1
 ```
+
+### Benchmarking
+
+Run micro-benchmarks for the search engine using Criterion (HTML reports enabled):
+
+```powershell
+# Windows (PowerShell)
+cargo bench --bench search_bench -- --quick    # fast sanity run
+cargo bench --bench search_bench               # full run with reports
+```
+
+```bash
+# Linux/macOS (Bash)
+cargo bench --bench search_bench -- --quick    # fast sanity run
+cargo bench --bench search_bench               # full run with reports
+```
+
+Benchmark reports are generated under `target/criterion/` (open the `report/index.html` inside each benchmark folder).
 
 ```bash
 # Linux/macOS - Run all tests (108+ comprehensive tests)

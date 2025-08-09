@@ -64,9 +64,17 @@ impl SearchEngine {
             // Simple string search with proper UTF-8 handling
             // Precompute pattern chars once
             let pattern_chars: Vec<char> = pattern.chars().collect();
+            let pattern_is_ascii = pattern.is_ascii();
             let pattern_search_chars: Vec<char> = if self.case_sensitive {
                 pattern_chars.clone()
+            } else if pattern_is_ascii {
+                // ASCII fast path: lower via ASCII mapping (same semantics for ASCII)
+                pattern_chars
+                    .iter()
+                    .map(|c| c.to_ascii_lowercase())
+                    .collect()
             } else {
+                // Unicode case-insensitive: keep previous semantics
                 pattern.to_lowercase().chars().collect()
             };
 
@@ -74,41 +82,89 @@ impl SearchEngine {
                 // Original chars for correct column indices and matched_text extraction
                 let line_chars: Vec<char> = line.chars().collect();
 
-                // Create a search view depending on case sensitivity
-                let search_chars: std::borrow::Cow<'_, [char]> = if self.case_sensitive {
-                    // Borrow without cloning in case-sensitive mode
-                    std::borrow::Cow::Borrowed(&line_chars)
-                } else {
-                    // Lowercase allocation once per line (keep semantics identical to previous version)
-                    let lower: Vec<char> = line.to_lowercase().chars().collect();
-                    std::borrow::Cow::Owned(lower)
-                };
-
-                let mut char_start = 0;
-                while char_start + pattern_search_chars.len() <= search_chars.len() {
-                    // Check if we have a match at this position
-                    let mut matches = true;
-                    for (i, &pattern_char) in pattern_search_chars.iter().enumerate() {
-                        if search_chars[char_start + i] != pattern_char {
-                            matches = false;
-                            break;
+                if self.case_sensitive {
+                    // Case-sensitive: compare directly against original chars without extra allocations
+                    let mut char_start = 0;
+                    while char_start + pattern_search_chars.len() <= line_chars.len() {
+                        let mut matches = true;
+                        for (i, &pattern_char) in pattern_search_chars.iter().enumerate() {
+                            if line_chars[char_start + i] != pattern_char {
+                                matches = false;
+                                break;
+                            }
                         }
+
+                        if matches {
+                            let char_end = char_start + pattern_chars.len();
+                            let matched_text: String =
+                                line_chars[char_start..char_end].iter().collect();
+
+                            results.push(SearchResult {
+                                line: line_num,
+                                start_col: char_start,
+                                end_col: char_end,
+                                matched_text,
+                            });
+                        }
+
+                        char_start += 1;
                     }
+                } else if line.is_ascii() && pattern_is_ascii {
+                    // Case-insensitive ASCII fast path: avoid allocating a lowercased line
+                    let mut char_start = 0;
+                    while char_start + pattern_search_chars.len() <= line_chars.len() {
+                        let mut matches = true;
+                        for (i, &pattern_char) in pattern_search_chars.iter().enumerate() {
+                            if line_chars[char_start + i].to_ascii_lowercase() != pattern_char {
+                                matches = false;
+                                break;
+                            }
+                        }
 
-                    if matches {
-                        let char_end = char_start + pattern_chars.len();
-                        let matched_text: String =
-                            line_chars[char_start..char_end].iter().collect();
+                        if matches {
+                            let char_end = char_start + pattern_chars.len();
+                            let matched_text: String =
+                                line_chars[char_start..char_end].iter().collect();
 
-                        results.push(SearchResult {
-                            line: line_num,
-                            start_col: char_start,
-                            end_col: char_end,
-                            matched_text,
-                        });
+                            results.push(SearchResult {
+                                line: line_num,
+                                start_col: char_start,
+                                end_col: char_end,
+                                matched_text,
+                            });
+                        }
+
+                        char_start += 1;
                     }
+                } else {
+                    // Unicode case-insensitive: allocate a lowercased view per line (previous semantics)
+                    let search_chars: Vec<char> = line.to_lowercase().chars().collect();
 
-                    char_start += 1;
+                    let mut char_start = 0;
+                    while char_start + pattern_search_chars.len() <= search_chars.len() {
+                        let mut matches = true;
+                        for (i, &pattern_char) in pattern_search_chars.iter().enumerate() {
+                            if search_chars[char_start + i] != pattern_char {
+                                matches = false;
+                                break;
+                            }
+                        }
+
+                        if matches {
+                            let char_end = char_start + pattern_chars.len();
+                            let matched_text: String =
+                                line_chars[char_start..char_end].iter().collect();
+
+                            results.push(SearchResult {
+                                line: line_num,
+                                start_col: char_start,
+                                end_col: char_end,
+                                matched_text,
+                            });
+                        }
+
+                        char_start += 1;
+                    }
                 }
             }
         }
