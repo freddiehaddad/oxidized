@@ -12,7 +12,7 @@ path = "src/main.rs"
 crossterm = "0.29.0"
 # JSON-RPC for LSP
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.142"
+serde_json = "1.0"
 # Configuration parsing
 toml = "0.9.5"
 # Regex support
@@ -26,9 +26,9 @@ tree-sitter-rust = "0.24.0"
 log = "0.4"
 env_logger = "0.11.8"
 # Timestamp formatting for logs
-chrono = "0.4.0"
+chrono = "0.4"
 # Error handling
-thiserror = "1.0"
+thiserror = "2.0"
 anyhow = "1.0"
 
 [dev-dependencies]
@@ -37,7 +37,7 @@ tokio = { version = "1.47.1", features = ["full"] }
 # Temporary directory creation for tests
 tempfile = "3.0"
 # Benchmarking
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.7", features = ["html_reports"] }
 
 [[bench]]
 name = "search_bench"
