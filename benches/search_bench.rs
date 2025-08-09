@@ -33,6 +33,8 @@ fn bench_search(c: &mut Criterion) {
         ("unicode", 1_200, 88, "βγ", 43),
         ("single_ascii", 3_000, 80, "a", 13),
         ("single_unicode", 3_000, 80, "β", 17),
+        ("symbols_semicolon", 3_000, 100, ";", 7),
+        ("symbols_comma", 3_000, 100, ",", 5),
     ];
 
     for (name, lines, len, pat, freq) in cases {
