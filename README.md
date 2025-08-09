@@ -1012,6 +1012,7 @@ pub struct RegisterSystem {
 - **Visual selection**: Proper character selection with highlighting ✅
 - **Visual line selection**: Complete line selection (V) ✅  
 - **Visual block selection**: Rectangular selection (Ctrl+V) ✅
+  - Tip: If your terminal intercepts Ctrl+V (e.g., VS Code integrated terminal), use Alt+V as an alternative shortcut.
 - **Selection operations**: d, c, y, >, <, ~ with visual selections ✅
 
 #### 4. **Enhanced Search & Replace**

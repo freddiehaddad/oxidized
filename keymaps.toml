@@ -32,6 +32,7 @@
 "v" = "visual_mode"
 "V" = "visual_line_mode"
 "Ctrl+v" = "visual_block_mode"
+"Alt+v" = "visual_block_mode" # Alternative for terminals that intercept Ctrl+V (e.g., VS Code)
 "R" = "replace_mode"
 
 # Search
@@ -273,6 +274,7 @@
 # Mode transitions
 "Escape" = "normal_mode"
 "Ctrl+v" = "normal_mode"
+"Alt+v" = "normal_mode" # Alternative exit for Visual Block
 "v" = "visual_mode"
 
 [replace_mode]

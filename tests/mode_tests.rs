@@ -36,8 +36,8 @@ mod mode_tests {
     #[test]
     fn test_mode_clone() {
         let original = Mode::VisualLine;
-    let copied = original; // Mode is Copy
-    assert_eq!(original, copied);
+        let copied = original; // Mode is Copy
+        assert_eq!(original, copied);
     }
 
     #[test]
@@ -82,8 +82,8 @@ mod mode_tests {
     #[test]
     fn test_position_clone() {
         let original = Position::new(1, 2);
-    let copied = original; // Position is Copy
-    assert_eq!(original, copied);
+        let copied = original; // Position is Copy
+        assert_eq!(original, copied);
     }
 
     #[test]
@@ -128,8 +128,8 @@ mod mode_tests {
     #[test]
     fn test_selection_clone() {
         let original = Selection::new(Position::new(1, 2), Position::new(3, 4));
-    let copied = original; // Selection is Copy
-    assert_eq!(original, copied);
+        let copied = original; // Selection is Copy
+        assert_eq!(original, copied);
     }
 
     #[test]
@@ -157,7 +157,7 @@ mod mode_tests {
 
     #[test]
     fn test_all_mode_variants() {
-    let modes = [
+        let modes = [
             Mode::Normal,
             Mode::Insert,
             Mode::Visual,
@@ -167,7 +167,7 @@ mod mode_tests {
             Mode::Replace,
             Mode::Search,
             Mode::OperatorPending,
-    ];
+        ];
 
         // Ensure all modes are unique
         for (i, mode1) in modes.iter().enumerate() {
