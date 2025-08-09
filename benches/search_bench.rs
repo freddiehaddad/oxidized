@@ -1,5 +1,6 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use oxidized::features::search::SearchEngine;
+use std::time::Duration;
 
 fn make_text(lines: usize, line_len: usize, pattern: &str, freq: usize) -> Vec<String> {
     let mut text = Vec::with_capacity(lines);
@@ -21,13 +22,17 @@ fn make_text(lines: usize, line_len: usize, pattern: &str, freq: usize) -> Vec<S
 
 fn bench_search(c: &mut Criterion) {
     let mut group = c.benchmark_group("search_engine");
+    // Light tuning for stability while keeping runs fast
+    group
+        .sample_size(30)
+        .warm_up_time(Duration::from_millis(200));
 
     let cases = vec![
-        ("short", 200, 60, "abc", 31),
-        ("medium", 1_000, 80, "needle", 53),
-        ("unicode", 800, 72, "βγ", 47),
-        ("single_ascii", 3_000, 64, "a", 11),
-        ("single_unicode", 3_000, 64, "β", 17),
+        ("short", 500, 80, "abc", 37),
+        ("medium", 2_000, 96, "needle", 59),
+        ("unicode", 1_200, 88, "βγ", 43),
+        ("single_ascii", 3_000, 80, "a", 13),
+        ("single_unicode", 3_000, 80, "β", 17),
     ];
 
     for (name, lines, len, pat, freq) in cases {
