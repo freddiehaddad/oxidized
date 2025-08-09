@@ -1,10 +1,11 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [master]
   pull_request:
-    branches: [ master ]
+    branches: [master]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -26,10 +27,10 @@ jobs:
   build-test:
     name: Build, Clippy, and Test
     runs-on: ${{ matrix.os }}
-  strategy:
+    strategy:
       fail-fast: false
       matrix:
-    os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         rust: [stable]
 
     steps:
