@@ -26,6 +26,8 @@ fn bench_search(c: &mut Criterion) {
         ("short", 200, 60, "abc", 31),
         ("medium", 1_000, 80, "needle", 53),
         ("unicode", 800, 72, "βγ", 47),
+        ("single_ascii", 3_000, 64, "a", 11),
+        ("single_unicode", 3_000, 64, "β", 17),
     ];
 
     for (name, lines, len, pat, freq) in cases {
