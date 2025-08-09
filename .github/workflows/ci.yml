@@ -7,6 +7,18 @@ on:
     branches: [ master ]
 
 jobs:
+  markdown-lint:
+    name: Markdown lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run markdownlint-cli2
+        uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: |
+            **/*.md
+
   build-test:
     name: Build, Clippy, and Test
     runs-on: ${{ matrix.os }}

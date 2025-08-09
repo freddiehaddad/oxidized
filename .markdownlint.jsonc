@@ -1,0 +1,7 @@
+{
+    // Prefer sensible defaults; disable rules that conflict with our style
+    "default": true,
+    "MD013": false, // line length
+    "MD033": false, // inline HTML
+    "MD041": false // first line heading
+}
