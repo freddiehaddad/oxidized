@@ -181,7 +181,7 @@ impl Editor {
         };
 
         info!("Editor initialization completed successfully");
-        Ok(Self {
+        let mut editor = Self {
             buffers: HashMap::new(),
             current_buffer_id: None,
             next_buffer_id: 1,
@@ -205,7 +205,10 @@ impl Editor {
             pending_operator: None,
             text_object_finder: crate::features::text_objects::TextObjectFinder::new(),
             macro_recorder: crate::features::macros::MacroRecorder::new(),
-        })
+        };
+        // Apply initial search settings from config
+        editor.apply_search_settings();
+        Ok(editor)
     }
 
     pub fn create_buffer(&mut self, file_path: Option<PathBuf>) -> Result<usize> {
@@ -902,7 +905,19 @@ impl Editor {
             return false;
         };
 
+        // Smart-case: if enabled and pattern has any uppercase, force case-sensitive for this search
+        let base_case_sensitive = !self.config.behavior.ignore_case;
+        let use_case_sensitive =
+            if self.config.behavior.smart_case && pattern.chars().any(|c| c.is_uppercase()) {
+                true
+            } else {
+                base_case_sensitive
+            };
+        // Temporarily set engine sensitivity for this search only
+        self.search_engine.set_case_sensitive(use_case_sensitive);
         let search_results = self.search_engine.search(pattern, &lines);
+        // Restore base sensitivity to avoid leaking state
+        self.search_engine.set_case_sensitive(base_case_sensitive);
         self.search_results = search_results;
 
         if !self.search_results.is_empty() {
