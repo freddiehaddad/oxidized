@@ -1,5 +1,6 @@
-use criterion::{BatchSize, BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use oxidized::features::search::SearchEngine;
+use std::hint::black_box;
 use std::time::Duration;
 
 fn make_text(lines: usize, line_len: usize, pattern: &str, freq: usize) -> Vec<String> {
