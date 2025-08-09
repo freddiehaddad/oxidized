@@ -138,7 +138,7 @@ impl UI {
                 SelectionType::Block => {
                     if line_number >= start.row && line_number <= end.row {
                         let left_col = start.col.min(end.col);
-                        let right_col = start.col.max(end.col);
+                        let right_col = start.col.max(end.col) + 1; // +1 to make it inclusive
                         let line_length = line.chars().count();
                         let actual_right = right_col.min(line_length);
 
