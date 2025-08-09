@@ -133,6 +133,12 @@ cargo install --path .
 - `?pattern` - Search backward
 - `n/N` - Next/previous search result
 
+**Visual Modes Tip:**
+
+- `v` - Visual (character)
+- `V` - Visual Line
+- `Ctrl+v` or `Alt+v` - Visual Block (use Alt+V if your terminal intercepts Ctrl+V). Press again to exit.
+
 **Macro Recording & Playback:**
 
 - `qa` - Start recording macro to register 'a' (use any a-z, A-Z, 0-9)
@@ -240,6 +246,9 @@ default_language = "text"
 "a" = "insert_after"
 "o" = "insert_line_below"
 "v" = "visual_mode"
+"V" = "visual_line_mode"
+"Ctrl+v" = "visual_block_mode"      # Note: some terminals intercept Ctrl+V
+"Alt+v" = "visual_block_mode"       # Alternative binding if Ctrl+V is intercepted
 
 # Delete/Edit operations
 "x" = "delete_char_at_cursor"
