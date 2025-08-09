@@ -143,6 +143,11 @@ fn test_write_file_to_readonly_directory() {
         let file_path = readonly_dir.join("test.txt");
         let result = FileManager::write_file(&file_path, "content");
         assert!(result.is_err());
+
+        // Restore permissions so TempDir can clean up
+        let mut restore = fs::metadata(&readonly_dir).unwrap().permissions();
+        restore.set_mode(0o755);
+        fs::set_permissions(&readonly_dir, restore).unwrap();
     }
 }
 

@@ -4,8 +4,9 @@ use crossterm::{
     cursor::{self, SetCursorStyle},
     style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+    tty::IsTty,
 };
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::io::{self, Stdout, Write};
 
 pub struct Terminal {
@@ -17,25 +18,32 @@ impl Terminal {
     pub fn new() -> io::Result<Self> {
         info!("Initializing terminal with alternate screen and raw mode");
         let mut stdout = io::stdout();
+        let is_tty = stdout.is_tty();
 
-        // Enter alternate screen before enabling raw mode
-        stdout.execute(EnterAlternateScreen)?;
-        debug!("Entered alternate screen mode");
+        if is_tty {
+            // Enter alternate screen before enabling raw mode
+            stdout.execute(EnterAlternateScreen)?;
+            debug!("Entered alternate screen mode");
 
-        terminal::enable_raw_mode()?;
-        debug!("Enabled raw terminal mode");
+            terminal::enable_raw_mode()?;
+            debug!("Enabled raw terminal mode");
 
-        stdout.execute(terminal::Clear(ClearType::All))?;
-        stdout.execute(cursor::Hide)?;
-        debug!("Cleared screen and hid cursor");
+            stdout.execute(terminal::Clear(ClearType::All))?;
+            stdout.execute(cursor::Hide)?;
+            debug!("Cleared screen and hid cursor");
 
-        // Flush stdout and give terminal time to settle
-        stdout.flush()?;
+            // Flush stdout and give terminal time to settle
+            stdout.flush()?;
 
-        let size = terminal::size()?;
-        info!("Terminal initialized with size: {}x{}", size.0, size.1);
-
-        Ok(Self { stdout, size })
+            let size = terminal::size()?;
+            info!("Terminal initialized with size: {}x{}", size.0, size.1);
+            Ok(Self { stdout, size })
+        } else {
+            // Headless/CI environment: skip TTY-dependent setup
+            warn!("Stdout is not a TTY; running terminal in headless mode for CI/tests");
+            let size = (80, 24); // sensible default
+            Ok(Self { stdout, size })
+        }
     }
 
     pub fn size(&self) -> (u16, u16) {
