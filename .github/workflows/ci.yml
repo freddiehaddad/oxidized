@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ master ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   markdown-lint:
     name: Markdown lint
@@ -22,10 +26,10 @@ jobs:
   build-test:
     name: Build, Clippy, and Test
     runs-on: ${{ matrix.os }}
-    strategy:
+  strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+    os: [ubuntu-latest, windows-latest, macos-latest]
         rust: [stable]
 
     steps:
