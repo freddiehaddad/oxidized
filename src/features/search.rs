@@ -78,6 +78,69 @@ impl SearchEngine {
                 pattern.to_lowercase().chars().collect()
             };
 
+            // Fast path: single-character pattern (and no Unicode expansion)
+            if pattern_search_chars.len() == 1 && pattern_chars.len() == 1 {
+                let p_cs = pattern_chars[0];
+                let p_ci_ascii = pattern_search_chars[0];
+
+                for (line_num, line) in text.iter().enumerate() {
+                    let line_chars: Vec<char> = line.chars().collect();
+
+                    if self.case_sensitive {
+                        for (idx, &ch) in line_chars.iter().enumerate() {
+                            if ch == p_cs {
+                                let matched_text: String =
+                                    line_chars[idx..idx + 1].iter().collect();
+                                results.push(SearchResult {
+                                    line: line_num,
+                                    start_col: idx,
+                                    end_col: idx + 1,
+                                    matched_text,
+                                });
+                            }
+                        }
+                    } else if pattern_is_ascii && line.is_ascii() {
+                        for (idx, &ch) in line_chars.iter().enumerate() {
+                            if ch.to_ascii_lowercase() == p_ci_ascii {
+                                let matched_text: String =
+                                    line_chars[idx..idx + 1].iter().collect();
+                                results.push(SearchResult {
+                                    line: line_num,
+                                    start_col: idx,
+                                    end_col: idx + 1,
+                                    matched_text,
+                                });
+                            }
+                        }
+                    } else {
+                        // Fallback to Unicode-insensitive general path for non-ASCII scenarios
+                        let search_chars: Vec<char> = if self.case_sensitive {
+                            line_chars.clone()
+                        } else {
+                            line.to_lowercase().chars().collect()
+                        };
+
+                        let mut char_start = 0;
+                        while char_start + pattern_search_chars.len() <= search_chars.len() {
+                            if search_chars[char_start] == p_ci_ascii {
+                                let matched_text: String =
+                                    line_chars[char_start..char_start + 1].iter().collect();
+                                results.push(SearchResult {
+                                    line: line_num,
+                                    start_col: char_start,
+                                    end_col: char_start + 1,
+                                    matched_text,
+                                });
+                            }
+                            char_start += 1;
+                        }
+                    }
+                }
+
+                debug!("Search completed, found {} matches", results.len());
+                return results;
+            }
+
             for (line_num, line) in text.iter().enumerate() {
                 // Original chars for correct column indices and matched_text extraction
                 let line_chars: Vec<char> = line.chars().collect();
