@@ -36,3 +36,9 @@ anyhow = "1.0"
 tokio = { version = "1.47.1", features = ["full"] }
 # Temporary directory creation for tests
 tempfile = "3.0"
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "search_bench"
+harness = false
