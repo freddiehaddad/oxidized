@@ -62,6 +62,28 @@ impl UI {
         editor_state: &crate::core::editor::EditorRenderState,
         width: u16,
     ) -> String {
+        let layout = self.compute_status_line_layout(editor_state, width);
+        let mut s = String::with_capacity(width as usize);
+        s.push_str(&layout.left);
+        s.push_str(&" ".repeat(layout.left_gap));
+        s.push_str(&layout.mid);
+        s.push_str(&" ".repeat(layout.right_gap));
+        s.push_str(&layout.right);
+        if s.len() < width as usize {
+            s.push_str(&" ".repeat((width as usize) - s.len()));
+        }
+        if s.len() > width as usize {
+            s.truncate(width as usize);
+        }
+        s
+    }
+
+    /// Internal: build status line parts and spacing so renderer can color segments.
+    fn compute_status_line_layout(
+        &self,
+        editor_state: &crate::core::editor::EditorRenderState,
+        width: u16,
+    ) -> StatusLineLayout {
         let total = width as usize;
 
         // Left: mode, filename, modified
@@ -162,30 +184,7 @@ impl UI {
         let mid_w = unicode_width::UnicodeWidthStr::width(mid.as_str());
         let right_w = unicode_width::UnicodeWidthStr::width(right.as_str());
 
-        // If everything fits, compose with centered mid and right-aligned right
-        let compose = |l: &str, m: &str, r: &str, total: usize| -> String {
-            let l_w = unicode_width::UnicodeWidthStr::width(l);
-            let m_w = unicode_width::UnicodeWidthStr::width(m);
-            let r_w = unicode_width::UnicodeWidthStr::width(r);
-            let rem = total.saturating_sub(l_w + r_w);
-            // Center middle within remaining space
-            let mid_space = rem;
-            let left_gap = mid_space.saturating_sub(m_w) / 2;
-            let right_gap = mid_space.saturating_sub(m_w) - left_gap;
-            let mut s = String::with_capacity(total);
-            s.push_str(l);
-            s.push_str(&" ".repeat(left_gap));
-            s.push_str(m);
-            s.push_str(&" ".repeat(right_gap));
-            s.push_str(r);
-            if s.len() < total {
-                s.push_str(&" ".repeat(total - s.len()));
-            }
-            if s.len() > total {
-                s.truncate(total);
-            }
-            s
-        };
+        // If everything fits, compute gaps for centered middle and right-aligned right
 
         // Helper to truncate end of a string by columns
         let trunc_end = |s: &mut String, target_cols: usize| {
@@ -220,7 +219,22 @@ impl UI {
             // recompute if needed later
         }
 
-        compose(&left, &mid, &right, total)
+        // Recompute widths after potential truncations
+        let l_w = unicode_width::UnicodeWidthStr::width(left.as_str());
+        let m_w = unicode_width::UnicodeWidthStr::width(mid.as_str());
+        let r_w = unicode_width::UnicodeWidthStr::width(right.as_str());
+        let rem = total.saturating_sub(l_w + r_w);
+        let mid_space = rem;
+        let left_gap = mid_space.saturating_sub(m_w) / 2;
+        let right_gap = mid_space.saturating_sub(m_w) - left_gap;
+
+        StatusLineLayout {
+            left,
+            mid,
+            right,
+            left_gap,
+            right_gap,
+        }
     }
 
     // --- UTF-8 helpers ---
@@ -1310,21 +1324,113 @@ impl UI {
         // Clear the status line first
         terminal.queue_clear_line()?;
 
-        // Set status line colors using theme
-        let status_color = if editor_state
+        // Build layout parts for colorized output
+        let layout = self.compute_status_line_layout(editor_state, width);
+
+        // If buffer is modified, keep legacy behavior: use status_modified bg for whole bar
+        let is_modified = editor_state
             .current_buffer
             .as_ref()
-            .is_some_and(|b| b.modified)
-        {
-            self.theme.status_modified
-        } else {
-            self.theme.status_bg
-        };
-        terminal.queue_set_bg_color(status_color)?;
-        terminal.queue_set_fg_color(self.theme.status_fg)?;
+            .is_some_and(|b| b.modified);
+        if is_modified {
+            terminal.queue_set_bg_color(self.theme.status_modified)?;
+            terminal.queue_set_fg_color(self.theme.status_fg)?;
+            let mut s = String::with_capacity(width as usize);
+            s.push_str(&layout.left);
+            s.push_str(&" ".repeat(layout.left_gap));
+            s.push_str(&layout.mid);
+            s.push_str(&" ".repeat(layout.right_gap));
+            s.push_str(&layout.right);
+            if s.len() < width as usize {
+                s.push_str(&" ".repeat((width as usize) - s.len()));
+            }
+            if s.len() > width as usize {
+                s.truncate(width as usize);
+            }
+            terminal.queue_print(&s)?;
+            terminal.queue_reset_color()?;
+            return Ok(());
+        }
 
-        let status_text = self.compute_status_line_text(editor_state, width);
-        terminal.queue_print(&status_text)?;
+        // Determine mode colors for the left-most mode token
+        let (mode_fg, mode_bg) = match editor_state.mode {
+            Mode::Insert => (
+                self.theme.mode_colors.insert_fg,
+                self.theme.mode_colors.insert_bg,
+            ),
+            Mode::Visual => (
+                self.theme.mode_colors.visual_fg,
+                self.theme.mode_colors.visual_bg,
+            ),
+            Mode::VisualLine => (
+                self.theme.mode_colors.visual_line_fg,
+                self.theme.mode_colors.visual_line_bg,
+            ),
+            Mode::VisualBlock => (
+                self.theme.mode_colors.visual_block_fg,
+                self.theme.mode_colors.visual_block_bg,
+            ),
+            Mode::Replace => (
+                self.theme.mode_colors.replace_fg,
+                self.theme.mode_colors.replace_bg,
+            ),
+            Mode::Command => (
+                self.theme.mode_colors.command_fg,
+                self.theme.mode_colors.command_bg,
+            ),
+            _ => (
+                self.theme.mode_colors.normal_fg,
+                self.theme.mode_colors.normal_bg,
+            ),
+        };
+
+        // Split left into mode token and rest (best-effort; if truncated, color all as mode)
+        let mode_token = format!(" {} ", editor_state.mode);
+        let (left_mode_part, left_rest_part) = if layout.left.starts_with(&mode_token) {
+            (&mode_token[..], &layout.left[mode_token.len()..])
+        } else {
+            (layout.left.as_str(), "")
+        };
+
+        // 1) Left segment: print mode token with mode colors
+        terminal.queue_set_bg_color(mode_bg)?;
+        terminal.queue_set_fg_color(mode_fg)?;
+        terminal.queue_print(left_mode_part)?;
+        // then rest of left with left segment colors
+        if !left_rest_part.is_empty() {
+            terminal.queue_set_bg_color(self.theme.status_left_bg)?;
+            terminal.queue_set_fg_color(self.theme.status_left_fg)?;
+            terminal.queue_print(left_rest_part)?;
+        }
+
+        // 2) Left gap spaces (mid segment bg)
+        if layout.left_gap > 0 {
+            terminal.queue_set_bg_color(self.theme.status_mid_bg)?;
+            terminal.queue_set_fg_color(self.theme.status_mid_fg)?;
+            terminal.queue_print(&" ".repeat(layout.left_gap))?;
+        }
+
+        // 3) Middle text
+        if !layout.mid.is_empty() {
+            terminal.queue_set_bg_color(self.theme.status_mid_bg)?;
+            terminal.queue_set_fg_color(self.theme.status_mid_fg)?;
+            terminal.queue_print(&layout.mid)?;
+        }
+
+        // 4) Right gap spaces
+        if layout.right_gap > 0 {
+            terminal.queue_set_bg_color(self.theme.status_mid_bg)?;
+            terminal.queue_set_fg_color(self.theme.status_mid_fg)?;
+            terminal.queue_print(&" ".repeat(layout.right_gap))?;
+        }
+
+        // 5) Right text
+        if !layout.right.is_empty() {
+            terminal.queue_set_bg_color(self.theme.status_right_bg)?;
+            terminal.queue_set_fg_color(self.theme.status_right_fg)?;
+            terminal.queue_print(&layout.right)?;
+        }
+
         terminal.queue_reset_color()?;
 
         Ok(())
@@ -1466,4 +1572,13 @@ impl UI {
     pub fn set_viewport_top(&mut self, viewport_top: usize) {
         self.viewport_top = viewport_top;
     }
+}
+
+#[derive(Debug, Clone)]
+struct StatusLineLayout {
+    left: String,
+    mid: String,
+    right: String,
+    left_gap: usize,
+    right_gap: usize,
 }

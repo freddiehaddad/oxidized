@@ -24,6 +24,34 @@ pub struct Theme {
     pub tree_sitter: HashMap<String, String>, // Direct node type -> color mappings (now required)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct StatusLineColors {
+    pub left_bg: String,
+    pub left_fg: String,
+    pub mid_bg: String,
+    pub mid_fg: String,
+    pub right_bg: String,
+    pub right_fg: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModeColors {
+    pub normal_bg: String,
+    pub normal_fg: String,
+    pub insert_bg: String,
+    pub insert_fg: String,
+    pub visual_bg: String,
+    pub visual_fg: String,
+    pub visual_line_bg: String,
+    pub visual_line_fg: String,
+    pub visual_block_bg: String,
+    pub visual_block_fg: String,
+    pub replace_bg: String,
+    pub replace_fg: String,
+    pub command_bg: String,
+    pub command_fg: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UIColors {
     pub background: String,
@@ -42,6 +70,12 @@ pub struct UIColors {
     pub visual_block_bg: String, // Block-wise visual selection background (future)
     pub warning: String,
     pub error: String,
+    /// Optional: granular status line colors per segment
+    #[serde(default)]
+    pub statusline: Option<StatusLineColors>,
+    /// Optional: per-mode colors for mode indicator in status line
+    #[serde(default)]
+    pub mode: Option<ModeColors>,
 }
 
 // Removed SyntaxColors and RustSpecificColors - using only tree_sitter node mappings now
@@ -53,6 +87,13 @@ pub struct UITheme {
     pub status_bg: Color,
     pub status_fg: Color,
     pub status_modified: Color,
+    // Optional per-segment status line colors
+    pub status_left_bg: Color,
+    pub status_left_fg: Color,
+    pub status_mid_bg: Color,
+    pub status_mid_fg: Color,
+    pub status_right_bg: Color,
+    pub status_right_fg: Color,
     pub line_number: Color,
     pub line_number_current: Color,
     pub cursor_line_bg: Color,
@@ -65,6 +106,7 @@ pub struct UITheme {
     pub visual_block_bg: Color, // Block-wise visual selection background (future)
     pub warning: Color,
     pub error: Color,
+    pub mode_colors: ModeThemeColors,
 }
 
 /// Syntax theme that uses only tree-sitter node type mappings
@@ -132,47 +174,91 @@ impl ThemeConfig {
 
     /// Create minimal emergency configuration when themes.toml is missing or invalid
     pub fn create_emergency_config() -> Self {
-        log::warn!("Using emergency theme configuration - please restore themes.toml");
+        log::warn!(
+            "themes.toml missing/invalid; using built-in 'default' theme to match repository settings"
+        );
         let mut themes = HashMap::new();
 
-        // Create a single emergency theme using neutral colors
+        // Clone the repository's default theme so fallback matches exactly
+        let default_ui = UIColors {
+            background: "#1f1611".to_string(),
+            status_bg: "#ce422b".to_string(),
+            status_fg: "#cccccc".to_string(),
+            status_modified: "#f74c00".to_string(),
+            line_number: "#8c6239".to_string(),
+            line_number_current: "#deb887".to_string(),
+            cursor_line_bg: "#2d2318".to_string(),
+            empty_line: "#4a3728".to_string(),
+            command_line_bg: "#1f1611".to_string(),
+            command_line_fg: "#deb887".to_string(),
+            selection_bg: "#8c4a2b".to_string(),
+            visual_line_bg: "#8c4a2b".to_string(),
+            visual_char_bg: "#7a3f28".to_string(),
+            visual_block_bg: "#9a5235".to_string(),
+            warning: "#ff8c00".to_string(),
+            error: "#dc322f".to_string(),
+            statusline: Some(StatusLineColors {
+                left_bg: "#ce422b".to_string(),
+                left_fg: "#cccccc".to_string(),
+                mid_bg: "#ce422b".to_string(),
+                mid_fg: "#cccccc".to_string(),
+                right_bg: "#ce422b".to_string(),
+                right_fg: "#cccccc".to_string(),
+            }),
+            mode: Some(ModeColors {
+                normal_bg: "#ce422b".to_string(),
+                normal_fg: "#ffffff".to_string(),
+                insert_bg: "#ce422b".to_string(),
+                insert_fg: "#ffe6c7".to_string(),
+                visual_bg: "#ce422b".to_string(),
+                visual_fg: "#fff3da".to_string(),
+                visual_line_bg: "#ce422b".to_string(),
+                visual_line_fg: "#ffedd5".to_string(),
+                visual_block_bg: "#ce422b".to_string(),
+                visual_block_fg: "#fffbeb".to_string(),
+                replace_bg: "#ce422b".to_string(),
+                replace_fg: "#ffd1c1".to_string(),
+                command_bg: "#ce422b".to_string(),
+                command_fg: "#ffffff".to_string(),
+            }),
+        };
+
+        let default_ts: HashMap<String, String> = HashMap::from([
+            ("plain_text".to_string(), "#deb887".to_string()),
+            ("keyword".to_string(), "#ce422b".to_string()),
+            ("function".to_string(), "#b58900".to_string()),
+            ("type".to_string(), "#268bd2".to_string()),
+            ("string".to_string(), "#859900".to_string()),
+            ("number".to_string(), "#d33682".to_string()),
+            ("comment".to_string(), "#93a1a1".to_string()),
+            ("identifier".to_string(), "#deb887".to_string()),
+            ("variable".to_string(), "#deb887".to_string()),
+            ("operator".to_string(), "#cb4b16".to_string()),
+            ("punctuation".to_string(), "#839496".to_string()),
+            ("delimiter".to_string(), "#839496".to_string()),
+            ("character".to_string(), "#859900".to_string()),
+            ("documentation".to_string(), "#586e75".to_string()),
+            ("preprocessor".to_string(), "#6c71c4".to_string()),
+            ("macro".to_string(), "#dc322f".to_string()),
+            ("attribute".to_string(), "#2aa198".to_string()),
+            ("label".to_string(), "#cb4b16".to_string()),
+            ("constant".to_string(), "#d33682".to_string()),
+        ]);
+
         themes.insert(
-            "emergency".to_string(),
+            "default".to_string(),
             Theme {
-                name: "Emergency".to_string(),
-                description: "Minimal emergency theme - restore themes.toml".to_string(),
-                ui: UIColors {
-                    background: "#000000".to_string(),
-                    status_bg: "#333333".to_string(),
-                    status_fg: "#ffffff".to_string(),
-                    status_modified: "#ff0000".to_string(),
-                    line_number: "#666666".to_string(),
-                    line_number_current: "#ffffff".to_string(),
-                    cursor_line_bg: "#222222".to_string(),
-                    empty_line: "#444444".to_string(),
-                    command_line_bg: "#000000".to_string(),
-                    command_line_fg: "#ffffff".to_string(),
-                    selection_bg: "#444444".to_string(),
-                    visual_line_bg: "#444444".to_string(),
-                    visual_char_bg: "#444444".to_string(),
-                    visual_block_bg: "#444444".to_string(),
-                    warning: "#ffff00".to_string(),
-                    error: "#ff0000".to_string(),
-                },
-                tree_sitter: HashMap::from([
-                    ("_default".to_string(), "#ffffff".to_string()),
-                    ("line_comment".to_string(), "#666666".to_string()),
-                    ("visibility_modifier".to_string(), "#00ffff".to_string()),
-                    ("fn".to_string(), "#00ffff".to_string()),
-                    ("string_literal".to_string(), "#ffff00".to_string()),
-                    ("integer_literal".to_string(), "#ff00ff".to_string()),
-                ]),
+                name: "Rust Theme".to_string(),
+                description: "Rust-inspired color palette with warm oranges and earth tones"
+                    .to_string(),
+                ui: default_ui,
+                tree_sitter: default_ts,
             },
         );
 
         Self {
             theme: ThemeSelection {
-                current: "emergency".to_string(),
+                current: "default".to_string(),
             },
             themes,
         }
@@ -219,12 +305,10 @@ impl ThemeConfig {
 
     /// Create emergency theme if no themes are available (should rarely happen)
     fn create_emergency_theme(&self) -> CompleteTheme {
-        CompleteTheme {
-            name: "Emergency".to_string(),
-            description: "Emergency fallback theme".to_string(),
-            ui: UITheme::emergency(),
-            syntax: SyntaxTheme::emergency(),
-        }
+        // Build from the same built-in default theme used by create_emergency_config,
+        // ensuring perfect parity with themes.toml's default.
+        let cfg = ThemeConfig::create_emergency_config();
+        cfg.get_current_theme()
     }
 
     /// Get a specific theme by name
@@ -309,11 +393,39 @@ impl ThemeConfig {
 impl UITheme {
     /// Create UITheme from color strings in themes.toml
     pub fn from_colors(colors: &UIColors) -> Self {
+        // Base status fg/bg
+        let base_bg = parse_color(&colors.status_bg);
+        let base_fg = parse_color(&colors.status_fg);
+
+        // Segment colors with fallback to base
+        let (left_bg, left_fg, mid_bg, mid_fg, right_bg, right_fg) =
+            if let Some(sl) = &colors.statusline {
+                (
+                    parse_color(&sl.left_bg),
+                    parse_color(&sl.left_fg),
+                    parse_color(&sl.mid_bg),
+                    parse_color(&sl.mid_fg),
+                    parse_color(&sl.right_bg),
+                    parse_color(&sl.right_fg),
+                )
+            } else {
+                (base_bg, base_fg, base_bg, base_fg, base_bg, base_fg)
+            };
+
+        // Per-mode colors with fallback to base fg/bg
+        let mode_colors = ModeThemeColors::from_mode_colors(colors.mode.as_ref(), base_fg, base_bg);
+
         Self {
             background: parse_color(&colors.background),
-            status_bg: parse_color(&colors.status_bg),
-            status_fg: parse_color(&colors.status_fg),
+            status_bg: base_bg,
+            status_fg: base_fg,
             status_modified: parse_color(&colors.status_modified),
+            status_left_bg: left_bg,
+            status_left_fg: left_fg,
+            status_mid_bg: mid_bg,
+            status_mid_fg: mid_fg,
+            status_right_bg: right_bg,
+            status_right_fg: right_fg,
             line_number: parse_color(&colors.line_number),
             line_number_current: parse_color(&colors.line_number_current),
             cursor_line_bg: parse_color(&colors.cursor_line_bg),
@@ -326,28 +438,72 @@ impl UITheme {
             visual_block_bg: parse_color(&colors.visual_block_bg),
             warning: parse_color(&colors.warning),
             error: parse_color(&colors.error),
+            mode_colors,
         }
     }
+}
 
-    /// Emergency UI theme with basic terminal colors (no hard-coded hex values)
-    pub fn emergency() -> Self {
-        Self {
-            background: Color::Black,
-            status_bg: Color::DarkGreen,
-            status_fg: Color::White,
-            status_modified: Color::Red,
-            line_number: Color::DarkGrey,
-            line_number_current: Color::Yellow,
-            cursor_line_bg: Color::DarkGrey,
-            empty_line: Color::Blue,
-            command_line_bg: Color::Black,
-            command_line_fg: Color::White,
-            selection_bg: Color::Blue,
-            visual_line_bg: Color::Blue,
-            visual_char_bg: Color::Blue,
-            visual_block_bg: Color::Blue,
-            warning: Color::Yellow,
-            error: Color::Red,
+#[derive(Debug, Clone)]
+pub struct ModeThemeColors {
+    pub normal_fg: Color,
+    pub normal_bg: Color,
+    pub insert_fg: Color,
+    pub insert_bg: Color,
+    pub visual_fg: Color,
+    pub visual_bg: Color,
+    pub visual_line_fg: Color,
+    pub visual_line_bg: Color,
+    pub visual_block_fg: Color,
+    pub visual_block_bg: Color,
+    pub replace_fg: Color,
+    pub replace_bg: Color,
+    pub command_fg: Color,
+    pub command_bg: Color,
+}
+
+impl ModeThemeColors {
+    pub fn from_mode_colors(
+        src: Option<&ModeColors>,
+        default_fg: Color,
+        default_bg: Color,
+    ) -> Self {
+        let get = |s: Option<&String>| s.map(|x| parse_color(x)).unwrap_or(default_fg);
+        let get_bg = |s: Option<&String>| s.map(|x| parse_color(x)).unwrap_or(default_bg);
+        if let Some(m) = src {
+            Self {
+                normal_fg: get(Some(&m.normal_fg)),
+                normal_bg: get_bg(Some(&m.normal_bg)),
+                insert_fg: get(Some(&m.insert_fg)),
+                insert_bg: get_bg(Some(&m.insert_bg)),
+                visual_fg: get(Some(&m.visual_fg)),
+                visual_bg: get_bg(Some(&m.visual_bg)),
+                visual_line_fg: get(Some(&m.visual_line_fg)),
+                visual_line_bg: get_bg(Some(&m.visual_line_bg)),
+                visual_block_fg: get(Some(&m.visual_block_fg)),
+                visual_block_bg: get_bg(Some(&m.visual_block_bg)),
+                replace_fg: get(Some(&m.replace_fg)),
+                replace_bg: get_bg(Some(&m.replace_bg)),
+                command_fg: get(Some(&m.command_fg)),
+                command_bg: get_bg(Some(&m.command_bg)),
+            }
+        } else {
+            // Default to the base fg/bg when per-mode colors are not provided
+            Self {
+                normal_fg: default_fg,
+                normal_bg: default_bg,
+                insert_fg: default_fg,
+                insert_bg: default_bg,
+                visual_fg: default_fg,
+                visual_bg: default_bg,
+                visual_line_fg: default_fg,
+                visual_line_bg: default_bg,
+                visual_block_fg: default_fg,
+                visual_block_bg: default_bg,
+                replace_fg: default_fg,
+                replace_bg: default_bg,
+                command_fg: default_fg,
+                command_bg: default_bg,
+            }
         }
     }
 }
@@ -366,31 +522,19 @@ impl SyntaxTheme {
         }
     }
 
-    /// Get default text color from tree-sitter mappings
+    /// Get default text color used when no syntax highlight applies
+    /// Priority order:
+    /// 1) plain_text (preferred)
+    /// 2) identifier (reasonable fallback often used for names)
+    /// 3) White (final fallback)
     pub fn get_default_text_color(&self) -> crossterm::style::Color {
-        self.tree_sitter_mappings
-            .get("_default")
-            .cloned()
-            .unwrap_or(crossterm::style::Color::White)
-    }
-
-    /// Emergency syntax theme with basic terminal colors (no hard-coded hex values)
-    pub fn emergency() -> Self {
-        let mut tree_sitter_mappings = HashMap::new();
-
-        // Basic emergency colors
-        tree_sitter_mappings.insert("_default".to_string(), Color::White);
-        tree_sitter_mappings.insert("line_comment".to_string(), Color::DarkGrey);
-        tree_sitter_mappings.insert("visibility_modifier".to_string(), Color::Blue);
-        tree_sitter_mappings.insert("fn".to_string(), Color::Blue);
-        tree_sitter_mappings.insert("string_literal".to_string(), Color::Yellow);
-        tree_sitter_mappings.insert("integer_literal".to_string(), Color::Magenta);
-        tree_sitter_mappings.insert("type_identifier".to_string(), Color::Green);
-        tree_sitter_mappings.insert("identifier".to_string(), Color::White);
-
-        Self {
-            tree_sitter_mappings,
+        if let Some(c) = self.tree_sitter_mappings.get("plain_text") {
+            return *c;
         }
+        if let Some(c) = self.tree_sitter_mappings.get("identifier") {
+            return *c;
+        }
+        crossterm::style::Color::White
     }
 }
 

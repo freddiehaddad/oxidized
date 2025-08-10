@@ -309,6 +309,8 @@ default_language = "text"
 
 ### Theme Configuration (`themes.toml`)
 
+The `plain_text` key controls the default color for text that has no specific syntax highlight.
+
 ```toml
 # Theme configuration for oxidized editor
 [theme]
@@ -321,7 +323,7 @@ description = "Rust-inspired color palette with warm oranges and earth tones"
 [themes.default.ui]
 background = "#1f1611"
 status_bg = "#ce422b"
-status_fg = "#ffffff"
+status_fg = "#cccccc"
 status_modified = "#f74c00"
 line_number = "#8c6239"
 line_number_current = "#deb887"
@@ -330,21 +332,60 @@ empty_line = "#4a3728"
 command_line_bg = "#1f1611"
 command_line_fg = "#deb887"
 selection_bg = "#8c4a2b"
+visual_line_bg = "#8c4a2b"      # Line-wise visual selection background
+visual_char_bg = "#7a3f28"      # Character-wise visual selection background
+visual_block_bg = "#9a5235"     # Block-wise visual selection background
 warning = "#ff8c00"
 error = "#dc322f"
 
+# Optional: granular status line colors per segment (fallbacks to status_bg/status_fg)
+[themes.default.ui.statusline]
+left_bg = "#ce422b"
+left_fg = "#cccccc"
+mid_bg = "#ce422b"
+mid_fg = "#cccccc"
+right_bg = "#ce422b"
+right_fg = "#cccccc"
+
+# Optional: per-mode colors for the mode token in the status line
+[themes.default.ui.mode]
+normal_bg = "#ce422b"
+normal_fg = "#ffffff"
+insert_bg = "#ce422b"
+insert_fg = "#ffe6c7"
+visual_bg = "#ce422b"
+visual_fg = "#fff3da"
+visual_line_bg = "#ce422b"
+visual_line_fg = "#ffedd5"
+visual_block_bg = "#ce422b"
+visual_block_fg = "#fffbeb"
+replace_bg = "#ce422b"
+replace_fg = "#ffd1c1"
+command_bg = "#ce422b"
+command_fg = "#ffffff"
+
 [themes.default.tree_sitter]
 # Rust-inspired color scheme with warm earth tones
-keyword = "#ce422b"      # Rust orange for keywords
-function = "#b58900"     # Golden brown for function names
-type = "#268bd2"         # Steel blue for types
-string = "#859900"       # Olive green for strings
-number = "#d33682"       # Magenta for numbers
-comment = "#93a1a1"      # Light gray for comments
-identifier = "#deb887"   # Burlywood for identifiers
-variable = "#deb887"     # Burlywood for variables
-operator = "#cb4b16"     # Orange-red for operators
-punctuation = "#839496"  # Gray for punctuation
+plain_text = "#deb887"   # Default text color when no syntax mapping applies
+keyword = "#ce422b"  # Rust orange for keywords (fn, let, pub, etc.)
+function = "#b58900" # Golden brown for function names
+type = "#268bd2"     # Steel blue for types (keeps contrast)
+string = "#859900"   # Olive green for strings
+number = "#d33682"   # Magenta for numbers (good contrast)
+comment = "#93a1a1"  # Light gray for comments
+# Everything else uses warm foreground color
+identifier = "#deb887"    # Burlywood for identifiers
+variable = "#deb887"      # Burlywood for variables
+operator = "#cb4b16"      # Orange-red for operators
+punctuation = "#839496"   # Gray for punctuation
+delimiter = "#839496"     # Gray for delimiters
+character = "#859900"     # Same as strings
+documentation = "#586e75" # Darker gray for docs
+preprocessor = "#6c71c4"  # Purple for preprocessor
+macro = "#dc322f"         # Red for macros
+attribute = "#2aa198"     # Cyan for attributes
+label = "#cb4b16"         # Orange for labels
+constant = "#d33682"      # Same as numbers
 ```
 
 ## 🏗️ Architecture Overview
