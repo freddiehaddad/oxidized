@@ -2104,6 +2104,7 @@ impl KeyHandler {
                 "scrolloff",
                 "sidescrolloff",
                 "timeoutlen",
+                "percentpathroot",
                 "colorscheme",
                 "syntax",
             ];
@@ -2191,6 +2192,9 @@ impl KeyHandler {
                 "syntax" | "syn" => {
                     editor.set_config_setting("syntax", "false");
                 }
+                "percentpathroot" => {
+                    editor.set_config_setting("percentpathroot", "false");
+                }
                 _ => editor.set_status_message(format!("Unknown option: no{}", setting)),
             }
             return;
@@ -2242,6 +2246,14 @@ impl KeyHandler {
                 "colorscheme" | "colo" => {
                     editor.set_config_setting("colorscheme", value);
                     editor.set_status_message(format!("Color scheme set to {}", value));
+                }
+                "percentpathroot" => {
+                    if let Ok(_b) = value.parse::<bool>() {
+                        editor.set_config_setting("percentpathroot", value);
+                        editor.set_status_message(format!("Percent path root set to {}", value));
+                    } else {
+                        editor.set_status_message("Invalid boolean value".to_string());
+                    }
                 }
                 _ => editor.set_status_message(format!("Unknown setting: {}", setting)),
             }
@@ -2323,6 +2335,10 @@ impl KeyHandler {
             "syntax" | "syn" => {
                 editor.set_config_setting("syntax", "true");
                 editor.set_status_message("Syntax highlighting enabled".to_string());
+            }
+            "percentpathroot" => {
+                editor.set_config_setting("percentpathroot", "true");
+                editor.set_status_message("Percent path root enabled".to_string());
             }
             _ => editor.set_status_message(format!("Unknown option: {}", args)),
         }

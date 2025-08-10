@@ -438,6 +438,13 @@ impl EditorConfig {
                     Err("Invalid timeout value".to_string())
                 }
             }
+            "percentpathroot" => {
+                self.interface.percent_path_root = value.parse().unwrap_or(true);
+                Ok(format!(
+                    "Percent path root: {}",
+                    if self.interface.percent_path_root { "enabled" } else { "disabled" }
+                ))
+            }
 
             // Display settings
             "colorscheme" | "colo" => {

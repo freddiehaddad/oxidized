@@ -571,6 +571,22 @@ impl CommandCompletion {
                 description: "Disable syntax highlighting (short)".to_string(),
                 category: "set".to_string(),
             },
+            // Percent path root toggle for completion behavior
+            CompletionItem {
+                text: "set percentpathroot".to_string(),
+                description: "Enable '%' root in path completion".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set nopercentpathroot".to_string(),
+                description: "Disable '%' root in path completion".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set percentpathroot=".to_string(),
+                description: "Set '%' root behavior (true/false)".to_string(),
+                category: "set".to_string(),
+            },
         ]);
 
         // Set commands with values
@@ -661,6 +677,7 @@ impl CommandCompletion {
             "scrolloff",
             "sidescrolloff",
             "timeoutlen",
+            "percentpathroot",
             "colorscheme",
             "syntax",
         ];
