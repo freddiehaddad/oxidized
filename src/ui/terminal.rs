@@ -6,7 +6,7 @@ use crossterm::{
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
     tty::IsTty,
 };
-use log::{debug, info, warn};
+use log::{debug, warn};
 use std::io::{self, Stdout, Write};
 
 pub struct Terminal {
@@ -16,7 +16,7 @@ pub struct Terminal {
 
 impl Terminal {
     pub fn new() -> io::Result<Self> {
-        info!("Initializing terminal with alternate screen and raw mode");
+        debug!("Initializing terminal with alternate screen and raw mode");
         let mut stdout = io::stdout();
         let is_tty = stdout.is_tty();
 
@@ -36,7 +36,7 @@ impl Terminal {
             stdout.flush()?;
 
             let size = terminal::size()?;
-            info!("Terminal initialized with size: {}x{}", size.0, size.1);
+            debug!("Terminal initialized with size: {}x{}", size.0, size.1);
             Ok(Self { stdout, size })
         } else {
             // Headless/CI environment: skip TTY-dependent setup
@@ -226,6 +226,6 @@ impl Drop for Terminal {
         debug!("Leaving alternate screen mode");
         // Leave alternate screen to restore original terminal content
         let _ = self.stdout.execute(LeaveAlternateScreen);
-        info!("Terminal cleanup completed");
+        debug!("Terminal cleanup completed");
     }
 }

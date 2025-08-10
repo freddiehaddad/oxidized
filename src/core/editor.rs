@@ -127,7 +127,7 @@ pub struct Editor {
 
 impl Editor {
     pub fn new() -> Result<Self> {
-        info!("Initializing Editor");
+        info!("Initializing editor");
 
         let mut terminal = Terminal::new()?;
 
@@ -144,7 +144,7 @@ impl Editor {
 
         // Get terminal size for window manager
         let (terminal_width, terminal_height) = terminal.size();
-        info!("Terminal size: {}x{}", terminal_width, terminal_height);
+        debug!("Terminal size: {}x{}", terminal_width, terminal_height);
 
         // Initialize UI with config values
         let mut ui = UI::new();
@@ -161,7 +161,7 @@ impl Editor {
         // Initialize config watcher for hot reloading
         let config_watcher = match ConfigWatcher::new() {
             Ok(watcher) => {
-                info!("Configuration file watcher initialized");
+                debug!("Configuration file watcher initialized");
                 Some(watcher)
             }
             Err(e) => {
@@ -176,7 +176,7 @@ impl Editor {
         // Initialize async syntax highlighter
         let async_syntax_highlighter = match AsyncSyntaxHighlighter::new() {
             Ok(highlighter) => {
-                info!("Async syntax highlighter initialized");
+                debug!("Async syntax highlighter initialized");
                 Some(highlighter)
             }
             Err(e) => {
@@ -185,7 +185,7 @@ impl Editor {
             }
         };
 
-        info!("Editor initialization completed successfully");
+        info!("Editor initialized");
         let mut editor = Self {
             buffers: HashMap::new(),
             current_buffer_id: None,
@@ -240,7 +240,7 @@ impl Editor {
         self.next_buffer_id += 1;
 
         let buffer = if let Some(path) = file_path {
-            info!("Creating buffer {} from file: {:?}", id, path);
+            debug!("Creating buffer {} from file: {:?}", id, path);
             Buffer::from_file(id, path, self.config.editing.undo_levels)?
         } else {
             debug!("Creating empty buffer {}", id);
@@ -282,7 +282,7 @@ impl Editor {
 
     pub fn switch_to_buffer(&mut self, id: usize) -> bool {
         if self.buffers.contains_key(&id) {
-            info!("Switching to buffer ID: {}", id);
+            debug!("Switching to buffer ID: {}", id);
             self.current_buffer_id = Some(id);
             true
         } else {
@@ -292,7 +292,7 @@ impl Editor {
     }
 
     pub fn close_buffer(&mut self, id: usize) -> Result<()> {
-        info!("Closing buffer ID: {}", id);
+        debug!("Closing buffer ID: {}", id);
 
         if let Some(buffer) = self.buffers.get(&id)
             && buffer.modified
@@ -304,18 +304,18 @@ impl Editor {
         }
 
         self.buffers.remove(&id);
-        info!("Successfully removed buffer ID: {}", id);
+        debug!("Successfully removed buffer ID: {}", id);
 
         // Switch to another buffer if we closed the current one
         if self.current_buffer_id == Some(id) {
             self.current_buffer_id = self.buffers.keys().next().copied();
             if let Some(new_id) = self.current_buffer_id {
-                info!(
+                debug!(
                     "Switched to buffer ID: {} after closing current buffer",
                     new_id
                 );
             } else {
-                info!("No buffers remaining after closing buffer {}", id);
+                debug!("No buffers remaining after closing buffer {}", id);
             }
         }
 
@@ -821,28 +821,28 @@ impl Editor {
         match operator {
             PendingOperator::Delete => {
                 self.delete_range(range)?;
-                info!("Deleted text object: {:?}", object_type);
+                debug!("Deleted text object: {:?}", object_type);
             }
             PendingOperator::Yank => {
                 self.yank_range(range)?;
-                info!("Yanked text object: {:?}", object_type);
+                debug!("Yanked text object: {:?}", object_type);
             }
             PendingOperator::Change => {
                 self.delete_range(range)?;
                 self.set_mode(Mode::Insert);
-                info!("Changed text object: {:?}", object_type);
+                debug!("Changed text object: {:?}", object_type);
             }
             PendingOperator::Indent => {
                 self.indent_range(range)?;
-                info!("Indented text object: {:?}", object_type);
+                debug!("Indented text object: {:?}", object_type);
             }
             PendingOperator::Unindent => {
                 self.unindent_range(range)?;
-                info!("Unindented text object: {:?}", object_type);
+                debug!("Unindented text object: {:?}", object_type);
             }
             PendingOperator::ToggleCase => {
                 self.toggle_case_range(range)?;
-                info!("Toggled case for text object: {:?}", object_type);
+                debug!("Toggled case for text object: {:?}", object_type);
             }
         }
 
@@ -987,10 +987,10 @@ impl Editor {
 
     pub fn save_current_buffer(&mut self) -> Result<()> {
         if let Some(buffer) = self.current_buffer_mut() {
-            info!("Saving buffer with file path: {:?}", buffer.file_path);
+            debug!("Saving buffer with file path: {:?}", buffer.file_path);
             match buffer.save() {
                 Ok(_) => {
-                    info!("Successfully saved buffer");
+                    info!("Buffer saved");
                     self.status_message = "File saved".to_string();
                 }
                 Err(e) => {
@@ -1008,7 +1008,7 @@ impl Editor {
 
     /// Perform a search in the current buffer
     pub fn search(&mut self, pattern: &str) -> bool {
-        info!("Performing search for pattern: '{}'", pattern);
+        debug!("Performing search for pattern: '{}'", pattern);
 
         let lines = if let Some(buffer) = self.current_buffer() {
             buffer.lines.clone()
@@ -1033,7 +1033,7 @@ impl Editor {
         self.search_results = search_results;
 
         if !self.search_results.is_empty() {
-            info!(
+            debug!(
                 "Search found {} matches for pattern: '{}'",
                 self.search_results.len(),
                 pattern
@@ -1043,7 +1043,7 @@ impl Editor {
             self.status_message = format!("Found {} matches", self.search_results.len());
             true
         } else {
-            info!("Search found no matches for pattern: '{}'", pattern);
+            info!("No search matches for pattern: '{}'", pattern);
             self.current_search_index = None;
             self.status_message = format!("Pattern not found: {}", pattern);
             false

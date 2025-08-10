@@ -5,42 +5,22 @@ use std::path::PathBuf;
 
 fn main() -> Result<()> {
     // Initialize comprehensive logging
-    use env_logger::{Builder, Target};
-    use std::io::Write;
+    use env_logger::Builder;
 
-    // Configure logging based on build type with timestamps and better formatting
+    // Configure logging based on build type
     let mut builder = if cfg!(debug_assertions) {
-        // Debug builds: Enable trace logging by default with detailed formatting
+        // Debug builds: Enable debug logging by default with detailed formatting
         Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
     } else {
         // Release builds: Use default behavior (respects RUST_LOG environment variable)
         Builder::from_default_env()
     };
 
-    // Enhanced log formatting with timestamps and module names
-    builder
-        .format(|buf, record| {
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            writeln!(
-                buf,
-                "{} [{}] [{}:{}] {}",
-                timestamp,
-                record.level(),
-                record.module_path().unwrap_or("unknown"),
-                record.line().unwrap_or(0),
-                record.args()
-            )
-        })
-        .target(Target::Pipe(Box::new(std::fs::File::create(
-            "oxidized.log",
-        )?)))
-        .init();
+    // Simple formatting to stderr; can be overridden with RUST_LOG
+    builder.format_timestamp_millis().init();
 
     log::info!("=== Oxidized Text Editor Starting ===");
-    log::info!(
+    log::debug!(
         "Build type: {}",
         if cfg!(debug_assertions) {
             "DEBUG"

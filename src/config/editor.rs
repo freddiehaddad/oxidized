@@ -223,12 +223,12 @@ fn default_true() -> bool {
 
 impl EditorConfig {
     pub fn load() -> Self {
-        info!("Loading editor configuration");
+        debug!("Loading editor configuration");
         // Try to load from editor.toml file, fall back to defaults if not found
         if let Ok(config_content) = fs::read_to_string("editor.toml") {
             debug!("Found editor.toml file, attempting to parse");
             if let Ok(config) = toml::from_str(&config_content) {
-                info!("Successfully loaded editor configuration from editor.toml");
+                info!("Loaded editor configuration from editor.toml");
                 return config;
             } else {
                 warn!("Failed to parse editor.toml, falling back to default configuration");
@@ -238,7 +238,7 @@ impl EditorConfig {
         }
 
         // Fallback to default configuration
-        info!("Using default editor configuration");
+        debug!("Using default editor configuration");
         Self::default()
     }
 
@@ -246,7 +246,7 @@ impl EditorConfig {
         debug!("Saving editor configuration to editor.toml");
         let toml_string = toml::to_string_pretty(self)?;
         fs::write("editor.toml", toml_string)?;
-        info!("Editor configuration saved successfully");
+        debug!("Editor configuration saved successfully");
         Ok(())
     }
 

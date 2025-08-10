@@ -13,6 +13,7 @@
 - [🛠️ Development & Debugging](#️-development--debugging)
   - [Testing](#testing)
   - [Benchmarking](#benchmarking)
+  - [Logging quick reference](#quick-reference)
 - [🔧 Troubleshooting](#-troubleshooting)
 - [🧰 Dependencies](#-dependencies)
 - [🤝 Contributing](#-contributing)
@@ -484,6 +485,8 @@ punctuation = "#839496"  # Gray for punctuation
 
 ## 🛠️ Development & Debugging
 
+Quick link: [Logging quick reference](#quick-reference)
+
 ### Building from Source
 
 **Development Build:**
@@ -493,12 +496,11 @@ punctuation = "#839496"  # Gray for punctuation
 git clone https://github.com/freddiehaddad/oxidized.git
 cd oxidized
 
-# Build in debug mode with comprehensive logging
+# Build in debug mode
 cargo build
 
-# Run with automatic debug logging
+# Run (debug builds default to debug-level logging)
 cargo run filename.txt
-# Debug logs automatically written to oxidized.log
 ```
 
 ```bash
@@ -506,12 +508,11 @@ cargo run filename.txt
 git clone https://github.com/freddiehaddad/oxidized.git
 cd oxidized
 
-# Build in debug mode with comprehensive logging
+# Build in debug mode
 cargo build
 
-# Run with automatic debug logging
+# Run (debug builds default to debug-level logging)
 cargo run filename.txt
-# Debug logs automatically written to oxidized.log
 ```
 
 **Release Build:**
@@ -520,7 +521,7 @@ cargo run filename.txt
 # Windows - Optimized release build
 cargo build --release
 
-# Run with custom log level
+# Run with custom log level (stderr output)
 $env:RUST_LOG="debug"; .\target\release\oxy.exe filename.txt
 ```
 
@@ -528,13 +529,39 @@ $env:RUST_LOG="debug"; .\target\release\oxy.exe filename.txt
 # Linux/macOS - Optimized release build
 cargo build --release
 
-# Run with custom log level
+# Run with custom log level (stderr output)
 RUST_LOG=debug ./target/release/oxy filename.txt
 ```
 
 ### 📊 Comprehensive Logging System
 
 Oxidized provides extensive logging capabilities for development, debugging, and performance monitoring:
+
+#### Quick reference
+
+```powershell
+# Windows (PowerShell)
+# 1) Enable verbose logs to stderr
+$env:RUST_LOG="debug"; cargo run filename.txt
+
+# 2) Module-focused logging
+$env:RUST_LOG="oxidized=info,oxidized::editor=debug"; cargo run
+
+# 3) Redirect logs to a file while displaying
+$env:RUST_LOG="debug"; cargo run 2>&1 | Tee-Object -FilePath oxidized.log
+```
+
+```bash
+# Linux/macOS (Bash)
+# 1) Enable verbose logs to stderr
+RUST_LOG=debug cargo run filename.txt
+
+# 2) Module-focused logging
+RUST_LOG="oxidized=info,oxidized::editor=debug" cargo run
+
+# 3) Redirect logs to a file while displaying
+RUST_LOG=debug cargo run 2>&1 | tee oxidized.log
+```
 
 #### **Log Levels and Usage**
 
@@ -546,7 +573,7 @@ Oxidized provides extensive logging capabilities for development, debugging, and
 - `debug` - Detailed debugging information (**default for debug builds**)
 - `trace` - Ultra-verbose tracing (development only)
 
-> **Note**: Debug builds automatically enable `debug` level logging without requiring `RUST_LOG` to be set. Release builds respect the `RUST_LOG` environment variable and default to `info` level.
+> Note: Debug builds default to `debug` logging. Release builds respect `RUST_LOG` and are minimal by default.
 
 #### **Environment Variables**
 
@@ -576,36 +603,30 @@ export RUST_LOG="oxidized::buffer=trace,oxidized::syntax=debug,warn"
 cargo run filename.txt
 ```
 
-#### **Log File Management**
+#### **Viewing Logs**
 
-**Automatic Logging:**
-
-- Debug builds: Automatic `debug` level logging to `oxidized.log` (enabled by default)
-- Release builds: `info` level logging (configurable via `RUST_LOG`)
-- Log rotation: Logs are appended, manual cleanup recommended
-
-**Real-time Log Monitoring:**
+By default logs are written to stderr. Control verbosity with `RUST_LOG` and optionally redirect to a file.
 
 ```powershell
-# Windows PowerShell - Monitor logs in real-time
+# Windows PowerShell
+$env:RUST_LOG="debug"; cargo run filename.txt
+
+# Redirect logs to a file
+$env:RUST_LOG="debug"; cargo run filename.txt 2>&1 | Tee-Object -FilePath oxidized.log
+
+# Follow a redirected log file
 Get-Content oxidized.log -Wait -Tail 50
-
-# Filter specific log levels
-Get-Content oxidized.log -Wait | Select-String "ERROR|WARN"
-
-# Watch specific modules
-Get-Content oxidized.log -Wait | Select-String "editor|buffer"
 ```
 
 ```bash
-# Linux/macOS - Monitor logs in real-time  
+# Linux/macOS (Bash)
+RUST_LOG=debug cargo run filename.txt
+
+# Redirect logs to a file while displaying
+RUST_LOG=debug cargo run filename.txt 2>&1 | tee oxidized.log
+
+# Follow a redirected log file
 tail -f oxidized.log
-
-# Filter specific log levels
-tail -f oxidized.log | grep -E "(ERROR|WARN)"
-
-# Watch specific modules
-tail -f oxidized.log | grep -E "(editor|buffer)"
 ```
 
 #### **Module-Specific Logging**
