@@ -206,6 +206,9 @@ impl Editor {
             text_object_finder: crate::features::text_objects::TextObjectFinder::new(),
             macro_recorder: crate::features::macros::MacroRecorder::new(),
         };
+        // Initialize reserved rows for status/command lines based on config
+        let reserved_rows = editor.reserved_rows_from_config();
+        editor.window_manager.set_reserved_rows(reserved_rows);
         // Apply initial search settings from config
         editor.apply_search_settings();
         Ok(editor)
@@ -214,6 +217,17 @@ impl Editor {
     /// Get command timeout in milliseconds from configuration
     pub fn command_timeout_ms(&self) -> u64 {
         self.config.interface.command_timeout
+    }
+
+    fn reserved_rows_from_config(&self) -> u16 {
+        let mut rows = 0u16;
+        if self.config.interface.show_status_line {
+            rows += 1;
+        }
+        if self.config.interface.show_command {
+            rows += 1;
+        }
+        rows
     }
 
     pub fn create_buffer(&mut self, file_path: Option<PathBuf>) -> Result<usize> {

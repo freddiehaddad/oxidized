@@ -74,6 +74,8 @@ pub struct WindowManager {
     current_window_id: Option<usize>,
     terminal_width: u16,
     terminal_height: u16,
+    /// Number of rows reserved at the bottom for global UI (status/command lines)
+    reserved_rows: u16,
 }
 
 impl WindowManager {
@@ -84,6 +86,7 @@ impl WindowManager {
             current_window_id: None,
             terminal_width,
             terminal_height,
+            reserved_rows: 2,
         };
 
         // Create initial window that fills the entire screen (minus status line)
@@ -92,7 +95,7 @@ impl WindowManager {
             0,
             0,
             terminal_width,
-            terminal_height.saturating_sub(2), // Reserve 2 lines for command/status
+            terminal_height.saturating_sub(manager.reserved_rows), // Reserve rows for command/status
         );
 
         manager.windows.insert(1, initial_window);
@@ -422,7 +425,7 @@ impl WindowManager {
         if self.windows.len() == 1 {
             if let Some(window) = self.windows.values_mut().next() {
                 window.width = width;
-                window.height = height.saturating_sub(2); // Reserve for status/command line
+                window.height = height.saturating_sub(self.reserved_rows); // Reserve for status/command line
             }
         } else {
             // TODO: Implement smart resizing for multiple windows
@@ -617,12 +620,36 @@ impl WindowManager {
             window.x = 0;
             window.y = 0;
             window.width = self.terminal_width;
-            window.height = self.terminal_height.saturating_sub(2);
+            window.height = self.terminal_height.saturating_sub(self.reserved_rows);
         }
         // TODO: More sophisticated window management for multiple windows
     }
 
     pub fn window_count(&self) -> usize {
         self.windows.len()
+    }
+
+    /// Set the number of reserved rows at the bottom and resize single-window layouts
+    pub fn set_reserved_rows(&mut self, reserved_rows: u16) {
+        self.reserved_rows = reserved_rows;
+        // Adjust layout for simple cases
+        if self.windows.len() == 1 {
+            if let Some(window) = self.windows.values_mut().next() {
+                window.height = self.terminal_height.saturating_sub(self.reserved_rows);
+                window.width = self.terminal_width;
+                window.x = 0;
+                window.y = 0;
+            }
+        } else {
+            // For multiple windows, keep positions but ensure boundaries don't exceed new area
+            // A more sophisticated reflow can be implemented later
+            // For now, clamp any windows that overflow
+            let max_height = self.terminal_height.saturating_sub(self.reserved_rows);
+            for window in self.windows.values_mut() {
+                if window.y + window.height > max_height {
+                    window.height = max_height.saturating_sub(window.y);
+                }
+            }
+        }
     }
 }

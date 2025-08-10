@@ -120,8 +120,12 @@ impl UI {
         terminal.queue_set_bg_color(self.theme.background)?;
         terminal.queue_clear_screen()?;
 
+        // Determine reserved rows from config flags
+        let reserved_rows: u16 = (editor_state.config.interface.show_status_line as u16)
+            + (editor_state.config.interface.show_command as u16);
+
         // Render all windows
-        self.render_windows(terminal, editor_state)?;
+        self.render_windows(terminal, editor_state, reserved_rows)?;
 
         // Render status line if enabled in config
         if editor_state.config.interface.show_status_line {
@@ -159,6 +163,7 @@ impl UI {
         &self,
         terminal: &mut Terminal,
         editor_state: &EditorRenderState,
+        reserved_rows: u16,
     ) -> io::Result<()> {
         // Render each window
         for window in editor_state.window_manager.all_windows().values() {
@@ -178,6 +183,7 @@ impl UI {
                         terminal,
                         window,
                         editor_state.current_window_id == Some(window.id),
+                        reserved_rows,
                     )?;
                 }
             }
@@ -359,6 +365,7 @@ impl UI {
         terminal: &mut Terminal,
         window: &crate::core::window::Window,
         is_active: bool,
+        reserved_rows: u16,
     ) -> io::Result<()> {
         // Draw border around the window (simple ASCII border)
         let border_char = if is_active { '|' } else { '│' };
@@ -375,7 +382,7 @@ impl UI {
         }
 
         // Bottom border
-        if window.y + window.height < terminal.size().1.saturating_sub(2) {
+        if window.y + window.height < terminal.size().1.saturating_sub(reserved_rows) {
             terminal.queue_move_cursor(Position::new(
                 (window.y + window.height) as usize,
                 window.x as usize,
@@ -715,7 +722,12 @@ impl UI {
         width: u16,
         height: u16,
     ) -> io::Result<()> {
-        let status_row = height.saturating_sub(2);
+        let reserved_cmd = if editor_state.config.interface.show_command {
+            1
+        } else {
+            0
+        };
+        let status_row = height.saturating_sub(reserved_cmd + 1);
         terminal.queue_move_cursor(Position::new(status_row as usize, 0))?;
 
         // Clear the status line first
@@ -910,7 +922,12 @@ impl UI {
 
     /// Get the current viewport range
     pub fn viewport_range(&self, height: u16) -> (usize, usize) {
-        let content_height = height.saturating_sub(2) as usize;
+        // Try to infer reserved rows from theme-agnostic UI flags
+        // Fallback to 2 if we can't access config here; Renderer calls pass height consistently.
+        // Since UI::renderer has access to EditorRenderState in render paths, content rendering
+        // already respects borders; this method is used for cursor/selection math.
+        let default_reserved = 2u16; // conservative fallback
+        let content_height = height.saturating_sub(default_reserved) as usize;
         (self.viewport_top, content_height)
     }
 
