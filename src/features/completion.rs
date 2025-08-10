@@ -1,3 +1,4 @@
+use crate::config::theme::ThemeConfig;
 /// Command completion system for Vim-style commands
 use log::{debug, info};
 
@@ -684,20 +685,142 @@ impl CommandCompletion {
     fn update_matches(&mut self, input: &str) {
         let input_lower = input.to_lowercase();
 
-        self.matches = self
+        // Static matches from the predefined command list
+        let mut combined: Vec<CompletionItem> = self
             .commands
             .iter()
             .filter(|cmd| cmd.text.to_lowercase().starts_with(&input_lower))
             .cloned()
             .collect();
 
+        // Dynamic matches based on current input (e.g., values after '=')
+        let dynamic = Self::dynamic_matches(input);
+        combined.extend(dynamic);
+
+        // Deduplicate by text while preferring shorter description (or first seen)
+        combined.sort_by(|a, b| a.text.cmp(&b.text));
+        combined.dedup_by(|a, b| a.text == b.text);
+
         // Sort matches by length (shorter matches first) and then alphabetically
-        self.matches.sort_by(|a, b| {
+        combined.sort_by(|a, b| {
             a.text
                 .len()
                 .cmp(&b.text.len())
                 .then_with(|| a.text.cmp(&b.text))
         });
+
+        self.matches = combined;
+    }
+
+    /// Produce dynamic completion items for :set value forms
+    fn dynamic_matches(input: &str) -> Vec<CompletionItem> {
+        let trimmed = input.trim_start();
+        let lower = trimmed.to_lowercase();
+        let mut out: Vec<CompletionItem> = Vec::new();
+
+        // Helper to filter suggestions by current value prefix after '='
+        fn value_prefix(s: &str) -> &str {
+            if let Some(idx) = s.find('=') {
+                &s[idx + 1..]
+            } else {
+                ""
+            }
+        }
+
+        // colorscheme / colo dynamic values from themes.toml
+        if lower.starts_with("set colorscheme=") || lower.starts_with("set colo=") {
+            let val_pref = value_prefix(trimmed);
+            let cfg = ThemeConfig::load();
+            // Build list of (name, description)
+            for (name, theme) in cfg.themes.iter() {
+                if val_pref.is_empty() || name.to_lowercase().starts_with(&val_pref.to_lowercase())
+                {
+                    out.push(CompletionItem {
+                        text: format!("set colorscheme={}", name),
+                        description: format!("Theme: {}", theme.description),
+                        category: "set".to_string(),
+                    });
+                }
+            }
+        }
+
+        // Numeric suggestions for common options
+        // tabstop / ts
+        if lower.starts_with("set tabstop=") || lower.starts_with("set ts=") {
+            let val_pref = value_prefix(trimmed);
+            let suggestions = ["2", "4", "8"]; // common tab widths
+            for s in suggestions.iter() {
+                if val_pref.is_empty() || s.starts_with(val_pref) {
+                    out.push(CompletionItem {
+                        text: format!("set tabstop={}", s),
+                        description: "Set tab width".to_string(),
+                        category: "set".to_string(),
+                    });
+                }
+            }
+        }
+
+        // scrolloff / so
+        if lower.starts_with("set scrolloff=") || lower.starts_with("set so=") {
+            let val_pref = value_prefix(trimmed);
+            let suggestions = ["0", "1", "2", "3", "5", "8", "10"];
+            for s in suggestions.iter() {
+                if val_pref.is_empty() || s.starts_with(val_pref) {
+                    out.push(CompletionItem {
+                        text: format!("set scrolloff={}", s),
+                        description: "Lines to keep around cursor".to_string(),
+                        category: "set".to_string(),
+                    });
+                }
+            }
+        }
+
+        // sidescrolloff / siso
+        if lower.starts_with("set sidescrolloff=") || lower.starts_with("set siso=") {
+            let val_pref = value_prefix(trimmed);
+            let suggestions = ["0", "1", "2", "3", "5", "8", "10"];
+            for s in suggestions.iter() {
+                if val_pref.is_empty() || s.starts_with(val_pref) {
+                    out.push(CompletionItem {
+                        text: format!("set sidescrolloff={}", s),
+                        description: "Columns to keep around cursor".to_string(),
+                        category: "set".to_string(),
+                    });
+                }
+            }
+        }
+
+        // timeoutlen / tm
+        if lower.starts_with("set timeoutlen=") || lower.starts_with("set tm=") {
+            let val_pref = value_prefix(trimmed);
+            let suggestions = ["200", "300", "500", "700", "1000"];
+            for s in suggestions.iter() {
+                if val_pref.is_empty() || s.starts_with(val_pref) {
+                    out.push(CompletionItem {
+                        text: format!("set timeoutlen={}", s),
+                        description: "Command timeout in ms".to_string(),
+                        category: "set".to_string(),
+                    });
+                }
+            }
+        }
+
+        // undolevels / ul
+        if lower.starts_with("set undolevels=") || lower.starts_with("set ul=") {
+            let val_pref = value_prefix(trimmed);
+            let suggestions = ["100", "1000"]; // sensible defaults
+            for s in suggestions.iter() {
+                if val_pref.is_empty() || s.starts_with(val_pref) {
+                    out.push(CompletionItem {
+                        text: format!("set undolevels={}", s),
+                        description: "Number of undo levels".to_string(),
+                        category: "set".to_string(),
+                    });
+                }
+            }
+        }
+
+        out
     }
 
     /// Move to next completion
