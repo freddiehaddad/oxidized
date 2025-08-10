@@ -1,18 +1,25 @@
 #!/bin/sh
-# Run rustfmt check before committing. Abort commit if formatting is needed.
+# Auto-run rustfmt before committing. Formats and re-stages Rust files.
 
 set -eu
 
 if ! command -v cargo >/dev/null 2>&1; then
-  echo "cargo not found; skipping rustfmt check" >&2
+  echo "cargo not found; skipping rustfmt" >&2
   exit 0
 fi
 
-# Only check Rust files in the repo to keep hook fast.
-# Use --all to cover workspace members.
-if ! cargo fmt --all -- --check; then
-  echo "Rust formatting check failed. Run:\n  cargo fmt --all\nThen re-stage and commit again." >&2
+# Format all workspace members
+if ! cargo fmt --all; then
+  echo "cargo fmt failed; aborting commit" >&2
   exit 1
+fi
+
+# Re-stage changed Rust files so the commit includes formatting updates.
+# Note: This may override partial staging for Rust files.
+changed_rs=$(git ls-files -m '*.rs' || true)
+if [ -n "${changed_rs}" ]; then
+  # shellcheck disable=SC2086
+  git add -- ${changed_rs}
 fi
 
 exit 0
