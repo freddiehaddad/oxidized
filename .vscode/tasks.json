@@ -1,0 +1,10 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "git add & commit completion enhancements",
+			"type": "shell",
+			"command": "git add -A && git commit -m \"feat(completion): improve file path suggestions\\n\\n- Add trailing separator for directories\\n- Include parent directory (..) in listings\\n- Support '%' to root at current buffer directory\\n- Extend CompletionContext with current_buffer_dir\\n\\nAlso keeps suggestions relative to the chosen root and preserves command prefix.\""
+		}
+	]
+}

@@ -722,28 +722,37 @@ impl CommandCompletion {
         let lower = trimmed.to_lowercase();
         let mut out: Vec<CompletionItem> = Vec::new();
         // Buffer name/id completion: b <...> or buffer <...>
-        if lower.starts_with("b ") || lower.starts_with("buffer ") {
-            if let Some(ctx) = &self.context {
-                let prefix = if let Some(p) = trimmed.strip_prefix("b ") {
-                    p
-                } else if let Some(p) = trimmed.strip_prefix("buffer ") {
-                    p
-                } else {
-                    ""
-                }
+        if (lower.starts_with("b ") || lower.starts_with("buffer ")) && self.context.is_some() {
+            let ctx = self.context.as_ref().unwrap();
+            let prefix = trimmed
+                .strip_prefix("b ")
+                .or_else(|| trimmed.strip_prefix("buffer "))
+                .unwrap_or_default()
                 .trim_start();
 
-                let prefix_lower = prefix.to_lowercase();
-                for b in &ctx.buffers {
-                    let id_str = b.id.to_string();
-                    let name_lower = b.name.to_lowercase();
-                    let matches = prefix.is_empty()
-                        || id_str.starts_with(prefix)
-                        || name_lower.contains(&prefix_lower);
-                    if matches {
-                        // Suggest by id
+            let prefix_lower = prefix.to_lowercase();
+            for b in &ctx.buffers {
+                let id_str = b.id.to_string();
+                let name_lower = b.name.to_lowercase();
+                let matches = prefix.is_empty()
+                    || id_str.starts_with(prefix)
+                    || name_lower.contains(&prefix_lower);
+                if matches {
+                    // Suggest by id
+                    out.push(CompletionItem {
+                        text: format!("b {}", b.id),
+                        description: format!(
+                            "Buffer {}: {}{}",
+                            b.id,
+                            b.name,
+                            if b.modified { " [+]" } else { "" }
+                        ),
+                        category: "buffer".to_string(),
+                    });
+                    // Suggest by name (only if it isn't "[No Name]")
+                    if b.name != "[No Name]" {
                         out.push(CompletionItem {
-                            text: format!("b {}", b.id),
+                            text: format!("b {}", b.name),
                             description: format!(
                                 "Buffer {}: {}{}",
                                 b.id,
@@ -752,19 +761,6 @@ impl CommandCompletion {
                             ),
                             category: "buffer".to_string(),
                         });
-                        // Suggest by name (only if it isn't "[No Name]")
-                        if b.name != "[No Name]" {
-                            out.push(CompletionItem {
-                                text: format!("b {}", b.name),
-                                description: format!(
-                                    "Buffer {}: {}{}",
-                                    b.id,
-                                    b.name,
-                                    if b.modified { " [+]" } else { "" }
-                                ),
-                                category: "buffer".to_string(),
-                            });
-                        }
                     }
                 }
             }
@@ -797,110 +793,166 @@ impl CommandCompletion {
         }
 
         // File path completion for :e and :w commands
-        if lower.starts_with("e ")
+        if (lower.starts_with("e ")
             || lower.starts_with("edit ")
             || lower.starts_with("w ")
-            || lower.starts_with("write ")
+            || lower.starts_with("write "))
+            && self.context.is_some()
         {
-            if let Some(ctx) = &self.context {
-                let raw = if let Some(p) = trimmed.strip_prefix("e ") {
-                    p
-                } else if let Some(p) = trimmed.strip_prefix("edit ") {
-                    p
-                } else if let Some(p) = trimmed.strip_prefix("w ") {
-                    p
-                } else if let Some(p) = trimmed.strip_prefix("write ") {
-                    p
-                } else {
-                    ""
-                };
-                let input_path = raw.trim_start();
+            let ctx = self.context.as_ref().unwrap();
+            let raw = trimmed
+                .strip_prefix("e ")
+                .or_else(|| trimmed.strip_prefix("edit "))
+                .or_else(|| trimmed.strip_prefix("w "))
+                .or_else(|| trimmed.strip_prefix("write "))
+                .unwrap_or_default();
+            let mut input_path = raw.trim_start();
 
-                use std::fs;
-                use std::path::{Path, PathBuf};
+            // Optional: support '%' as a shorthand to root at current buffer's directory
+            // Example: :e %/src will complete under the current buffer directory
+            let use_buf_root = input_path.starts_with('%');
+            if use_buf_root {
+                input_path = &input_path[1..];
+            }
 
-                // Resolve base directory and prefix filter
-                let (dir, filter) = if input_path.is_empty() {
-                    (ctx.cwd.clone(), String::new())
-                } else {
-                    let p = Path::new(input_path);
-                    if p.is_absolute() {
-                        if p.is_dir() {
-                            (PathBuf::from(p), String::new())
-                        } else if let Some(parent) = p.parent() {
-                            (
-                                parent.to_path_buf(),
-                                p.file_name()
-                                    .and_then(|s| s.to_str())
-                                    .unwrap_or("")
-                                    .to_string(),
-                            )
-                        } else {
-                            (ctx.cwd.clone(), input_path.to_string())
-                        }
+            use std::fs;
+            use std::path::{Path, PathBuf};
+
+            // Resolve base directory and prefix filter
+            let base_root = if use_buf_root {
+                ctx.current_buffer_dir.clone().unwrap_or(ctx.cwd.clone())
+            } else {
+                ctx.cwd.clone()
+            };
+
+            let (dir, filter) = if input_path.is_empty() {
+                (base_root.clone(), String::new())
+            } else {
+                let p = Path::new(input_path);
+                if p.is_absolute() {
+                    if p.is_dir() {
+                        (PathBuf::from(p), String::new())
+                    } else if let Some(parent) = p.parent() {
+                        (
+                            parent.to_path_buf(),
+                            p.file_name()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("")
+                                .to_string(),
+                        )
                     } else {
-                        let joined = ctx.cwd.join(p);
-                        if joined.is_dir() {
-                            (joined, String::new())
-                        } else if let Some(parent) = joined.parent() {
-                            (
-                                parent.to_path_buf(),
-                                joined
-                                    .file_name()
-                                    .and_then(|s| s.to_str())
-                                    .unwrap_or("")
-                                    .to_string(),
-                            )
-                        } else {
-                            (ctx.cwd.clone(), input_path.to_string())
-                        }
+                        (ctx.cwd.clone(), input_path.to_string())
                     }
-                };
-
-                if let Ok(read_dir) = fs::read_dir(&dir) {
-                    for entry in read_dir.flatten() {
-                        let path = entry.path();
-                        let name = entry.file_name().to_string_lossy().to_string();
-                        if !filter.is_empty()
-                            && !name.to_lowercase().starts_with(&filter.to_lowercase())
-                        {
-                            continue;
-                        }
-                        let mut text = String::new();
-                        // Preserve the command and prefix
-                        if lower.starts_with("e ") {
-                            text.push_str("e ");
-                        } else if lower.starts_with("edit ") {
-                            text.push_str("edit ");
-                        } else if lower.starts_with("w ") {
-                            text.push_str("w ");
-                        } else {
-                            text.push_str("write ");
-                        }
-                        // If the user typed a partial path, include it
-                        if !input_path.is_empty() {
-                            // Rebuild the suggestion keeping user-typed prefix up to dir
-                            let suggested = if Path::new(input_path).is_absolute() {
-                                dir.join(&name)
-                            } else {
-                                // Use a relative suggestion from cwd when possible
-                                let abs = dir.join(&name);
-                                abs.strip_prefix(&ctx.cwd).unwrap_or(&abs).to_path_buf()
-                            };
-                            text.push_str(&suggested.to_string_lossy());
-                        } else {
-                            // Base directory listing, relative to cwd when possible
-                            let rel = path.strip_prefix(&ctx.cwd).unwrap_or(&path).to_path_buf();
-                            text.push_str(&rel.to_string_lossy());
-                        }
-
-                        let desc = if path.is_dir() { "Directory" } else { "File" };
-                        out.push(CompletionItem {
-                            text,
-                            description: desc.to_string(),
-                            category: "file".to_string(),
-                        });
+                } else {
+                    let joined = base_root.join(p);
+                    if joined.is_dir() {
+                        (joined, String::new())
+                    } else if let Some(parent) = joined.parent() {
+                        (
+                            parent.to_path_buf(),
+                            joined
+                                .file_name()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("")
+                                .to_string(),
+                        )
+                    } else {
+                        (base_root.clone(), input_path.to_string())
                     }
+                }
+            };
+
+            if let Ok(read_dir) = fs::read_dir(&dir) {
+                // Include parent directory entry when not at filesystem root
+                if let Some(parent) = dir.parent() {
+                    let mut text = String::new();
+                    if lower.starts_with("e ") {
+                        text.push_str("e ");
+                    } else if lower.starts_with("edit ") {
+                        text.push_str("edit ");
+                    } else if lower.starts_with("w ") {
+                        text.push_str("w ");
+                    } else {
+                        text.push_str("write ");
+                    }
+                    // Preserve user-typed prefix
+                    if !input_path.is_empty() {
+                        let suggested = if Path::new(input_path).is_absolute() {
+                            parent.join("..")
+                        } else {
+                            let abs = parent.join("..");
+                            abs.strip_prefix(&base_root).unwrap_or(&abs).to_path_buf()
+                        };
+                        text.push_str(&suggested.to_string_lossy());
+                    } else {
+                        let rel = parent
+                            .strip_prefix(&base_root)
+                            .unwrap_or(parent)
+                            .to_path_buf();
+                        let display = if rel.as_os_str().is_empty() {
+                            PathBuf::from("..")
+                        } else {
+                            rel.join("..")
+                        };
+                        text.push_str(&display.to_string_lossy());
+                    }
+                    // Ensure trailing separator for directories
+                    if !text.ends_with(std::path::MAIN_SEPARATOR) {
+                        text.push(std::path::MAIN_SEPARATOR);
+                    }
+                    out.push(CompletionItem {
+                        text,
+                        description: "Parent Directory".to_string(),
+                        category: "file".to_string(),
+                    });
+                }
+                for entry in read_dir.flatten() {
+                    let path = entry.path();
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !filter.is_empty()
+                        && !name.to_lowercase().starts_with(&filter.to_lowercase())
+                    {
+                        continue;
+                    }
+                    let mut text = String::new();
+                    // Preserve the command and prefix
+                    if lower.starts_with("e ") {
+                        text.push_str("e ");
+                    } else if lower.starts_with("edit ") {
+                        text.push_str("edit ");
+                    } else if lower.starts_with("w ") {
+                        text.push_str("w ");
+                    } else {
+                        text.push_str("write ");
+                    }
+                    // If the user typed a partial path, include it
+                    if !input_path.is_empty() {
+                        // Rebuild the suggestion keeping user-typed prefix up to dir
+                        let suggested = if Path::new(input_path).is_absolute() {
+                            dir.join(&name)
+                        } else {
+                            // Use a relative suggestion from cwd when possible
+                            let abs = dir.join(&name);
+                            abs.strip_prefix(&base_root).unwrap_or(&abs).to_path_buf()
+                        };
+                        text.push_str(&suggested.to_string_lossy());
+                    } else {
+                        // Base directory listing, relative to cwd when possible
+                        let rel = path.strip_prefix(&base_root).unwrap_or(&path).to_path_buf();
+                        text.push_str(&rel.to_string_lossy());
+                    }
+
+                    // Ensure trailing separator for directories
+                    if path.is_dir() && !text.ends_with(std::path::MAIN_SEPARATOR) {
+                        text.push(std::path::MAIN_SEPARATOR);
+                    }
+
+                    let desc = if path.is_dir() { "Directory" } else { "File" };
+                    out.push(CompletionItem {
+                        text,
+                        description: desc.to_string(),
+                        category: "file".to_string(),
+                    });
                 }
             }
         }
@@ -1078,6 +1130,8 @@ impl CommandCompletion {
 pub struct CompletionContext {
     pub cwd: PathBuf,
     pub buffers: Vec<BufferSummary>,
+    /// Optional current buffer directory for '%'-rooted path completion
+    pub current_buffer_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]

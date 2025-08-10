@@ -670,8 +670,18 @@ impl Editor {
                 modified: buf.modified,
             });
         }
+        let current_buffer_dir = self
+            .current_buffer()
+            .and_then(|b| b.file_path.as_ref())
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf());
+
         self.command_completion
-            .set_context(crate::features::completion::CompletionContext { cwd, buffers });
+            .set_context(crate::features::completion::CompletionContext {
+                cwd,
+                buffers,
+                current_buffer_dir,
+            });
         self.command_completion.start_completion(input);
     }
 
