@@ -26,6 +26,8 @@ pub struct KeyHandler {
     keymap_config: KeymapConfig,
     pub pending_sequence: String,
     pub last_key_time: Option<std::time::Instant>,
+    // Pending numeric count prefix (e.g., 10j, 3dd)
+    pub pending_count: Option<usize>,
     // Character navigation state
     pub last_char_search: Option<CharSearchState>,
     pub pending_char_command: Option<PendingCharCommand>,
@@ -75,6 +77,7 @@ impl KeyHandler {
             keymap_config: Self::load_default_keymaps(),
             pending_sequence: String::new(),
             last_key_time: None,
+            pending_count: None,
             last_char_search: None,
             pending_char_command: None,
             last_command: None,
@@ -279,8 +282,34 @@ impl KeyHandler {
                     self.pending_sequence
                 );
                 self.pending_sequence.clear();
+                // Also clear any pending count
+                if self.pending_count.is_some() {
+                    debug!("Pending count timed out, clearing");
+                }
+                self.pending_count = None;
             }
             self.last_key_time = Some(now);
+
+            // Numeric count handling: accumulate digits as count prefix in Normal/OP modes
+            if let KeyCode::Char(d) = key.code
+                && d.is_ascii_digit()
+            {
+                // '0' is special: if no count started and no sequence, treat as line_start
+                let is_zero_no_count =
+                    d == '0' && self.pending_count.is_none() && self.pending_sequence.is_empty();
+                if !is_zero_no_count {
+                    let digit = (d as u8 - b'0') as usize;
+                    let new_count = self
+                        .pending_count
+                        .unwrap_or(0)
+                        .saturating_mul(10)
+                        .saturating_add(digit);
+                    self.pending_count = Some(new_count);
+                    debug!("Accumulated count: {}", new_count);
+                    // Don't include digits in the key sequence; wait for next non-digit
+                    return Ok(());
+                }
+            }
 
             // Add current key to sequence
             if !self.pending_sequence.is_empty() {
@@ -431,6 +460,11 @@ impl KeyHandler {
                     self.pending_sequence
                 );
                 self.pending_sequence.clear();
+                // Clear pending count as well since the sequence is invalid
+                if self.pending_count.is_some() {
+                    debug!("Clearing pending count due to no match");
+                }
+                self.pending_count = None;
             }
 
             return Ok(());
@@ -579,6 +613,12 @@ impl KeyHandler {
         action: &str,
         key: KeyEvent,
     ) -> Result<()> {
+        // Peek and apply pending numeric count (default = 1); clear only when used
+        let count = self.pending_count.unwrap_or(1);
+        let mut used_count = false;
+        if count > 1 {
+            debug!("Applying count {} to '{}' when applicable", count, action);
+        }
         // Record key event if macro recording is active (but not if we're executing macro actions)
         if editor.is_macro_recording()
             && !matches!(action, "start_macro_recording" | "execute_macro")
@@ -588,15 +628,50 @@ impl KeyHandler {
 
         match action {
             // Movement actions
-            "cursor_left" => self.action_cursor_left(editor)?,
-            "cursor_right" => self.action_cursor_right(editor)?,
-            "cursor_up" => self.action_cursor_up(editor)?,
-            "cursor_down" => self.action_cursor_down(editor)?,
+            "cursor_left" => {
+                used_count = true;
+                for _ in 0..count {
+                    self.action_cursor_left(editor)?;
+                }
+            }
+            "cursor_right" => {
+                used_count = true;
+                for _ in 0..count {
+                    self.action_cursor_right(editor)?;
+                }
+            }
+            "cursor_up" => {
+                used_count = true;
+                for _ in 0..count {
+                    self.action_cursor_up(editor)?;
+                }
+            }
+            "cursor_down" => {
+                used_count = true;
+                for _ in 0..count {
+                    self.action_cursor_down(editor)?;
+                }
+            }
 
             // Word movement
-            "word_forward" => self.action_word_forward(editor)?,
-            "word_backward" => self.action_word_backward(editor)?,
-            "word_end" => self.action_word_end(editor)?,
+            "word_forward" => {
+                used_count = true;
+                for _ in 0..count {
+                    self.action_word_forward(editor)?;
+                }
+            }
+            "word_backward" => {
+                used_count = true;
+                for _ in 0..count {
+                    self.action_word_backward(editor)?;
+                }
+            }
+            "word_end" => {
+                used_count = true;
+                for _ in 0..count {
+                    self.action_word_end(editor)?;
+                }
+            }
 
             // Character navigation
             "start_find_char_forward" => self.action_start_find_char_forward(editor)?,
@@ -629,9 +704,24 @@ impl KeyHandler {
             "repeat_last_change" => self.action_repeat_last_change(editor)?,
 
             // Delete operations
-            "delete_char_at_cursor" => self.action_delete_char_at_cursor(editor)?,
-            "delete_char_before_cursor" => self.action_delete_char_before_cursor(editor)?,
-            "delete_line" => self.action_delete_line(editor)?,
+            "delete_char_at_cursor" => {
+                used_count = true;
+                for _ in 0..count {
+                    self.action_delete_char_at_cursor(editor)?;
+                }
+            }
+            "delete_char_before_cursor" => {
+                used_count = true;
+                for _ in 0..count {
+                    self.action_delete_char_before_cursor(editor)?;
+                }
+            }
+            "delete_line" => {
+                used_count = true;
+                for _ in 0..count {
+                    self.action_delete_line(editor)?;
+                }
+            }
             "delete_to_end_of_line" => self.action_delete_to_end_of_line(editor)?,
 
             // Line operations
@@ -641,7 +731,12 @@ impl KeyHandler {
             "substitute_char" => self.action_substitute_char(editor)?,
 
             // Yank (copy) operations
-            "yank_line" => self.action_yank_line(editor)?,
+            "yank_line" => {
+                used_count = true;
+                for _ in 0..count {
+                    self.action_yank_line(editor)?;
+                }
+            }
             "yank_word" => self.action_yank_word(editor)?,
             "yank_to_end_of_line" => self.action_yank_to_end_of_line(editor)?,
 
@@ -769,6 +864,9 @@ impl KeyHandler {
             "resize_window_shorter" => self.action_resize_window_shorter(editor)?,
 
             _ => return Ok(()), // Unknown action, ignore
+        }
+        if used_count {
+            self.pending_count = None;
         }
         Ok(())
     }
@@ -3158,7 +3256,8 @@ impl KeyHandler {
         self.last_command = Some(RepeatableCommand {
             action: action.to_string(),
             key,
-            count: None, // TODO: Add count support for commands like 3dd
+            // Capture the active count if any; execution already consumed it
+            count: self.pending_count,
         });
         debug!("Recorded command for repeat: {}", action);
     }

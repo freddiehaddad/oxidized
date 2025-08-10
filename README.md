@@ -131,6 +131,12 @@ cargo install --path .
 - `p/P` - Paste (after/before cursor)
 - `x` - Delete character
 
+**Counts (numeric prefixes):**
+
+- Use a number before a motion or action to repeat it.
+- Examples: `10j` moves down 10 lines, `3dd` deletes 3 lines, `5x` deletes 5 characters, `10w` jumps 10 words.
+- Numbers are accumulated until a non-digit key is pressed. `0` acts as a digit only after another digit; otherwise it maps to `0` (line start).
+
 **Search & Navigation:**
 
 - `/pattern` - Search forward
