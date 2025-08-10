@@ -1,42 +1,37 @@
-use oxidized::core::editor::{Editor, EditorRenderState};
+use oxidized::core::buffer::Buffer;
+use oxidized::core::editor::EditorRenderState;
+use oxidized::core::mode::Mode;
+use oxidized::core::window::WindowManager;
 use oxidized::ui::UI;
+use std::collections::HashMap;
 
 #[test]
 fn status_line_matches_terminal_width_on_resize() {
-    // Build a minimal editor to extract an EditorRenderState
-    let mut editor = Editor::new().expect("editor init");
+    // Build a minimal EditorRenderState without touching the real terminal
+    let config = oxidized::config::EditorConfig::load();
+    let window_manager = WindowManager::new(80, 24); // arbitrary terminal size
 
-    // Ensure a buffer exists so the status line has content
-    if editor.current_buffer().is_none() {
-        editor.create_buffer(None).expect("create buffer");
-    }
+    // Create a simple buffer so the status line has content
+    let mut buf = Buffer::new(1, config.editing.undo_levels);
+    buf.file_path = None; // unnamed buffer shows [No Name]
+    let current_buffer = Some(buf.clone());
 
-    // Render once to populate state and ensure paths are set up
-    editor.render().expect("initial render");
-
-    // Capture render state via a minimal clone through public API
-    // We call render again which assembles EditorRenderState internally; to
-    // construct one for testing, we replicate just enough fields.
-    // Get current buffer clone and IDs through public getters
-    let current_buffer = editor.current_buffer().cloned();
-    let mut displayed_buffers = std::collections::HashMap::new();
-    if let Some(buf) = current_buffer.clone() {
-        displayed_buffers.insert(buf.id, buf.clone());
-    }
+    let mut all_buffers = HashMap::new();
+    all_buffers.insert(buf.id, buf);
 
     let editor_state = EditorRenderState {
-        mode: editor.mode(),
+        mode: Mode::Normal,
         current_buffer,
-        all_buffers: displayed_buffers,
-        command_line: editor.command_line().to_string(),
-        status_message: editor.status_message().to_string(),
+        all_buffers,
+        command_line: String::new(),
+        status_message: String::new(),
         buffer_count: 1,
-        current_buffer_id: editor.current_buffer_id,
-        current_window_id: editor.window_manager.current_window_id(),
-        window_manager: editor.window_manager.clone(),
-        syntax_highlights: std::collections::HashMap::new(),
+        current_buffer_id: Some(1),
+        current_window_id: window_manager.current_window_id(),
+        window_manager: window_manager.clone(),
+        syntax_highlights: HashMap::new(),
         command_completion: Default::default(),
-        config: oxidized::config::EditorConfig::load(),
+        config,
     };
 
     let ui = UI::new();
