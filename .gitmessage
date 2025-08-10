@@ -1,0 +1,10 @@
+<type>(scope): short imperative subject under 50 chars
+
+Body wrapped at 72 characters. Explain what and why, not how. Reference
+issues and PRs when useful. Include context and user impact. Use blank
+lines between paragraphs.
+
+- Bullet points are fine; keep them wrapped to 72 characters
+- Reference: Fixes #123, Refs #456
+
+Co-authored-by: Name <email@example.com>
