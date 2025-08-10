@@ -13,6 +13,8 @@ pub struct EditorConfig {
     pub editing: EditingConfig,
     pub interface: InterfaceConfig,
     pub languages: LanguageConfig,
+    #[serde(default)]
+    pub statusline: StatusLineConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +61,46 @@ pub struct InterfaceConfig {
     /// Enable '%' prefix in file path completion to root at current buffer directory
     #[serde(default = "default_true")]
     pub percent_path_root: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusLineConfig {
+    #[serde(default = "default_true")]
+    pub show_indent: bool,
+    #[serde(default = "default_true")]
+    pub show_eol: bool,
+    #[serde(default = "default_true")]
+    pub show_encoding: bool,
+    #[serde(default = "default_true")]
+    pub show_type: bool,
+    #[serde(default = "default_true")]
+    pub show_macro: bool,
+    #[serde(default = "default_true")]
+    pub show_search: bool,
+    #[serde(default = "default_true")]
+    pub show_progress: bool,
+    /// Separator text used between right-side statusline segments
+    #[serde(default = "default_separator")]
+    pub separator: String,
+}
+
+impl Default for StatusLineConfig {
+    fn default() -> Self {
+        Self {
+            show_indent: true,
+            show_eol: true,
+            show_encoding: true,
+            show_type: true,
+            show_macro: true,
+            show_search: true,
+            show_progress: true,
+            separator: default_separator(),
+        }
+    }
+}
+
+fn default_separator() -> String {
+    "  ".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -159,6 +201,16 @@ impl Default for EditorConfig {
                 completion_menu_width: 30,
                 completion_menu_height: 8,
                 percent_path_root: true,
+            },
+            statusline: StatusLineConfig {
+                show_indent: true,
+                show_eol: true,
+                show_encoding: true,
+                show_type: true,
+                show_macro: true,
+                show_search: true,
+                show_progress: true,
+                separator: default_separator(),
             },
             languages: LanguageConfig::default(),
         }

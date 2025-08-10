@@ -69,6 +69,11 @@ pub struct EditorRenderState {
     pub syntax_highlights: HashMap<(usize, usize), Vec<HighlightRange>>, // (buffer_id, line_index) -> highlights
     pub command_completion: CommandCompletion,
     pub config: EditorConfig,
+    // --- Status line extras ---
+    pub filetype: Option<String>,
+    pub macro_recording: Option<char>,
+    pub search_total: usize,
+    pub search_index: Option<usize>,
 }
 
 pub struct Editor {
@@ -583,6 +588,23 @@ impl Editor {
             syntax_highlights,
             command_completion: self.command_completion.clone(),
             config: self.config.clone(),
+            filetype: self
+                .current_buffer()
+                .and_then(|b| b.file_path.as_ref())
+                .and_then(|p| p.extension())
+                .map(|e| e.to_string_lossy().to_string())
+                .or_else(|| {
+                    // fallback to language config if unnamed
+                    if let Some(buf) = self.current_buffer() {
+                        let content = buf.lines.join("\n");
+                        self.config.languages.detect_language_from_content(&content)
+                    } else {
+                        None
+                    }
+                }),
+            macro_recording: self.macro_recorder.recording_register(),
+            search_total: self.search_results.len(),
+            search_index: self.current_search_index,
         };
 
         // Use the existing UI render method but with optimized state

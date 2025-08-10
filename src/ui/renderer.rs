@@ -56,55 +56,171 @@ impl UI {
         }
     }
 
-    /// Compute the status line text for a given width. Public for testing.
+    /// Compute a three-part status line (left/middle/right) within given width.
     pub fn compute_status_line_text(
         &self,
         editor_state: &crate::core::editor::EditorRenderState,
         width: u16,
     ) -> String {
-        let mut status_text = String::new();
+        let total = width as usize;
 
-        // Mode indicator
-        status_text.push_str(&format!(" {} ", editor_state.mode));
-
-        // Buffer information
-        if editor_state.buffer_count > 1
-            && let Some(buffer_id) = editor_state.current_buffer_id
-        {
-            status_text.push_str(&format!(" [{}] ", buffer_id));
+        // Left: mode, filename, modified
+        let mut left = String::new();
+        left.push_str(&format!(" {} ", editor_state.mode));
+        if let Some(buffer) = &editor_state.current_buffer {
+            let name = buffer
+                .file_path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "[No Name]".to_string());
+            left.push_str(&format!(" {} ", name));
+            if buffer.modified {
+                left.push_str("[+] ");
+            }
+        } else {
+            left.push_str(" [No Name] ");
         }
 
-        // File and cursor info (only when a buffer exists)
+        // Middle: status message
+        let mut mid = String::new();
+        if !editor_state.status_message.is_empty() {
+            mid.push_str(&editor_state.status_message);
+        }
+
+        // Right: cursor, indent, encoding, type, macro, search, progress
+        let mut right = String::new();
+        let sep = editor_state.config.statusline.separator.as_str();
         if let Some(buffer) = &editor_state.current_buffer {
-            if let Some(path) = &buffer.file_path {
-                status_text.push_str(&format!(" {} ", path.display()));
-            } else {
-                status_text.push_str(" [No Name] ");
-            }
-
-            if buffer.modified {
-                status_text.push_str("[+] ");
-            }
-
-            status_text.push_str(&format!(
-                "{}:{} ",
+            right.push_str(&format!(
+                "Ln {}, Col {}",
                 buffer.cursor.row + 1,
                 buffer.cursor.col + 1
             ));
+
+            // Indentation (from behavior config)
+            if editor_state.config.statusline.show_indent {
+                let spaces = editor_state.config.behavior.expand_tabs;
+                let width = editor_state.config.behavior.tab_width;
+                right.push_str(&format!(
+                    "{}{}: {}",
+                    sep,
+                    if spaces { "Spaces" } else { "Tabs" },
+                    width
+                ));
+            }
+
+            // Encoding (ASCII vs UTF-8 heuristic)
+            if editor_state.config.statusline.show_encoding {
+                let is_ascii = buffer.lines.iter().all(|l| l.is_ascii());
+                right.push_str(&format!(
+                    "{}{}",
+                    sep,
+                    if is_ascii { "ASCII" } else { "UTF-8" }
+                ));
+            }
+
+            if editor_state.config.statusline.show_eol {
+                // TODO: track actual EOL per buffer; default to LF for now
+                right.push_str(sep);
+                right.push_str("LF");
+            }
+
+            // File type
+            if editor_state.config.statusline.show_type && editor_state.filetype.is_some() {
+                right.push_str(sep);
+                right.push_str(editor_state.filetype.as_deref().unwrap());
+            }
         }
 
-        // Status message
-        if !editor_state.status_message.is_empty() {
-            status_text.push_str(&format!(" | {}", editor_state.status_message));
+        // Macro recording
+        if editor_state.config.statusline.show_macro && editor_state.macro_recording.is_some() {
+            right.push_str(sep);
+            right.push_str(&format!("REC @{}", editor_state.macro_recording.unwrap()));
         }
 
-        // Pad to full width and truncate if necessary
-        let padding = width as usize - status_text.len().min(width as usize);
-        status_text.push_str(&" ".repeat(padding));
-        if status_text.len() > width as usize {
-            status_text.truncate(width as usize);
+        // Search status
+        if editor_state.config.statusline.show_search && editor_state.search_total > 0 {
+            right.push_str(sep);
+            match editor_state.search_index {
+                Some(i) => right.push_str(&format!("{}/{}", i + 1, editor_state.search_total)),
+                None => right.push_str(&format!("{} matches", editor_state.search_total)),
+            }
         }
-        status_text
+
+        // Progress
+        if editor_state.config.statusline.show_progress && editor_state.current_buffer.is_some() {
+            let buffer = editor_state.current_buffer.as_ref().unwrap();
+            let total_lines = buffer.lines.len().max(1);
+            let percent = ((buffer.cursor.row + 1) * 100) / total_lines;
+            right.push_str(sep);
+            right.push_str(&format!("{}%", percent));
+        }
+
+        // Measure and fit into total width with priorities and truncation
+        let left_w = unicode_width::UnicodeWidthStr::width(left.as_str());
+        let mid_w = unicode_width::UnicodeWidthStr::width(mid.as_str());
+        let right_w = unicode_width::UnicodeWidthStr::width(right.as_str());
+
+        // If everything fits, compose with centered mid and right-aligned right
+        let compose = |l: &str, m: &str, r: &str, total: usize| -> String {
+            let l_w = unicode_width::UnicodeWidthStr::width(l);
+            let m_w = unicode_width::UnicodeWidthStr::width(m);
+            let r_w = unicode_width::UnicodeWidthStr::width(r);
+            let rem = total.saturating_sub(l_w + r_w);
+            // Center middle within remaining space
+            let mid_space = rem;
+            let left_gap = mid_space.saturating_sub(m_w) / 2;
+            let right_gap = mid_space.saturating_sub(m_w) - left_gap;
+            let mut s = String::with_capacity(total);
+            s.push_str(l);
+            s.push_str(&" ".repeat(left_gap));
+            s.push_str(m);
+            s.push_str(&" ".repeat(right_gap));
+            s.push_str(r);
+            if s.len() < total {
+                s.push_str(&" ".repeat(total - s.len()));
+            }
+            if s.len() > total {
+                s.truncate(total);
+            }
+            s
+        };
+
+        // Helper to truncate end of a string by columns
+        let trunc_end = |s: &mut String, target_cols: usize| {
+            use unicode_segmentation::UnicodeSegmentation;
+            let mut cols = 0usize;
+            let mut out = String::new();
+            for g in s.graphemes(true) {
+                let w = unicode_width::UnicodeWidthStr::width(g);
+                if cols + w > target_cols {
+                    break;
+                }
+                out.push_str(g);
+                cols += w;
+            }
+            *s = out;
+        };
+
+        // Shrink until it fits: drop mid first, then truncate left filename, then right details
+        if left_w + mid_w + right_w > total {
+            // Drop middle first
+            mid.clear();
+            // middle cleared
+        }
+        if left_w + right_w > total {
+            // Truncate left to make room for right; keep mode and some filename
+            trunc_end(&mut left, total.saturating_sub(right_w));
+            // recompute if needed later
+        }
+        if left_w + right_w > total {
+            // Still too big: truncate right as last resort
+            trunc_end(&mut right, total.saturating_sub(left_w));
+            // recompute if needed later
+        }
+
+        compose(&left, &mid, &right, total)
     }
 
     // --- UTF-8 helpers ---
@@ -1207,52 +1323,7 @@ impl UI {
         terminal.queue_set_bg_color(status_color)?;
         terminal.queue_set_fg_color(self.theme.status_fg)?;
 
-        let mut status_text = String::new();
-
-        // Mode indicator
-        status_text.push_str(&format!(" {} ", editor_state.mode));
-
-        // Buffer information
-        if editor_state.buffer_count > 1
-            && let Some(buffer_id) = editor_state.current_buffer_id
-        {
-            status_text.push_str(&format!(" [{}] ", buffer_id));
-        }
-
-        // File information
-        if let Some(buffer) = &editor_state.current_buffer {
-            if let Some(path) = &buffer.file_path {
-                status_text.push_str(&format!(" {} ", path.display()));
-            } else {
-                status_text.push_str(" [No Name] ");
-            }
-
-            if buffer.modified {
-                status_text.push_str("[+] ");
-            }
-
-            // Cursor position
-            status_text.push_str(&format!(
-                "{}:{} ",
-                buffer.cursor.row + 1,
-                buffer.cursor.col + 1
-            ));
-        }
-
-        // Status message
-        if !editor_state.status_message.is_empty() {
-            status_text.push_str(&format!(" | {}", editor_state.status_message));
-        }
-
-        // Pad the status line to full width
-        let padding = width as usize - status_text.len().min(width as usize);
-        status_text.push_str(&" ".repeat(padding));
-
-        // Truncate if too long
-        if status_text.len() > width as usize {
-            status_text.truncate(width as usize);
-        }
-
+        let status_text = self.compute_status_line_text(editor_state, width);
         terminal.queue_print(&status_text)?;
         terminal.queue_reset_color()?;
 

@@ -36,6 +36,25 @@ completion_menu_height = 8
 # Toggle at runtime with :set ppr / :set noppr, query with :set ppr?
 percent_path_root = true
 
+[statusline]
+# Toggle individual status line segments (all default to true).
+# Indentation segment: shows Tabs/Spaces and width
+show_indent = true
+# End-of-line marker (placeholder until per-buffer EOL is tracked)
+show_eol = true
+# Encoding detection (ASCII vs UTF-8 heuristic)
+show_encoding = true
+# File type/language name
+show_type = true
+# Macro recording indicator (REC @x)
+show_macro = true
+# Search progress (i/N or N matches)
+show_search = true
+# File progress percentage
+show_progress = true
+# Separator between segments (default two spaces)
+separator = "  "
+
 [languages]
 # Default language to use when no specific language can be detected
 default_language = "text"

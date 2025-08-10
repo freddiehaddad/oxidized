@@ -32,6 +32,10 @@ fn status_line_matches_terminal_width_on_resize() {
         syntax_highlights: HashMap::new(),
         command_completion: Default::default(),
         config,
+        filetype: Some("Plain".to_string()),
+        macro_recording: None,
+        search_total: 0,
+        search_index: None,
     };
 
     let ui = UI::new();
@@ -46,6 +50,5 @@ fn status_line_matches_terminal_width_on_resize() {
     let status_large = ui.compute_status_line_text(&editor_state, large_width);
     assert_eq!(status_large.len(), large_width as usize);
 
-    // Ensure the small version is a prefix of the large (when content allows)
-    assert!(status_large.starts_with(&status_small[..small_width as usize].to_string()));
+    // Layout differs with centering/right-align; only assert correct widths.
 }
