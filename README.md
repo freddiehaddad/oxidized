@@ -234,8 +234,14 @@ default_language = "text"
 
 #### Wrapping & Scrolling
 
-- wrap_lines: When true, long lines are soft-wrapped visually into multiple
-   rows. Line numbers appear on the first visual row of a logical line.
+- wrap_lines: When true, long lines are soft-wrapped visually into multiple rows. Line numbers appear on the first visual row of a logical line.
+
+#### Path completion
+
+- percent_path_root (alias: ppr): When enabled (default), file path completion for :e/:w treats a leading '%' as the current buffer's directory. Examples:
+  - :e %/src completes files under the current buffer's folder
+  - Toggle with :set ppr / :set noppr, query with :set ppr?
+
 - line_break: When wrapping, prefer breaking at whitespace boundaries (word
    wrapping). When false, wrap strictly by display columns.
 - side_scroll_off: In no-wrap mode, horizontally scroll the view to keep the

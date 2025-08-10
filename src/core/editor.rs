@@ -1262,7 +1262,7 @@ impl Editor {
             "scrolloff" | "so" => Some(self.config.interface.scroll_off.to_string()),
             "sidescrolloff" | "siso" => Some(self.config.interface.side_scroll_off.to_string()),
             "timeoutlen" | "tm" => Some(self.config.interface.command_timeout.to_string()),
-            "percentpathroot" => Some(self.config.interface.percent_path_root.to_string()),
+            "percentpathroot" | "ppr" => Some(self.config.interface.percent_path_root.to_string()),
             "colorscheme" | "colo" => Some(self.config.display.color_scheme.clone()),
             "syntax" | "syn" => Some(self.config.display.syntax_highlighting.to_string()),
             _ => None,

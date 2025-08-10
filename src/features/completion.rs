@@ -587,6 +587,22 @@ impl CommandCompletion {
                 description: "Set '%' root behavior (true/false)".to_string(),
                 category: "set".to_string(),
             },
+            // Short alias
+            CompletionItem {
+                text: "set ppr".to_string(),
+                description: "Enable '%' root in path completion (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set noppr".to_string(),
+                description: "Disable '%' root in path completion (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set ppr=".to_string(),
+                description: "Set '%' root behavior (short)".to_string(),
+                category: "set".to_string(),
+            },
         ]);
 
         // Set commands with values
@@ -678,6 +694,7 @@ impl CommandCompletion {
             "sidescrolloff",
             "timeoutlen",
             "percentpathroot",
+            "ppr",
             "colorscheme",
             "syntax",
         ];

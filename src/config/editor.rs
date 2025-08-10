@@ -438,7 +438,7 @@ impl EditorConfig {
                     Err("Invalid timeout value".to_string())
                 }
             }
-            "percentpathroot" => {
+            "percentpathroot" | "ppr" => {
                 self.interface.percent_path_root = value.parse().unwrap_or(true);
                 Ok(format!(
                     "Percent path root: {}",

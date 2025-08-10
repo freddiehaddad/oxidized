@@ -2105,6 +2105,7 @@ impl KeyHandler {
                 "sidescrolloff",
                 "timeoutlen",
                 "percentpathroot",
+                "ppr",
                 "colorscheme",
                 "syntax",
             ];
@@ -2192,7 +2193,7 @@ impl KeyHandler {
                 "syntax" | "syn" => {
                     editor.set_config_setting("syntax", "false");
                 }
-                "percentpathroot" => {
+                "percentpathroot" | "ppr" => {
                     editor.set_config_setting("percentpathroot", "false");
                 }
                 _ => editor.set_status_message(format!("Unknown option: no{}", setting)),
@@ -2247,7 +2248,7 @@ impl KeyHandler {
                     editor.set_config_setting("colorscheme", value);
                     editor.set_status_message(format!("Color scheme set to {}", value));
                 }
-                "percentpathroot" => {
+                "percentpathroot" | "ppr" => {
                     if let Ok(_b) = value.parse::<bool>() {
                         editor.set_config_setting("percentpathroot", value);
                         editor.set_status_message(format!("Percent path root set to {}", value));
@@ -2336,7 +2337,7 @@ impl KeyHandler {
                 editor.set_config_setting("syntax", "true");
                 editor.set_status_message("Syntax highlighting enabled".to_string());
             }
-            "percentpathroot" => {
+            "percentpathroot" | "ppr" => {
                 editor.set_config_setting("percentpathroot", "true");
                 editor.set_status_message("Percent path root enabled".to_string());
             }
