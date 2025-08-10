@@ -13,6 +13,8 @@ struct LineRenderContext {
     max_width: usize,
     selection: Option<crate::core::mode::Selection>,
     editor_mode: crate::core::mode::Mode,
+    /// Horizontal base offset into the logical line for rendering
+    base_offset: usize,
 }
 
 pub struct UI {
@@ -102,8 +104,16 @@ impl UI {
         line: &str,
         line_number: usize,
         selection: Option<crate::core::mode::Selection>,
+        base_offset: usize,
     ) -> Option<(usize, usize)> {
-        selection.and_then(|sel| sel.highlight_span_for_line(line_number, line.chars().count()))
+        selection
+            .and_then(|sel| sel.highlight_span_for_line(line_number, line.chars().count()))
+            .map(|(start, end)| {
+                (
+                    start.saturating_sub(base_offset),
+                    end.saturating_sub(base_offset),
+                )
+            })
     }
 
     pub fn render(
@@ -284,14 +294,39 @@ impl UI {
                             );
                         }
                     }
+                    // Compute base offset in character columns for selection math
+                    let base_offset_chars = if window.horiz_offset == 0 {
+                        0
+                    } else {
+                        line[..std::cmp::min(window.horiz_offset, line.len())]
+                            .chars()
+                            .count()
+                    };
+
                     let context = LineRenderContext {
                         line_number: buffer_row,
                         is_cursor_line,
                         max_width: text_width,
                         selection: buffer.get_selection(),
                         editor_mode: editor_state.mode,
+                        base_offset: base_offset_chars,
                     };
-                    self.render_highlighted_line(terminal, line, highlights, &context)?
+                    // Apply horizontal offset by slicing the line for display
+                    let display_slice = if window.horiz_offset < line.len() {
+                        &line[window.horiz_offset..]
+                    } else {
+                        ""
+                    };
+                    // Shift highlight ranges to match the sliced view
+                    let shifted: Vec<HighlightRange> = highlights
+                        .iter()
+                        .map(|h| HighlightRange {
+                            start: h.start.saturating_sub(window.horiz_offset),
+                            end: h.end.saturating_sub(window.horiz_offset),
+                            style: h.style.clone(),
+                        })
+                        .collect();
+                    self.render_highlighted_line(terminal, display_slice, &shifted, &context)?
                 } else {
                     // Debug: Show we're missing highlights
                     if log::log_enabled!(log::Level::Debug) {
@@ -303,10 +338,19 @@ impl UI {
                         );
                     }
                     // Render line without syntax highlighting but with visual selection support
-                    let display_line = if line.len() > text_width {
-                        &line[..text_width]
+                    // Apply horizontal offset and clamp to available width
+                    let start = std::cmp::min(window.horiz_offset, line.len());
+                    let remaining = &line[start..];
+                    let display_line = if remaining.len() > text_width {
+                        &remaining[..text_width]
                     } else {
-                        line
+                        remaining
+                    };
+                    // Compute base offset in character columns for selection math
+                    let base_offset_chars = if start == 0 {
+                        0
+                    } else {
+                        line[..start].chars().count()
                     };
                     self.render_plain_text_line(
                         terminal,
@@ -315,6 +359,7 @@ impl UI {
                         is_cursor_line,
                         buffer.get_selection(),
                         editor_state.mode,
+                        base_offset_chars,
                     )?;
                     display_line.len()
                 };
@@ -443,7 +488,12 @@ impl UI {
                     .cursor
                     .row
                     .saturating_sub(current_window.viewport_top);
-                let screen_col = buffer.cursor.col + line_number_width;
+                // Account for horizontal offset when positioning the cursor
+                let rel_col = buffer
+                    .cursor
+                    .col
+                    .saturating_sub(current_window.horiz_offset);
+                let screen_col = rel_col + line_number_width;
 
                 // Ensure cursor is within window bounds
                 if screen_row < content_height {
@@ -470,8 +520,12 @@ impl UI {
         let display_len = std::cmp::min(line.len(), context.max_width);
 
         // Determine if this line has visual selection and what range
-        let line_selection_range =
-            self.calculate_line_selection_range(line, context.line_number, context.selection);
+        let line_selection_range = self.calculate_line_selection_range(
+            line,
+            context.line_number,
+            context.selection,
+            context.base_offset,
+        );
 
         for highlight in highlights {
             let start = std::cmp::min(highlight.start, display_len);
@@ -643,6 +697,7 @@ impl UI {
     }
 
     /// Render a plain text line with visual selection support
+    #[allow(clippy::too_many_arguments)]
     fn render_plain_text_line(
         &self,
         terminal: &mut Terminal,
@@ -651,10 +706,11 @@ impl UI {
         is_cursor_line: bool,
         selection: Option<crate::core::mode::Selection>,
         editor_mode: crate::core::mode::Mode,
+        base_offset: usize,
     ) -> io::Result<()> {
         // Determine if this line has visual selection and what range
         let line_selection_range =
-            self.calculate_line_selection_range(line, line_number, selection);
+            self.calculate_line_selection_range(line, line_number, selection, base_offset);
 
         // Render the entire line with selection highlighting
         self.render_text_segment(

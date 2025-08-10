@@ -23,6 +23,8 @@ pub struct Window {
     /// Cursor position within this window's buffer
     pub cursor_row: usize,
     pub cursor_col: usize,
+    /// Horizontal scroll offset (in columns) for long lines when wrap is disabled
+    pub horiz_offset: usize,
 }
 
 impl Window {
@@ -41,6 +43,7 @@ impl Window {
             viewport_top: 0,
             cursor_row: 0,
             cursor_col: 0,
+            horiz_offset: 0,
         }
     }
 

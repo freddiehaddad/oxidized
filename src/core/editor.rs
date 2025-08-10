@@ -482,6 +482,32 @@ impl Editor {
             // Ensure viewport doesn't go below zero or beyond buffer end
             let max_viewport_top = buffer.lines.len().saturating_sub(content_height);
             current_window.viewport_top = current_window.viewport_top.min(max_viewport_top);
+
+            // Maintain horizontal offset when wrapping is disabled
+            if !self.config.behavior.wrap_lines {
+                // Visible text columns within window (excluding line number column in UI)
+                // We can't access UI's line number width here; use full window width as an approximation
+                let text_width = current_window.width as usize;
+                let col = buffer.cursor.col;
+                let siso = self.config.interface.side_scroll_off;
+
+                // Adjust horiz_offset to keep cursor within [offset+siso, offset+text_width-siso-1]
+                if col < current_window.horiz_offset.saturating_add(siso) {
+                    current_window.horiz_offset = col.saturating_sub(siso);
+                } else if col
+                    >= current_window
+                        .horiz_offset
+                        .saturating_add(text_width.saturating_sub(siso.max(1)))
+                {
+                    let target = col
+                        .saturating_sub(text_width.saturating_sub(siso.max(1)))
+                        .saturating_add(1);
+                    current_window.horiz_offset = target;
+                }
+            } else {
+                // Reset horizontal offset when wrap is enabled
+                current_window.horiz_offset = 0;
+            }
         }
 
         // Generate syntax highlights for all visible windows
