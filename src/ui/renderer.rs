@@ -123,16 +123,23 @@ impl UI {
         // Render all windows
         self.render_windows(terminal, editor_state)?;
 
-        // Render status line
-        self.render_status_line(terminal, editor_state, width, height)?;
+        // Render status line if enabled in config
+        if editor_state.config.interface.show_status_line {
+            self.render_status_line(terminal, editor_state, width, height)?;
+        }
 
-        // Render command line if in command or search mode
-        if editor_state.mode == Mode::Command || editor_state.mode == Mode::Search {
+        // Render command line if enabled and in command or search mode
+        if editor_state.config.interface.show_command
+            && (editor_state.mode == Mode::Command || editor_state.mode == Mode::Search)
+        {
             self.render_command_line(terminal, editor_state, width, height)?;
         }
 
-        // Render command completion popup if active
-        if editor_state.mode == Mode::Command && editor_state.command_completion.should_show() {
+        // Render command completion popup if enabled and active
+        if editor_state.config.interface.show_command
+            && editor_state.mode == Mode::Command
+            && editor_state.command_completion.should_show()
+        {
             self.render_completion_popup(terminal, editor_state, width, height)?;
         }
 

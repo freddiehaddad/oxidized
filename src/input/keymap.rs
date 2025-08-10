@@ -168,7 +168,7 @@ impl KeyHandler {
             let now = Instant::now();
             if !self.pending_sequence.is_empty()
                 && let Some(last_time) = self.last_key_time
-                && now.duration_since(last_time).as_millis() > 1000
+                && now.duration_since(last_time).as_millis() > editor.command_timeout_ms() as u128
             {
                 debug!(
                     "Key sequence '{}' timed out, clearing",

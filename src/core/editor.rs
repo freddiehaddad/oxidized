@@ -211,6 +211,11 @@ impl Editor {
         Ok(editor)
     }
 
+    /// Get command timeout in milliseconds from configuration
+    pub fn command_timeout_ms(&self) -> u64 {
+        self.config.interface.command_timeout
+    }
+
     pub fn create_buffer(&mut self, file_path: Option<PathBuf>) -> Result<usize> {
         let id = self.next_buffer_id;
         self.next_buffer_id += 1;

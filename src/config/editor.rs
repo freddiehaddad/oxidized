@@ -44,14 +44,11 @@ pub struct EditingConfig {
     pub backup: bool,
     pub swap_file: bool,
     pub auto_save: bool,
-    pub text_object_timeout: u64,
-    pub operator_pending_timeout: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InterfaceConfig {
     pub show_status_line: bool,
-    pub status_line_format: String,
     pub command_timeout: u64,
     pub show_command: bool,
     pub scroll_off: usize,
@@ -148,12 +145,9 @@ impl Default for EditorConfig {
                 backup: false,
                 swap_file: false,
                 auto_save: false,
-                text_object_timeout: 1000,
-                operator_pending_timeout: 1000,
             },
             interface: InterfaceConfig {
                 show_status_line: true,
-                status_line_format: "default".to_string(),
                 command_timeout: 1000,
                 show_command: true,
                 scroll_off: 0,
