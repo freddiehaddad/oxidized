@@ -37,6 +37,12 @@ pub struct KeyHandler {
     pub pending_macro_register: bool,
     // Macro execution register selection state (after pressing '@')
     pub pending_macro_execute: bool,
+    // Mark: pending register after 'm'
+    pub pending_mark_set: bool,
+    // Mark: pending register after '\'' (line jump)
+    pub pending_mark_jump_line: bool,
+    // Mark: pending register after '`' (exact jump)
+    pub pending_mark_jump_exact: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -83,6 +89,9 @@ impl KeyHandler {
             last_command: None,
             pending_macro_register: false,
             pending_macro_execute: false,
+            pending_mark_set: false,
+            pending_mark_jump_line: false,
+            pending_mark_jump_exact: false,
         }
     }
 
@@ -154,6 +163,68 @@ impl KeyHandler {
                 _ => {
                     // Any non-char cancels the pending state without starting
                     self.pending_macro_register = false;
+                    self.pending_sequence.clear();
+                    return Ok(());
+                }
+            }
+        }
+
+        // If we're waiting for a mark register after 'm'
+        if self.pending_mark_set {
+            match key.code {
+                KeyCode::Char(register) => {
+                    self.pending_mark_set = false;
+                    editor.set_mark(register);
+                    info!("Set mark '{}'", register);
+                    // Record the register key into macro if recording
+                    if editor.is_macro_recording() {
+                        editor.record_macro_event(key);
+                    }
+                    self.pending_sequence.clear();
+                    return Ok(());
+                }
+                KeyCode::Esc => {
+                    self.pending_mark_set = false;
+                    self.pending_sequence.clear();
+                    return Ok(());
+                }
+                _ => {
+                    self.pending_mark_set = false;
+                    self.pending_sequence.clear();
+                    return Ok(());
+                }
+            }
+        }
+
+        // If we're waiting for a mark jump register after '\'' (line) or '`' (exact)
+        if self.pending_mark_jump_line || self.pending_mark_jump_exact {
+            match key.code {
+                KeyCode::Char(register) => {
+                    if self.pending_mark_jump_line {
+                        self.pending_mark_jump_line = false;
+                        editor.jump_to_mark_line(register);
+                        info!("Jumped to mark '{}' (line)", register);
+                    } else {
+                        self.pending_mark_jump_exact = false;
+                        editor.jump_to_mark_exact(register);
+                        info!("Jumped to mark '{}' (exact)", register);
+                    }
+                    // Record the register key into macro if recording
+                    if editor.is_macro_recording() {
+                        editor.record_macro_event(key);
+                    }
+                    self.pending_sequence.clear();
+                    return Ok(());
+                }
+                KeyCode::Esc => {
+                    self.pending_mark_jump_line = false;
+                    self.pending_mark_jump_exact = false;
+                    self.pending_sequence.clear();
+                    return Ok(());
+                }
+                _ => {
+                    self.pending_mark_jump_line = false;
+                    self.pending_mark_jump_exact = false;
                     self.pending_sequence.clear();
                     return Ok(());
                 }
@@ -776,6 +847,11 @@ impl KeyHandler {
             // Macro operations
             "start_macro_recording" => self.action_start_macro_recording(editor, key)?,
             "execute_macro" => self.action_execute_macro(editor, key)?,
+
+            // Mark operations
+            "mark_set_start" => self.action_mark_set_start(editor, key)?,
+            "mark_jump_line" => self.action_mark_jump_line(editor, key)?,
+            "mark_jump_exact" => self.action_mark_jump_exact(editor, key)?,
 
             // Undo/Redo
             "undo" => self.action_undo(editor)?,
@@ -3180,6 +3256,43 @@ impl KeyHandler {
         } else {
             // If mapping is triggered with other key (unlikely), fall back to arming as well
             self.pending_macro_execute = true;
+            self.pending_sequence.clear();
+        }
+        Ok(())
+    }
+
+    // Mark action methods
+    fn action_mark_set_start(&mut self, _editor: &mut Editor, key: KeyEvent) -> Result<()> {
+        if let KeyCode::Char('m') = key.code {
+            self.pending_mark_set = true;
+            self.pending_sequence.clear();
+            debug!("Armed mark set; awaiting register");
+        } else {
+            self.pending_mark_set = true;
+            self.pending_sequence.clear();
+        }
+        Ok(())
+    }
+
+    fn action_mark_jump_line(&mut self, _editor: &mut Editor, key: KeyEvent) -> Result<()> {
+        if let KeyCode::Char('\'') = key.code {
+            self.pending_mark_jump_line = true;
+            self.pending_sequence.clear();
+            debug!("Armed mark line jump; awaiting register");
+        } else {
+            self.pending_mark_jump_line = true;
+            self.pending_sequence.clear();
+        }
+        Ok(())
+    }
+
+    fn action_mark_jump_exact(&mut self, _editor: &mut Editor, key: KeyEvent) -> Result<()> {
+        if let KeyCode::Char('`') = key.code {
+            self.pending_mark_jump_exact = true;
+            self.pending_sequence.clear();
+            debug!("Armed mark exact jump; awaiting register");
+        } else {
+            self.pending_mark_jump_exact = true;
             self.pending_sequence.clear();
         }
         Ok(())

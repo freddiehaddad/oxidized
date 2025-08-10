@@ -2135,4 +2135,55 @@ impl Editor {
     pub fn finish_macro_playback(&mut self) {
         self.macro_recorder.finish_playback();
     }
+
+    // --- Marks ---
+    /// Set a mark in the current buffer at the cursor
+    pub fn set_mark(&mut self, register: char) {
+        let pos = {
+            if let Some(buffer) = self.current_buffer_mut() {
+                buffer.set_mark(register);
+                Some(buffer.cursor)
+            } else {
+                None
+            }
+        };
+        if let Some(pos) = pos {
+            self.set_status_message(format!(
+                "Set mark '{}' at {}:{}",
+                register, pos.row, pos.col
+            ));
+        }
+    }
+
+    /// Jump to start of line of the mark
+    pub fn jump_to_mark_line(&mut self, register: char) {
+        let ok = {
+            if let Some(buffer) = self.current_buffer_mut() {
+                buffer.jump_to_mark_line(register)
+            } else {
+                false
+            }
+        };
+        if ok {
+            self.set_status_message(format!("Jumped to mark '{}' (line)", register));
+        } else {
+            self.set_status_message(format!("Mark '{}' not set", register));
+        }
+    }
+
+    /// Jump to exact position of the mark
+    pub fn jump_to_mark_exact(&mut self, register: char) {
+        let ok = {
+            if let Some(buffer) = self.current_buffer_mut() {
+                buffer.jump_to_mark_exact(register)
+            } else {
+                false
+            }
+        };
+        if ok {
+            self.set_status_message(format!("Jumped to mark '{}' (exact)", register));
+        } else {
+            self.set_status_message(format!("Mark '{}' not set", register));
+        }
+    }
 }

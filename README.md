@@ -164,6 +164,17 @@ Notes:
 - Press `q` again to stop recording. While recording, the statusline shows `REC @<register>`.
 - If you pressed `q` by mistake, press `Esc` to cancel the pending register selection without starting a recording.
 
+**Marks (bookmarks):**
+
+- `ma` sets mark `a` at the current cursor position (use any a–z, A–Z, 0–9)
+- `'a` jumps to the start of the line of mark `a`
+- `` `a `` jumps to the exact cursor position of mark `a`
+
+Notes:
+
+- Marks are currently buffer-local. If a mark is not set, a status message
+   will indicate it.
+
 ### Advanced Window Management
 
 **Window Creation:**
@@ -372,6 +383,11 @@ default_language = "text"
 # Macro operations
 "q" = "start_macro_recording"  # q{register} - start/stop recording
 "@" = "execute_macro"          # @{register} - execute macro
+
+# Marks
+"m" = "mark_set_start"         # m{register} - set mark
+"'" = "mark_jump_line"         # '{register} - jump to line of mark
+"`" = "mark_jump_exact"        # `{register} - jump to exact position of mark
 
 # Undo/Redo
 "u" = "undo"

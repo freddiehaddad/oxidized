@@ -1,7 +1,7 @@
 use crate::core::mode::{Position, Selection, SelectionType};
 use anyhow::Result;
 use log::{debug, info, trace, warn};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 
 /// Types of content that can be yanked
@@ -53,6 +53,8 @@ pub struct Buffer {
     pub clipboard: ClipboardContent,
     /// Maximum number of undo levels to keep
     pub undo_levels: usize,
+    /// Named marks within this buffer (e.g., 'ma, 'mb)
+    pub marks: HashMap<char, Position>,
 }
 
 /// Represents a single edit operation for delta-based undo system
@@ -108,6 +110,7 @@ impl Buffer {
             buffer_type: BufferType::Normal,
             clipboard: ClipboardContent::default(),
             undo_levels,
+            marks: HashMap::new(),
         }
     }
 
@@ -138,7 +141,49 @@ impl Buffer {
             buffer_type: BufferType::Normal,
             clipboard: ClipboardContent::default(),
             undo_levels,
+            marks: HashMap::new(),
         })
+    }
+
+    /// Set a mark at the current cursor position
+    pub fn set_mark(&mut self, ch: char) {
+        self.marks.insert(ch, self.cursor);
+        debug!(
+            "Set mark '{}' at {}:{}",
+            ch, self.cursor.row, self.cursor.col
+        );
+    }
+
+    /// Get a mark position by name
+    pub fn get_mark(&self, ch: char) -> Option<Position> {
+        self.marks.get(&ch).cloned()
+    }
+
+    /// Jump to the exact position of a mark (like ` in Vim)
+    pub fn jump_to_mark_exact(&mut self, ch: char) -> bool {
+        if let Some(pos) = self.get_mark(ch) {
+            self.move_cursor(pos);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Jump to the start of the line of a mark (like ' in Vim)
+    pub fn jump_to_mark_line(&mut self, ch: char) -> bool {
+        if let Some(pos) = self.get_mark(ch) {
+            let row = pos.row.min(self.lines.len().saturating_sub(1));
+            self.cursor.row = row;
+            // Move to first non-blank on the line for convenience
+            self.cursor.col = self
+                .lines
+                .get(row)
+                .map(|line| line.chars().position(|c| !c.is_whitespace()).unwrap_or(0))
+                .unwrap_or(0);
+            true
+        } else {
+            false
+        }
     }
 
     pub fn insert_char(&mut self, ch: char) {
