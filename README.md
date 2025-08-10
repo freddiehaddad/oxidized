@@ -42,11 +42,14 @@
 - **Multi-Buffer Management**: Efficient buffer handling with instant switching
 - **Advanced Window System**: Complete window splitting, navigation, and resizing
 - **Optimized Rendering**: Smart viewport management and efficient screen updates
+- **Soft Line Wrapping**: Optional word-aware wrapping for long lines
+- **Horizontal Scrolling**: No-wrap mode with smart side scroll offsets
 
 ### Cross-Platform Terminal Integration
 
 - **Alternate Screen Mode**: Clean terminal entry/exit without disrupting scrollback
-- **Unicode Support**: Full Unicode text handling with proper width calculation
+- **Unicode Support**: UTF-8 safe, grapheme/width-aware rendering (emoji, ZWJ,
+combining marks) with proper display width calculation
 - **Configurable Timeouts**: Customizable key sequence and mode transition timings
 
 ## 🔧 Installation & Setup
@@ -229,6 +232,15 @@ default_language = "text"
 - ignore_case (ic): When true, searches are case-insensitive by default.
 - smart_case (scs): When true and the search pattern contains any uppercase letter, the search becomes case-sensitive for that query only; otherwise it follows ignore_case.
 
+#### Wrapping & Scrolling
+
+- wrap_lines: When true, long lines are soft-wrapped visually into multiple
+   rows. Line numbers appear on the first visual row of a logical line.
+- line_break: When wrapping, prefer breaking at whitespace boundaries (word
+   wrapping). When false, wrap strictly by display columns.
+- side_scroll_off: In no-wrap mode, horizontally scroll the view to keep the
+   cursor away from the left/right edges by this many columns when possible.
+
 ### Keymap Customization (`keymaps.toml`)
 
 ```toml
@@ -344,7 +356,7 @@ punctuation = "#839496"  # Gray for punctuation
 - **Async Syntax Highlighter**: Background Tree-sitter processing with priority queues
 - **Viewport Manager**: Efficient screen updates with scroll optimization
 - **Terminal Interface**: Cross-platform terminal handling with alternate screen support
-- **Unicode Engine**: Proper Unicode text handling with width calculation
+- **Unicode Engine**: UTF-8 safe, grapheme-cluster aware width calculation
 
 **Configuration Framework:**
 
@@ -355,10 +367,10 @@ punctuation = "#839496"  # Gray for punctuation
 
 ### Performance Features
 
-- **Zero-Copy Rendering**: Efficient screen updates without unnecessary allocations
+- **Efficient Rendering**: Minimized redraws and buffered terminal updates
 - **Background Processing**: Syntax highlighting and file operations run asynchronously
 - **Memory Management**: Rust's ownership system ensures memory safety without garbage collection
-- **Optimized Data Structures**: Efficient text manipulation with gap buffers and rope structures
+- **Pragmatic Data Structures**: Efficient line-based model today; advanced gap/rope structures are planned
 - **Fast Search Path (ASCII)**: Case-insensitive search uses an ASCII fast path to avoid per-line lowercase allocations when possible; Unicode-insensitive search preserves exact matching semantics
 
 ## 📋 Feature Status
@@ -425,7 +437,7 @@ punctuation = "#839496"  # Gray for punctuation
 
 - Alternate screen mode for clean entry/exit
 - Cross-platform terminal handling (Windows, Linux, macOS)
-- Unicode support with proper width calculation
+- Unicode support with grapheme/emoji-aware width calculation
 - Professional status line with mode indication
 
 ### 🚧 In Progress
@@ -434,13 +446,6 @@ punctuation = "#839496"  # Gray for punctuation
 
 - Advanced search and replace with regex substitution
 - Code folding and automatic indentation
-- **Macro recording and playback** ✅ **IMPLEMENTED**
-  - `q{register}` - Start/stop macro recording to registers a-z, A-Z, 0-9
-  - `@{register}` - Playback recorded macro from any register
-  - `@@` - Repeat last executed macro
-  - `{count}@{register}` - Execute macro multiple times
-  - Automatic loop prevention and error handling
-  - Full Vim-compatible behavior with all standard registers
 
 **File Management:**
 
@@ -677,13 +682,13 @@ RUST_LOG="oxidized::features::macros=trace" cargo run
 **Run Test Suite:**
 
 ```powershell
-# Windows - Run all tests (108+ comprehensive tests)
+# Windows - Run all tests (200+ comprehensive tests)
 cargo test
 
-# Run specific test modules
-cargo test buffer_tests
-cargo test search_tests  
-cargo test syntax_tests
+# Run specific test modules (substring match)
+cargo test ui_wrap_tests
+cargo test visual_block_mode_tests
+cargo test search_integration
 cargo test macro_tests
 
 # Run with detailed output
@@ -711,13 +716,13 @@ Benchmark reports are generated under `target/criterion/` (open the `report/inde
 CI also runs quick benches on push and weekly (Mon 06:00 UTC) across Ubuntu, macOS, and Windows. HTML reports are uploaded as artifacts named `criterion-<os>` on each run.
 
 ```bash
-# Linux/macOS - Run all tests (108+ comprehensive tests)
+# Linux/macOS - Run all tests (200+ comprehensive tests)
 cargo test
 
-# Run specific test modules
-cargo test buffer_tests
-cargo test search_tests
-cargo test syntax_tests  
+# Run specific test modules (substring match)
+cargo test ui_wrap_tests
+cargo test visual_block_mode_tests
+cargo test search_integration
 cargo test macro_tests
 
 # Run with detailed output
