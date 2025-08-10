@@ -165,7 +165,9 @@ impl Default for EditorConfig {
     }
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 impl EditorConfig {
     pub fn load() -> Self {
@@ -442,7 +444,11 @@ impl EditorConfig {
                 self.interface.percent_path_root = value.parse().unwrap_or(true);
                 Ok(format!(
                     "Percent path root: {}",
-                    if self.interface.percent_path_root { "enabled" } else { "disabled" }
+                    if self.interface.percent_path_root {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
                 ))
             }
 
