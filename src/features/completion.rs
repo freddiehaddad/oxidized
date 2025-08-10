@@ -813,6 +813,10 @@ impl CommandCompletion {
             let use_buf_root = input_path.starts_with('%');
             if use_buf_root {
                 input_path = &input_path[1..];
+                // Treat a leading path separator as relative to the buffer root
+                while input_path.starts_with('/') || input_path.starts_with('\\') {
+                    input_path = &input_path[1..];
+                }
             }
 
             use std::fs;
