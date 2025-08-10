@@ -21,6 +21,7 @@ fn test_parse_color() {
 #[test]
 fn test_emergency_theme_config() {
     let config = ThemeConfig::create_emergency_config();
-    assert_eq!(config.theme.current, "emergency");
-    assert!(config.themes.contains_key("emergency"));
+    // Emergency config now mirrors the repository's default theme exactly
+    assert_eq!(config.theme.current, "default");
+    assert!(config.themes.contains_key("default"));
 }

@@ -31,6 +31,8 @@ pub struct KeyHandler {
     pub pending_char_command: Option<PendingCharCommand>,
     // Repeat command state
     pub last_command: Option<RepeatableCommand>,
+    // Macro recording register selection state (after pressing 'q')
+    pub pending_macro_register: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -74,6 +76,7 @@ impl KeyHandler {
             last_char_search: None,
             pending_char_command: None,
             last_command: None,
+            pending_macro_register: false,
         }
     }
 
@@ -128,6 +131,34 @@ impl KeyHandler {
             key_string,
             editor.mode()
         );
+
+        // If we're waiting for a macro register after 'q', consume the next char
+        if self.pending_macro_register {
+            match key.code {
+                KeyCode::Char(register) => {
+                    self.pending_macro_register = false;
+                    // Start recording with the chosen register
+                    if editor.start_macro_recording(register).is_ok() {
+                        info!("Started macro recording for register '{}'", register);
+                    }
+                    // Do not process this key further or record it; it's only a selector
+                    self.pending_sequence.clear();
+                    return Ok(());
+                }
+                KeyCode::Esc => {
+                    // Cancel pending register selection
+                    self.pending_macro_register = false;
+                    self.pending_sequence.clear();
+                    return Ok(());
+                }
+                _ => {
+                    // Any non-char cancels the pending state without starting
+                    self.pending_macro_register = false;
+                    self.pending_sequence.clear();
+                    return Ok(());
+                }
+            }
+        }
 
         // Handle pending character navigation commands
         if let Some(pending_cmd) = self.pending_char_command {
@@ -2951,27 +2982,23 @@ impl KeyHandler {
     }
 
     // Macro action methods
-    fn action_start_macro_recording(&mut self, editor: &mut Editor, key: KeyEvent) -> Result<()> {
-        match key.code {
-            KeyCode::Char(register) => {
-                if editor.is_macro_recording() {
-                    // Stop recording if already recording
-                    if let Ok(stopped_register) = editor.stop_macro_recording() {
-                        info!(
-                            "Stopped macro recording for register '{}'",
-                            stopped_register
-                        );
-                    }
-                } else {
-                    // Start recording
-                    if editor.start_macro_recording(register).is_ok() {
-                        info!("Started macro recording for register '{}'", register);
-                    }
-                }
+    fn action_start_macro_recording(&mut self, editor: &mut Editor, _key: KeyEvent) -> Result<()> {
+        // 'q' toggles stop if already recording; otherwise arm register-pending
+        if editor.is_macro_recording() {
+            if let Ok(stopped_register) = editor.stop_macro_recording() {
+                info!(
+                    "Stopped macro recording for register '{}'",
+                    stopped_register
+                );
             }
-            _ => {
-                warn!("Invalid register for macro recording: expected a character");
-            }
+            // Clear any pending to be safe
+            self.pending_macro_register = false;
+            self.pending_sequence.clear();
+        } else {
+            // Arm the pending register selection; consume next char as register
+            self.pending_macro_register = true;
+            // Reset sequence so the next key (e.g., 'a') doesn't match normal mappings
+            self.pending_sequence.clear();
         }
         Ok(())
     }

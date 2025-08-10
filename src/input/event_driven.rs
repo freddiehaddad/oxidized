@@ -29,6 +29,8 @@ struct RenderState {
     buffer_id: Option<usize>,
     command_line: String,
     status_message: String,
+    // Whether a macro is currently recording (used to trigger redraw for statusline REC indicator)
+    macro_recording_active: bool,
     needs_full_redraw: bool,
     // Track command completion state so UI can redraw when it changes
     completion_active: bool,
@@ -74,6 +76,7 @@ impl EventDrivenEditor {
                 buffer_id: None,
                 command_line: String::new(),
                 status_message: String::new(),
+                macro_recording_active: false,
                 needs_full_redraw: true, // Force initial full redraw
                 completion_active: false,
                 completion_matches_len: 0,
@@ -160,6 +163,8 @@ impl EventDrivenEditor {
                     let cursor_before = editor.current_buffer().map(|b| b.cursor);
                     let buffer_id_before = editor.current_buffer_id;
                     let command_line_before = editor.command_line().to_string();
+                    // Macro state before
+                    let macro_recording_before = editor.is_macro_recording();
                     // Snapshot completion state before
                     let completion_active_before = editor.is_completion_active();
                     let completion_matches_len_before = editor.completion_matches_len();
@@ -173,6 +178,8 @@ impl EventDrivenEditor {
                     let cursor_after = editor.current_buffer().map(|b| b.cursor);
                     let buffer_id_after = editor.current_buffer_id;
                     let command_line_after = editor.command_line();
+                    // Macro state after
+                    let macro_recording_after = editor.is_macro_recording();
                     // Completion state after
                     let completion_active_after = editor.is_completion_active();
                     let completion_matches_len_after = editor.completion_matches_len();
@@ -182,6 +189,7 @@ impl EventDrivenEditor {
                         || cursor_before != cursor_after
                         || buffer_id_before != buffer_id_after
                         || command_line_before != command_line_after
+                        || macro_recording_before != macro_recording_after
                         // Redraw when completion state changes (activation, matches, selection)
                         || completion_active_before != completion_active_after
                         || completion_matches_len_before != completion_matches_len_after
@@ -241,6 +249,7 @@ impl EventDrivenEditor {
                     let current_buffer_id = editor.current_buffer_id;
                     let current_command_line = editor.command_line().to_string();
                     let current_status = editor.status_message().to_string();
+                    let current_macro_recording = editor.is_macro_recording();
                     // Current completion state summary
                     let current_completion_active = editor.is_completion_active();
                     let current_completion_matches_len = editor.completion_matches_len();
@@ -251,6 +260,7 @@ impl EventDrivenEditor {
                         || last_state.buffer_id != current_buffer_id
                         || last_state.command_line != current_command_line
                         || last_state.status_message != current_status
+                        || last_state.macro_recording_active != current_macro_recording
                         // Redraw when completion state changed
                         || last_state.completion_active != current_completion_active
                         || last_state.completion_matches_len != current_completion_matches_len
@@ -271,6 +281,7 @@ impl EventDrivenEditor {
                             last_state.buffer_id = current_buffer_id;
                             last_state.command_line = current_command_line;
                             last_state.status_message = current_status;
+                            last_state.macro_recording_active = current_macro_recording;
                             last_state.needs_full_redraw = false;
                             last_state.completion_active = current_completion_active;
                             last_state.completion_matches_len = current_completion_matches_len;
@@ -557,6 +568,10 @@ impl EventDrivenEditor {
                         log::warn!("Failed to start macro recording: {}", e);
                     } else {
                         log::info!("Started macro recording for register '{}'", register);
+                        // Ensure UI updates immediately to show REC indicator
+                        let _ = self
+                            .event_sender
+                            .send(EditorEvent::UI(UIEvent::RedrawRequest));
                     }
                 }
                 crate::input::events::MacroEvent::StopRecording => {
@@ -565,6 +580,10 @@ impl EventDrivenEditor {
                             log::warn!("Failed to stop macro recording: {}", e);
                         } else {
                             log::info!("Stopped macro recording");
+                            // Ensure UI updates immediately to hide REC indicator
+                            let _ = self
+                                .event_sender
+                                .send(EditorEvent::UI(UIEvent::RedrawRequest));
                         }
                     }
                 }
