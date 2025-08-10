@@ -2067,6 +2067,14 @@ impl KeyHandler {
                 "expandtab: {}",
                 editor.get_config_value("expandtab").unwrap_or_default()
             ));
+            settings.push(format!(
+                "wrap: {}",
+                editor.get_config_value("wrap").unwrap_or_default()
+            ));
+            settings.push(format!(
+                "linebreak: {}",
+                editor.get_config_value("linebreak").unwrap_or_default()
+            ));
             editor.set_status_message(format!("Current settings: {}", settings.join(", ")));
             return;
         }
