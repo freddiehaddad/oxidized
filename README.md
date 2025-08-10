@@ -362,7 +362,6 @@ default_language = "text"
 
 # File operations
 "Ctrl+s" = "save_file"
-"Ctrl+q" = "quit"
 
 # Macro operations
 "q" = "start_macro_recording"  # q{register} - start/stop recording
