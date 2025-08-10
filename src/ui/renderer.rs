@@ -222,7 +222,200 @@ impl UI {
         let text_start_col = window.x as usize + line_number_width;
         let text_width = window.width.saturating_sub(line_number_width as u16) as usize;
 
-        // Render lines within the window bounds
+        // Wrapping flags
+        let wrap_enabled = editor_state.config.behavior.wrap_lines;
+        let word_break = editor_state.config.behavior.line_break;
+
+        if wrap_enabled {
+            // Render using soft wrapping: multiple visual rows per logical line
+            let mut screen_rows_rendered = 0usize;
+            let mut buf_row = window.viewport_top;
+            let is_active_window = editor_state.current_window_id == Some(window.id);
+
+            while screen_rows_rendered < content_height {
+                let screen_row = window.y as usize + screen_rows_rendered;
+
+                // Move cursor to the start of this line within the window
+                terminal.queue_move_cursor(Position::new(screen_row, window.x as usize))?;
+
+                // Determine if this visual row corresponds to the cursor line
+                let is_cursor_line =
+                    self.show_cursor_line && is_active_window && buf_row == buffer.cursor.row;
+
+                // Set background color for this line (cursor line background or normal background)
+                if is_cursor_line {
+                    terminal.queue_set_bg_color(self.theme.cursor_line_bg)?;
+                } else {
+                    terminal.queue_set_bg_color(self.theme.background)?;
+                }
+
+                // Clear the window area with the background color set
+                let spaces = " ".repeat(window.width as usize);
+                terminal.queue_print(&spaces)?;
+
+                // Move back to the start of the window for actual content rendering
+                terminal.queue_move_cursor(Position::new(screen_row, window.x as usize))?;
+
+                if buf_row < buffer.lines.len() {
+                    // Render line number only for first visual row of the logical line
+                    if self.show_line_numbers || self.show_relative_numbers {
+                        self.render_line_number(
+                            terminal,
+                            buffer,
+                            buf_row,
+                            line_number_width,
+                            is_cursor_line,
+                            is_active_window,
+                        )?;
+                    }
+
+                    // Move to text area within the window
+                    terminal.queue_move_cursor(Position::new(screen_row, text_start_col))?;
+
+                    // Render as many wrapped segments from this logical line as fit in remaining rows
+                    let line = &buffer.lines[buf_row];
+                    let mut start = 0usize;
+                    loop {
+                        // Determine the end of this segment
+                        let max_end = (start + text_width).min(line.len());
+                        let end = if word_break {
+                            let bytes = line.as_bytes();
+                            let mut cut = max_end;
+                            let mut i = max_end;
+                            while i > start {
+                                i -= 1;
+                                let b = bytes[i];
+                                if b == b' ' || b == b'\t' {
+                                    cut = i + 1; // include the space
+                                    break;
+                                }
+                            }
+                            cut
+                        } else {
+                            max_end
+                        };
+
+                        let display_slice = &line[start..end];
+
+                        // Compute base offset in character columns for selection math up to start
+                        let base_offset_chars = if start == 0 {
+                            0
+                        } else {
+                            line[..start].chars().count()
+                        };
+
+                        if let Some(highlights) =
+                            editor_state.syntax_highlights.get(&(buffer.id, buf_row))
+                        {
+                            // Shift highlights for this slice
+                            let shifted: Vec<HighlightRange> = highlights
+                                .iter()
+                                .map(|h| HighlightRange {
+                                    start: h.start.saturating_sub(start),
+                                    end: h.end.saturating_sub(start),
+                                    style: h.style.clone(),
+                                })
+                                .collect();
+                            let context = LineRenderContext {
+                                line_number: buf_row,
+                                is_cursor_line,
+                                max_width: text_width,
+                                selection: buffer.get_selection(),
+                                editor_mode: editor_state.mode,
+                                base_offset: base_offset_chars,
+                            };
+                            let rendered = self.render_highlighted_line(
+                                terminal,
+                                display_slice,
+                                &shifted,
+                                &context,
+                            )?;
+                            if rendered < text_width {
+                                let filler = " ".repeat(text_width - rendered);
+                                terminal.queue_print(&filler)?;
+                            }
+                        } else {
+                            self.render_plain_text_line(
+                                terminal,
+                                display_slice,
+                                buf_row,
+                                is_cursor_line,
+                                buffer.get_selection(),
+                                editor_state.mode,
+                                base_offset_chars,
+                            )?;
+                            if display_slice.len() < text_width {
+                                let filler = " ".repeat(text_width - display_slice.len());
+                                terminal.queue_print(&filler)?;
+                            }
+                        }
+
+                        // Finished one visual row
+                        screen_rows_rendered += 1;
+                        if screen_rows_rendered >= content_height {
+                            return Ok(());
+                        }
+
+                        // If end of line reached, advance to next buffer line
+                        if end >= line.len() {
+                            buf_row += 1;
+                            break;
+                        }
+
+                        // Otherwise, continue with next wrapped segment on the next screen row
+                        start = end;
+
+                        // Prepare next visual row: move to beginning of the next row area
+                        let next_screen_row = window.y as usize + screen_rows_rendered;
+                        terminal
+                            .queue_move_cursor(Position::new(next_screen_row, window.x as usize))?;
+                        // Clear row background
+                        terminal.queue_set_bg_color(self.theme.background)?;
+                        let spaces = " ".repeat(window.width as usize);
+                        terminal.queue_print(&spaces)?;
+                        terminal
+                            .queue_move_cursor(Position::new(next_screen_row, window.x as usize))?;
+
+                        // In wrapped continuation rows, line numbers are blank
+                        if self.show_line_numbers || self.show_relative_numbers {
+                            let blanks = " ".repeat(line_number_width);
+                            terminal.queue_print(&blanks)?;
+                        }
+
+                        // Move to text start for the next segment
+                        terminal
+                            .queue_move_cursor(Position::new(next_screen_row, text_start_col))?;
+                    }
+                } else {
+                    // Beyond buffer end: draw empty line indicator
+                    if self.show_line_numbers || self.show_relative_numbers {
+                        self.render_line_number(
+                            terminal,
+                            buffer,
+                            buf_row,
+                            line_number_width,
+                            is_cursor_line,
+                            is_active_window,
+                        )?;
+                    }
+                    terminal.queue_move_cursor(Position::new(screen_row, text_start_col))?;
+                    terminal.queue_set_fg_color(self.theme.empty_line)?;
+                    terminal.queue_print("~")?;
+                    if text_width > 1 {
+                        let filler = " ".repeat(text_width - 1);
+                        terminal.queue_print(&filler)?;
+                    }
+                    screen_rows_rendered += 1;
+                }
+
+                // Reset colors after each line
+                terminal.queue_reset_color()?;
+            }
+
+            return Ok(());
+        }
+
+        // No wrapping: existing single-row-per-line rendering with horizontal offset
         for row in 0..content_height {
             let buffer_row = window.viewport_top + row;
             let screen_row = window.y as usize + row;
@@ -483,23 +676,119 @@ impl UI {
                     0
                 };
 
-                // Calculate screen cursor position relative to the current window
-                let screen_row = buffer
-                    .cursor
-                    .row
-                    .saturating_sub(current_window.viewport_top);
-                // Account for horizontal offset when positioning the cursor
-                let rel_col = buffer
-                    .cursor
-                    .col
-                    .saturating_sub(current_window.horiz_offset);
-                let screen_col = rel_col + line_number_width;
+                let wrap_enabled = editor_state.config.behavior.wrap_lines;
+                let word_break = editor_state.config.behavior.line_break;
 
-                // Ensure cursor is within window bounds
-                if screen_row < content_height {
-                    let final_row = current_window.y as usize + screen_row;
-                    let final_col = current_window.x as usize + screen_col;
-                    terminal.queue_move_cursor(Position::new(final_row, final_col))?;
+                if wrap_enabled {
+                    // Compute the visual row of the cursor by simulating wrapping from viewport_top
+                    let text_width = current_window
+                        .width
+                        .saturating_sub(line_number_width as u16)
+                        as usize;
+                    if text_width == 0 {
+                        return Ok(());
+                    }
+
+                    let mut visual_rows = 0usize;
+                    // Count wrapped rows for all lines before the cursor line within the viewport
+                    for row in current_window.viewport_top..buffer.cursor.row {
+                        if row >= buffer.lines.len() {
+                            visual_rows += 1; // empty visual line for beyond-EOF
+                            continue;
+                        }
+                        let line = &buffer.lines[row];
+                        if line.is_empty() {
+                            visual_rows += 1;
+                            continue;
+                        }
+                        let mut start = 0usize;
+                        loop {
+                            let max_end = (start + text_width).min(line.len());
+                            let end = if word_break {
+                                let bytes = line.as_bytes();
+                                let mut cut = max_end;
+                                let mut i = max_end;
+                                while i > start {
+                                    i -= 1;
+                                    let b = bytes[i];
+                                    if b == b' ' || b == b'\t' {
+                                        cut = i + 1;
+                                        break;
+                                    }
+                                }
+                                cut
+                            } else {
+                                max_end
+                            };
+                            visual_rows += 1;
+                            if end >= line.len() {
+                                break;
+                            }
+                            start = end;
+                        }
+                    }
+
+                    // Determine which wrapped segment within the cursor line the cursor is in
+                    let segment_start = if buffer.cursor.row < buffer.lines.len() {
+                        let line = &buffer.lines[buffer.cursor.row];
+                        let mut start = 0usize;
+                        loop {
+                            let max_end = (start + text_width).min(line.len());
+                            let end = if word_break {
+                                let bytes = line.as_bytes();
+                                let mut cut = max_end;
+                                let mut i = max_end;
+                                while i > start {
+                                    i -= 1;
+                                    let b = bytes[i];
+                                    if b == b' ' || b == b'\t' {
+                                        cut = i + 1;
+                                        break;
+                                    }
+                                }
+                                cut
+                            } else {
+                                max_end
+                            };
+                            if buffer.cursor.col <= end {
+                                break start;
+                            }
+                            if end >= line.len() {
+                                break start;
+                            }
+                            start = end;
+                        }
+                    } else {
+                        0usize
+                    };
+
+                    let screen_row = visual_rows;
+                    if screen_row < content_height {
+                        let within_segment_col = buffer.cursor.col.saturating_sub(segment_start);
+                        let final_row = current_window.y as usize + screen_row;
+                        let final_col =
+                            current_window.x as usize + line_number_width + within_segment_col;
+                        terminal.queue_move_cursor(Position::new(final_row, final_col))?;
+                    }
+                } else {
+                    // Calculate screen cursor position relative to the current window
+                    let screen_row = buffer
+                        .cursor
+                        .row
+                        .saturating_sub(current_window.viewport_top);
+                    // Account for horizontal offset when positioning the cursor
+                    let rel_col = buffer
+                        .cursor
+                        .col
+                        .saturating_sub(current_window.horiz_offset);
+                    let screen_col = rel_col + line_number_width;
+
+                    // Ensure cursor is within window bounds
+                    if screen_row < content_height {
+                        let final_row = current_window.y as usize + screen_row;
+                        let final_col = current_window.x as usize + screen_col;
+                        terminal.queue_move_cursor(Position::new(final_row, final_col))?;
+                    }
                 }
             }
         }
