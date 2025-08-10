@@ -796,6 +796,115 @@ impl CommandCompletion {
             }
         }
 
+        // File path completion for :e and :w commands
+        if lower.starts_with("e ")
+            || lower.starts_with("edit ")
+            || lower.starts_with("w ")
+            || lower.starts_with("write ")
+        {
+            if let Some(ctx) = &self.context {
+                let raw = if let Some(p) = trimmed.strip_prefix("e ") {
+                    p
+                } else if let Some(p) = trimmed.strip_prefix("edit ") {
+                    p
+                } else if let Some(p) = trimmed.strip_prefix("w ") {
+                    p
+                } else if let Some(p) = trimmed.strip_prefix("write ") {
+                    p
+                } else {
+                    ""
+                };
+                let input_path = raw.trim_start();
+
+                use std::fs;
+                use std::path::{Path, PathBuf};
+
+                // Resolve base directory and prefix filter
+                let (dir, filter) = if input_path.is_empty() {
+                    (ctx.cwd.clone(), String::new())
+                } else {
+                    let p = Path::new(input_path);
+                    if p.is_absolute() {
+                        if p.is_dir() {
+                            (PathBuf::from(p), String::new())
+                        } else if let Some(parent) = p.parent() {
+                            (
+                                parent.to_path_buf(),
+                                p.file_name()
+                                    .and_then(|s| s.to_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                            )
+                        } else {
+                            (ctx.cwd.clone(), input_path.to_string())
+                        }
+                    } else {
+                        let joined = ctx.cwd.join(p);
+                        if joined.is_dir() {
+                            (joined, String::new())
+                        } else if let Some(parent) = joined.parent() {
+                            (
+                                parent.to_path_buf(),
+                                joined
+                                    .file_name()
+                                    .and_then(|s| s.to_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                            )
+                        } else {
+                            (ctx.cwd.clone(), input_path.to_string())
+                        }
+                    }
+                };
+
+                if let Ok(read_dir) = fs::read_dir(&dir) {
+                    for entry in read_dir.flatten() {
+                        let path = entry.path();
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        if !filter.is_empty()
+                            && !name.to_lowercase().starts_with(&filter.to_lowercase())
+                        {
+                            continue;
+                        }
+                        let mut text = String::new();
+                        // Preserve the command and prefix
+                        if lower.starts_with("e ") {
+                            text.push_str("e ");
+                        } else if lower.starts_with("edit ") {
+                            text.push_str("edit ");
+                        } else if lower.starts_with("w ") {
+                            text.push_str("w ");
+                        } else {
+                            text.push_str("write ");
+                        }
+                        // If the user typed a partial path, include it
+                        if !input_path.is_empty() {
+                            // Rebuild the suggestion keeping user-typed prefix up to dir
+                            let suggested = if Path::new(input_path).is_absolute() {
+                                dir.join(&name)
+                            } else {
+                                // Use a relative suggestion from cwd when possible
+                                let abs = dir.join(&name);
+                                abs.strip_prefix(&ctx.cwd).unwrap_or(&abs).to_path_buf()
+                            };
+                            text.push_str(&suggested.to_string_lossy());
+                        } else {
+                            // Base directory listing, relative to cwd when possible
+                            let rel = path.strip_prefix(&ctx.cwd).unwrap_or(&path).to_path_buf();
+                            text.push_str(&rel.to_string_lossy());
+                        }
+
+                        let desc = if path.is_dir() { "Directory" } else { "File" };
+                        out.push(CompletionItem {
+                            text,
+                            description: desc.to_string(),
+                            category: "file".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
         // Numeric suggestions for common options
         // tabstop / ts
         if lower.starts_with("set tabstop=") || lower.starts_with("set ts=") {
