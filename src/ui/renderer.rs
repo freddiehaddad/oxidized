@@ -188,6 +188,8 @@ impl UI {
         terminal: &mut Terminal,
         editor_state: &EditorRenderState,
     ) -> io::Result<()> {
+        // Refresh terminal size to reflect any recent resize events
+        terminal.update_size()?;
         let (width, height) = terminal.size();
 
         // Start double buffering - queue all operations without immediate display
