@@ -1,0 +1,18 @@
+#!/bin/sh
+# Run rustfmt check before committing. Abort commit if formatting is needed.
+
+set -eu
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "cargo not found; skipping rustfmt check" >&2
+  exit 0
+fi
+
+# Only check Rust files in the repo to keep hook fast.
+# Use --all to cover workspace members.
+if ! cargo fmt --all -- --check; then
+  echo "Rust formatting check failed. Run:\n  cargo fmt --all\nThen re-stage and commit again." >&2
+  exit 1
+fi
+
+exit 0
