@@ -7,7 +7,8 @@ fn completes_directories_with_trailing_separator_and_parent() {
     cc.set_context(CompletionContext {
         cwd: cwd.clone(),
         buffers: vec![],
-        current_buffer_dir: None,
+    current_buffer_dir: None,
+    allow_percent_path_root: true,
     });
     cc.start_completion("e ");
     assert!(cc.should_show());
@@ -32,7 +33,8 @@ fn supports_percent_root_for_current_buffer_dir() {
     cc.set_context(CompletionContext {
         cwd,
         buffers: vec![],
-        current_buffer_dir: Some(tmp_dir.path().to_path_buf()),
+    current_buffer_dir: Some(tmp_dir.path().to_path_buf()),
+    allow_percent_path_root: true,
     });
     cc.start_completion("e %/");
     assert!(cc.should_show());
@@ -49,7 +51,8 @@ fn buffer_and_numeric_hints_present() {
             name: "test.txt".into(),
             modified: false,
         }],
-        current_buffer_dir: None,
+    current_buffer_dir: None,
+    allow_percent_path_root: true,
     });
     cc.start_completion("b ");
     // buffers completion may produce items; then check numeric hints

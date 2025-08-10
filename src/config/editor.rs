@@ -56,6 +56,9 @@ pub struct InterfaceConfig {
     pub window_resize_amount: u16,
     pub completion_menu_width: u16,
     pub completion_menu_height: u16,
+    /// Enable '%' prefix in file path completion to root at current buffer directory
+    #[serde(default = "default_true")]
+    pub percent_path_root: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -155,11 +158,14 @@ impl Default for EditorConfig {
                 window_resize_amount: 1,
                 completion_menu_width: 30,
                 completion_menu_height: 8,
+                percent_path_root: true,
             },
             languages: LanguageConfig::default(),
         }
     }
 }
+
+fn default_true() -> bool { true }
 
 impl EditorConfig {
     pub fn load() -> Self {

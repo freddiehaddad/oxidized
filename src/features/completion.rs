@@ -810,7 +810,7 @@ impl CommandCompletion {
 
             // Optional: support '%' as a shorthand to root at current buffer's directory
             // Example: :e %/src will complete under the current buffer directory
-            let use_buf_root = input_path.starts_with('%');
+            let use_buf_root = input_path.starts_with('%') && ctx.allow_percent_path_root;
             if use_buf_root {
                 input_path = &input_path[1..];
                 // Treat a leading path separator as relative to the buffer root
@@ -1136,6 +1136,8 @@ pub struct CompletionContext {
     pub buffers: Vec<BufferSummary>,
     /// Optional current buffer directory for '%'-rooted path completion
     pub current_buffer_dir: Option<PathBuf>,
+    /// Whether '%' path rooting is enabled by config
+    pub allow_percent_path_root: bool,
 }
 
 #[derive(Debug, Clone)]

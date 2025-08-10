@@ -676,11 +676,14 @@ impl Editor {
             .and_then(|p| p.parent())
             .map(|p| p.to_path_buf());
 
+        let allow_percent_path_root = self.config.interface.percent_path_root;
+
         self.command_completion
             .set_context(crate::features::completion::CompletionContext {
                 cwd,
                 buffers,
                 current_buffer_dir,
+                allow_percent_path_root,
             });
         self.command_completion.start_completion(input);
     }
