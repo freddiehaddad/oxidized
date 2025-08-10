@@ -259,6 +259,37 @@ impl CommandCompletion {
                 description: "Disable cursor line highlight (short)".to_string(),
                 category: "set".to_string(),
             },
+            // Wrapping and line break
+            CompletionItem {
+                text: "set wrap".to_string(),
+                description: "Enable soft line wrapping".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set nowrap".to_string(),
+                description: "Disable soft line wrapping".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set linebreak".to_string(),
+                description: "Prefer breaking at word boundaries when wrapping".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set lbr".to_string(),
+                description: "Prefer word-boundary breaks (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set nolinebreak".to_string(),
+                description: "Disable word-boundary preference".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set nolbr".to_string(),
+                description: "Disable word-boundary preference (short)".to_string(),
+                category: "set".to_string(),
+            },
         ]);
 
         // Set commands - search and navigation
@@ -345,6 +376,198 @@ impl CommandCompletion {
             },
         ]);
 
+        // Set commands - editing toggles
+        commands.extend(vec![
+            CompletionItem {
+                text: "set expandtab".to_string(),
+                description: "Insert spaces for tabs".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set et".to_string(),
+                description: "Insert spaces for tabs (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set noexpandtab".to_string(),
+                description: "Use hard tab characters".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set noet".to_string(),
+                description: "Use hard tab characters (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set autoindent".to_string(),
+                description: "Enable automatic indentation".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set ai".to_string(),
+                description: "Enable automatic indentation (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set noautoindent".to_string(),
+                description: "Disable automatic indentation".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set noai".to_string(),
+                description: "Disable automatic indentation (short)".to_string(),
+                category: "set".to_string(),
+            },
+        ]);
+
+        // Set commands - files and persistence
+        commands.extend(vec![
+            CompletionItem {
+                text: "set undofile".to_string(),
+                description: "Enable persistent undo".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set udf".to_string(),
+                description: "Enable persistent undo (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set noundofile".to_string(),
+                description: "Disable persistent undo".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set noudf".to_string(),
+                description: "Disable persistent undo (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set backup".to_string(),
+                description: "Enable backup files".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set bk".to_string(),
+                description: "Enable backup files (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set nobackup".to_string(),
+                description: "Disable backup files".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set nobk".to_string(),
+                description: "Disable backup files (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set swapfile".to_string(),
+                description: "Enable swap file".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set swf".to_string(),
+                description: "Enable swap file (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set noswapfile".to_string(),
+                description: "Disable swap file".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set noswf".to_string(),
+                description: "Disable swap file (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set autosave".to_string(),
+                description: "Enable auto save".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set aw".to_string(),
+                description: "Enable auto save (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set noautosave".to_string(),
+                description: "Disable auto save".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set noaw".to_string(),
+                description: "Disable auto save (short)".to_string(),
+                category: "set".to_string(),
+            },
+        ]);
+
+        // Set commands - UI toggles and syntax
+        commands.extend(vec![
+            CompletionItem {
+                text: "set laststatus".to_string(),
+                description: "Show status line".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set ls".to_string(),
+                description: "Show status line (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set nolaststatus".to_string(),
+                description: "Hide status line".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set nols".to_string(),
+                description: "Hide status line (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set showcmd".to_string(),
+                description: "Show command in status area".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set sc".to_string(),
+                description: "Show command (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set noshowcmd".to_string(),
+                description: "Hide command in status area".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set nosc".to_string(),
+                description: "Hide command (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set syntax".to_string(),
+                description: "Enable syntax highlighting".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set syn".to_string(),
+                description: "Enable syntax highlighting (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set nosyntax".to_string(),
+                description: "Disable syntax highlighting".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set nosyn".to_string(),
+                description: "Disable syntax highlighting (short)".to_string(),
+                category: "set".to_string(),
+            },
+        ]);
+
         // Set commands with values
         commands.extend(vec![
             CompletionItem {
@@ -387,7 +610,62 @@ impl CommandCompletion {
                 description: "Change color scheme (short)".to_string(),
                 category: "set".to_string(),
             },
+            CompletionItem {
+                text: "set timeoutlen=".to_string(),
+                description: "Set command timeout (ms)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set tm=".to_string(),
+                description: "Set command timeout (ms) (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set undolevels=".to_string(),
+                description: "Set number of undo levels".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set ul=".to_string(),
+                description: "Set undo levels (short)".to_string(),
+                category: "set".to_string(),
+            },
         ]);
+
+        // Set queries for booleans and values
+        let query_items = vec![
+            "number",
+            "relativenumber",
+            "cursorline",
+            "tabstop",
+            "expandtab",
+            "autoindent",
+            "ignorecase",
+            "smartcase",
+            "hlsearch",
+            "incsearch",
+            "wrap",
+            "linebreak",
+            "undolevels",
+            "undofile",
+            "backup",
+            "swapfile",
+            "autosave",
+            "laststatus",
+            "showcmd",
+            "scrolloff",
+            "sidescrolloff",
+            "timeoutlen",
+            "colorscheme",
+            "syntax",
+        ];
+        for key in query_items {
+            commands.push(CompletionItem {
+                text: format!("set {}?", key),
+                description: format!("Query '{}' value", key),
+                category: "set".to_string(),
+            });
+        }
 
         commands
     }
