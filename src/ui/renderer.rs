@@ -54,6 +54,57 @@ impl UI {
         }
     }
 
+    // --- UTF-8 helpers ---
+    /// Convert a character position to a byte index by walking char_indices.
+    fn floor_char_boundary(s: &str, char_pos: usize) -> usize {
+        if char_pos == 0 {
+            return 0;
+        }
+        for (count, (b, _)) in s.char_indices().enumerate() {
+            if count == char_pos {
+                return b;
+            }
+        }
+        s.len()
+    }
+
+    /// Compute the end byte index for a wrapped segment of at most `width` characters
+    /// starting at `start_byte`. If `word_break` is true, prefer the last whitespace
+    /// break within the segment (including that whitespace char).
+    fn wrap_next_end_byte(
+        &self,
+        s: &str,
+        start_byte: usize,
+        width: usize,
+        word_break: bool,
+    ) -> (usize, usize) {
+        if start_byte >= s.len() || width == 0 {
+            return (start_byte, 0);
+        }
+        let slice = &s[start_byte..];
+        let mut chars_seen = 0usize;
+        let mut last_break_end_rel: Option<usize> = None;
+        for (rel, ch) in slice.char_indices() {
+            let ch_end = rel + ch.len_utf8();
+            if ch.is_whitespace() {
+                last_break_end_rel = Some(ch_end);
+            }
+            chars_seen += 1;
+            if chars_seen == width {
+                if word_break && let Some(b) = last_break_end_rel {
+                    let end = start_byte + b;
+                    let seg_chars = slice[..b].chars().count();
+                    return (end, seg_chars);
+                }
+                return (start_byte + ch_end, width);
+            }
+        }
+        // Less than width characters remaining
+        let end = start_byte + slice.len();
+        let seg_chars = slice.chars().count();
+        (end, seg_chars)
+    }
+
     /// Set the UI theme by loading from themes.toml
     pub fn set_theme(&mut self, theme_name: &str) {
         debug!("Setting UI theme to: '{}'", theme_name);
@@ -276,33 +327,13 @@ impl UI {
                     let line = &buffer.lines[buf_row];
                     let mut start = 0usize;
                     loop {
-                        // Determine the end of this segment
-                        let max_end = (start + text_width).min(line.len());
-                        let end = if word_break {
-                            let bytes = line.as_bytes();
-                            let mut cut = max_end;
-                            let mut i = max_end;
-                            while i > start {
-                                i -= 1;
-                                let b = bytes[i];
-                                if b == b' ' || b == b'\t' {
-                                    cut = i + 1; // include the space
-                                    break;
-                                }
-                            }
-                            cut
-                        } else {
-                            max_end
-                        };
-
+                        // Determine the end of this segment using UTF-8 safe wrapping
+                        let (end, seg_chars) =
+                            self.wrap_next_end_byte(line, start, text_width, word_break);
                         let display_slice = &line[start..end];
 
                         // Compute base offset in character columns for selection math up to start
-                        let base_offset_chars = if start == 0 {
-                            0
-                        } else {
-                            line[..start].chars().count()
-                        };
+                        let base_offset_chars = line[..start].chars().count();
 
                         if let Some(highlights) =
                             editor_state.syntax_highlights.get(&(buffer.id, buf_row))
@@ -344,8 +375,8 @@ impl UI {
                                 editor_state.mode,
                                 base_offset_chars,
                             )?;
-                            if display_slice.len() < text_width {
-                                let filler = " ".repeat(text_width - display_slice.len());
+                            if seg_chars < text_width {
+                                let filler = " ".repeat(text_width - seg_chars);
                                 terminal.queue_print(&filler)?;
                             }
                         }
@@ -487,14 +518,9 @@ impl UI {
                             );
                         }
                     }
-                    // Compute base offset in character columns for selection math
-                    let base_offset_chars = if window.horiz_offset == 0 {
-                        0
-                    } else {
-                        line[..std::cmp::min(window.horiz_offset, line.len())]
-                            .chars()
-                            .count()
-                    };
+                    // Compute base offsets safely for horizontal slicing (UTF-8 aware)
+                    let base_offset_bytes = Self::floor_char_boundary(line, window.horiz_offset);
+                    let base_offset_chars = window.horiz_offset;
 
                     let context = LineRenderContext {
                         line_number: buffer_row,
@@ -504,18 +530,18 @@ impl UI {
                         editor_mode: editor_state.mode,
                         base_offset: base_offset_chars,
                     };
-                    // Apply horizontal offset by slicing the line for display
-                    let display_slice = if window.horiz_offset < line.len() {
-                        &line[window.horiz_offset..]
+                    // Apply horizontal offset by slicing at a character boundary
+                    let display_slice = if base_offset_bytes < line.len() {
+                        &line[base_offset_bytes..]
                     } else {
                         ""
                     };
-                    // Shift highlight ranges to match the sliced view
+                    // Shift highlight ranges to match the sliced view (byte-based)
                     let shifted: Vec<HighlightRange> = highlights
                         .iter()
                         .map(|h| HighlightRange {
-                            start: h.start.saturating_sub(window.horiz_offset),
-                            end: h.end.saturating_sub(window.horiz_offset),
+                            start: h.start.saturating_sub(base_offset_bytes),
+                            end: h.end.saturating_sub(base_offset_bytes),
                             style: h.style.clone(),
                         })
                         .collect();
@@ -531,20 +557,41 @@ impl UI {
                         );
                     }
                     // Render line without syntax highlighting but with visual selection support
-                    // Apply horizontal offset and clamp to available width
-                    let start = std::cmp::min(window.horiz_offset, line.len());
-                    let remaining = &line[start..];
-                    let display_line = if remaining.len() > text_width {
-                        &remaining[..text_width]
-                    } else {
-                        remaining
+                    // Apply horizontal offset and clamp to available width (UTF-8 safe)
+                    let start_byte = {
+                        if window.horiz_offset == 0 {
+                            0
+                        } else {
+                            let mut byte_idx = line.len();
+                            for (count, (b, _)) in line.char_indices().enumerate() {
+                                if count == window.horiz_offset {
+                                    byte_idx = b;
+                                    break;
+                                }
+                            }
+                            byte_idx
+                        }
                     };
+                    // Determine end byte that fits within text_width characters
+                    let mut chars_seen = 0usize;
+                    let mut end_byte = start_byte;
+                    for (b, ch) in line[start_byte..].char_indices() {
+                        let next_end = start_byte + b + ch.len_utf8();
+                        if chars_seen + 1 > text_width {
+                            break;
+                        }
+                        chars_seen += 1;
+                        end_byte = next_end;
+                        if chars_seen == text_width {
+                            break;
+                        }
+                    }
+                    if end_byte < start_byte {
+                        end_byte = start_byte;
+                    }
+                    let display_line = &line[start_byte..end_byte];
                     // Compute base offset in character columns for selection math
-                    let base_offset_chars = if start == 0 {
-                        0
-                    } else {
-                        line[..start].chars().count()
-                    };
+                    let base_offset_chars = line[..start_byte].chars().count();
                     self.render_plain_text_line(
                         terminal,
                         display_line,
@@ -554,7 +601,7 @@ impl UI {
                         editor_state.mode,
                         base_offset_chars,
                     )?;
-                    display_line.len()
+                    chars_seen
                 };
 
                 // Fill remaining width with appropriate background
