@@ -654,6 +654,24 @@ impl Editor {
 
     // Command completion methods
     pub fn start_command_completion(&mut self, input: &str) {
+        // Build dynamic context for completion (cwd and buffers)
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let mut buffers = Vec::new();
+        for (id, buf) in self.buffers.iter() {
+            let name = buf
+                .file_path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "[No Name]".to_string());
+            buffers.push(crate::features::completion::BufferSummary {
+                id: *id,
+                name,
+                modified: buf.modified,
+            });
+        }
+        self.command_completion
+            .set_context(crate::features::completion::CompletionContext { cwd, buffers });
         self.command_completion.start_completion(input);
     }
 

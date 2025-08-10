@@ -1,6 +1,7 @@
 use crate::config::theme::ThemeConfig;
 /// Command completion system for Vim-style commands
 use log::{debug, info};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct CommandCompletion {
@@ -14,6 +15,8 @@ pub struct CommandCompletion {
     pub selected_index: usize,
     /// The text that triggered completion
     pub completion_prefix: String,
+    /// Optional dynamic context (cwd, buffers, etc.)
+    pub context: Option<CompletionContext>,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +42,7 @@ impl CommandCompletion {
             matches: Vec::new(),
             selected_index: 0,
             completion_prefix: String::new(),
+            context: None,
         }
     }
 
@@ -694,7 +698,7 @@ impl CommandCompletion {
             .collect();
 
         // Dynamic matches based on current input (e.g., values after '=')
-        let dynamic = Self::dynamic_matches(input);
+        let dynamic = self.dynamic_matches(input);
         combined.extend(dynamic);
 
         // Deduplicate by text while preferring shorter description (or first seen)
@@ -713,10 +717,58 @@ impl CommandCompletion {
     }
 
     /// Produce dynamic completion items for :set value forms
-    fn dynamic_matches(input: &str) -> Vec<CompletionItem> {
+    fn dynamic_matches(&self, input: &str) -> Vec<CompletionItem> {
         let trimmed = input.trim_start();
         let lower = trimmed.to_lowercase();
         let mut out: Vec<CompletionItem> = Vec::new();
+        // Buffer name/id completion: b <...> or buffer <...>
+        if lower.starts_with("b ") || lower.starts_with("buffer ") {
+            if let Some(ctx) = &self.context {
+                let prefix = if let Some(p) = trimmed.strip_prefix("b ") {
+                    p
+                } else if let Some(p) = trimmed.strip_prefix("buffer ") {
+                    p
+                } else {
+                    ""
+                }
+                .trim_start();
+
+                let prefix_lower = prefix.to_lowercase();
+                for b in &ctx.buffers {
+                    let id_str = b.id.to_string();
+                    let name_lower = b.name.to_lowercase();
+                    let matches = prefix.is_empty()
+                        || id_str.starts_with(prefix)
+                        || name_lower.contains(&prefix_lower);
+                    if matches {
+                        // Suggest by id
+                        out.push(CompletionItem {
+                            text: format!("b {}", b.id),
+                            description: format!(
+                                "Buffer {}: {}{}",
+                                b.id,
+                                b.name,
+                                if b.modified { " [+]" } else { "" }
+                            ),
+                            category: "buffer".to_string(),
+                        });
+                        // Suggest by name (only if it isn't "[No Name]")
+                        if b.name != "[No Name]" {
+                            out.push(CompletionItem {
+                                text: format!("b {}", b.name),
+                                description: format!(
+                                    "Buffer {}: {}{}",
+                                    b.id,
+                                    b.name,
+                                    if b.modified { " [+]" } else { "" }
+                                ),
+                                category: "buffer".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
 
         // Helper to filter suggestions by current value prefix after '='
         fn value_prefix(s: &str) -> &str {
@@ -910,6 +962,25 @@ impl CommandCompletion {
             }
         }
         0
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CompletionContext {
+    pub cwd: PathBuf,
+    pub buffers: Vec<BufferSummary>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BufferSummary {
+    pub id: usize,
+    pub name: String,
+    pub modified: bool,
+}
+
+impl CommandCompletion {
+    pub fn set_context(&mut self, ctx: CompletionContext) {
+        self.context = Some(ctx);
     }
 }
 
