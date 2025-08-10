@@ -176,12 +176,9 @@ impl KeyHandler {
                                     events.len()
                                 );
                             }
+                            // Replay events through the normal key handler so counts and state are honored
                             for key_event in events {
-                                if let Some(action) = self.get_action_for_key(editor, &key_event) {
-                                    self.execute_action_without_recording(
-                                        editor, &action, key_event,
-                                    )?;
-                                }
+                                self.handle_key(editor, key_event)?;
                             }
                             // Mark playback finished
                             editor.finish_macro_playback();
@@ -202,12 +199,9 @@ impl KeyHandler {
                                 register,
                                 events.len()
                             );
+                            // Replay events through the normal key handler so counts and state are honored
                             for key_event in events {
-                                if let Some(action) = self.get_action_for_key(editor, &key_event) {
-                                    self.execute_action_without_recording(
-                                        editor, &action, key_event,
-                                    )?;
-                                }
+                                self.handle_key(editor, key_event)?;
                             }
                             // Mark playback finished
                             editor.finish_macro_playback();
@@ -306,6 +300,10 @@ impl KeyHandler {
                         .saturating_add(digit);
                     self.pending_count = Some(new_count);
                     debug!("Accumulated count: {}", new_count);
+                    // If recording a macro, also record the digit key so playback reproduces the count
+                    if editor.is_macro_recording() {
+                        editor.record_macro_event(key);
+                    }
                     // Don't include digits in the key sequence; wait for next non-digit
                     return Ok(());
                 }
@@ -1028,8 +1026,11 @@ impl KeyHandler {
         let command = editor.command_line().trim_start_matches(':').to_string();
 
         match command.as_str() {
+            // Quit commands
             "q" | "quit" => editor.quit(),
             "q!" | "quit!" => editor.force_quit(),
+
+            // Write/save commands
             "w" | "write" => {
                 if let Some(buffer) = editor.current_buffer_mut() {
                     match buffer.save() {
@@ -1038,6 +1039,7 @@ impl KeyHandler {
                     }
                 }
             }
+            // Write and quit
             "wq" | "x" => {
                 if let Some(buffer) = editor.current_buffer_mut() {
                     match buffer.save() {
@@ -1047,16 +1049,16 @@ impl KeyHandler {
                         }
                         Err(e) => editor.set_status_message(format!("Error saving: {}", e)),
                     }
-                } else {
-                    editor.quit();
                 }
             }
+
             // Line number commands
             "set nu" | "set number" => editor.set_line_numbers(true, false),
             "set nonu" | "set nonumber" => editor.set_line_numbers(false, false),
             "set rnu" | "set relativenumber" => editor.set_line_numbers(false, true),
             "set nornu" | "set norelativenumber" => editor.set_line_numbers(true, false),
             "set nu rnu" | "set number relativenumber" => editor.set_line_numbers(true, true),
+
             // Cursor line commands
             "set cul" | "set cursorline" => editor.set_cursor_line(true),
             "set nocul" | "set nocursorline" => editor.set_cursor_line(false),
@@ -1067,13 +1069,6 @@ impl KeyHandler {
                     editor.set_status_message("Switched to next buffer".to_string());
                 } else {
                     editor.set_status_message("No next buffer".to_string());
-                }
-            }
-            "bp" | "bprev" | "bprevious" => {
-                if editor.switch_to_previous_buffer() {
-                    editor.set_status_message("Switched to previous buffer".to_string());
-                } else {
-                    editor.set_status_message("No previous buffer".to_string());
                 }
             }
             "bd" | "bdelete" => match editor.close_current_buffer() {
@@ -1088,6 +1083,7 @@ impl KeyHandler {
                 let buffer_list = editor.list_buffers();
                 editor.set_status_message(buffer_list);
             }
+
             // Window/Split commands
             "split" | "sp" => {
                 let message = editor.split_horizontal();
@@ -1101,6 +1097,7 @@ impl KeyHandler {
                 let message = editor.close_window();
                 editor.set_status_message(message);
             }
+
             _ => {
                 // Handle :e filename and :b commands
                 if let Some(filename) = command.strip_prefix("e ") {
@@ -3188,41 +3185,8 @@ impl KeyHandler {
         Ok(())
     }
 
-    // Helper method to get action for a key in the current mode
-    fn get_action_for_key(&self, editor: &Editor, key_event: &KeyEvent) -> Option<String> {
-        let keymap = match editor.mode() {
-            Mode::Normal => &self.keymap_config.normal_mode,
-            Mode::Insert => &self.keymap_config.insert_mode,
-            Mode::Command => &self.keymap_config.command_mode,
-            Mode::Visual => &self.keymap_config.visual_mode,
-            Mode::VisualLine => &self.keymap_config.visual_line_mode,
-            Mode::VisualBlock => &self.keymap_config.visual_block_mode,
-            Mode::Replace => &self.keymap_config.replace_mode,
-            Mode::Search => &self.keymap_config.search_mode,
-            Mode::OperatorPending => &self.keymap_config.operator_pending_mode,
-        };
-
-        let key_str = KeyHandler::key_event_to_string(*key_event);
-        if let Some(action) = keymap.get(&key_str) {
-            return Some(action.clone());
-        }
-
-        // Fallback: for modes that use a generic "Char" mapping, map raw character keys accordingly
-        match editor.mode() {
-            Mode::Insert | Mode::Replace | Mode::Command | Mode::Search => {
-                if let KeyCode::Char(_) = key_event.code
-                    && !key_event.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key_event.modifiers.contains(KeyModifiers::ALT)
-                    && let Some(action) = keymap.get("Char")
-                {
-                    return Some(action.clone());
-                }
-            }
-            _ => {}
-        }
-
-        None
-    }
+    // Note: previously had a helper to map KeyEvent to action; no longer needed after macro
+    // playback replays through handle_key. If needed in the future, restore a similar helper.
 
     fn is_repeatable_action(&self, action: &str) -> bool {
         matches!(
