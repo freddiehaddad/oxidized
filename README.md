@@ -535,32 +535,37 @@ RUST_LOG=debug ./target/release/oxy filename.txt
 
 ### 📊 Comprehensive Logging System
 
-Oxidized provides extensive logging capabilities for development, debugging, and performance monitoring:
+Oxidized provides extensive logging for development, debugging, and performance.
+To avoid corrupting the terminal UI, when running in an interactive terminal
+(TTY) logs are written to a file by default. In non-TTY contexts (e.g., CI),
+logs go to stderr. Warnings and errors are mirrored to stderr even when file
+logging is active.
 
 #### Quick reference
 
 ```powershell
 # Windows (PowerShell)
-# 1) Enable verbose logs to stderr
-$env:RUST_LOG="debug"; cargo run filename.txt
+# 1) Default: logs go to oxidized.log when running in a terminal
+cargo run filename.txt
+Get-Content oxidized.log -Wait -Tail 50
 
 # 2) Module-focused logging
 $env:RUST_LOG="oxidized=info,oxidized::editor=debug"; cargo run
 
-# 3) Redirect logs to a file while displaying
-$env:RUST_LOG="debug"; cargo run 2>&1 | Tee-Object -FilePath oxidized.log
+# 3) Force stderr logging instead of file
+$env:OXY_LOG_DEST="stderr"; $env:RUST_LOG="debug"; cargo run
 ```
 
 ```bash
 # Linux/macOS (Bash)
-# 1) Enable verbose logs to stderr
-RUST_LOG=debug cargo run filename.txt
+# 1) Default: logs go to oxidized.log when running in a terminal
+cargo run filename.txt & tail -f oxidized.log
 
 # 2) Module-focused logging
 RUST_LOG="oxidized=info,oxidized::editor=debug" cargo run
 
-# 3) Redirect logs to a file while displaying
-RUST_LOG=debug cargo run 2>&1 | tee oxidized.log
+# 3) Force stderr logging instead of file
+OXY_LOG_DEST=stderr RUST_LOG=debug cargo run
 ```
 
 #### **Log Levels and Usage**
@@ -582,6 +587,8 @@ RUST_LOG=debug cargo run 2>&1 | tee oxidized.log
 $env:RUST_LOG="debug"                    # Debug level for all modules
 $env:RUST_LOG="oxidized=trace"           # Trace level for oxidized only
 $env:RUST_LOG="oxidized::editor=debug"   # Debug level for editor module only
+$env:OXY_LOG_DEST="file|stderr|off"      # Destination override
+$env:OXY_LOG_FILE="custom.log"           # File path (default: oxidized.log)
 
 # Multiple modules with different levels
 $env:RUST_LOG="oxidized::buffer=trace,oxidized::syntax=debug,warn"
@@ -595,6 +602,8 @@ cargo run filename.txt
 export RUST_LOG=debug                    # Debug level for all modules
 export RUST_LOG=oxidized=trace           # Trace level for oxidized only
 export RUST_LOG=oxidized::editor=debug   # Debug level for editor module only
+export OXY_LOG_DEST=file|stderr|off      # Destination override
+export OXY_LOG_FILE=custom.log           # File path (default: oxidized.log)
 
 # Multiple modules with different levels
 export RUST_LOG="oxidized::buffer=trace,oxidized::syntax=debug,warn"
@@ -605,28 +614,30 @@ cargo run filename.txt
 
 #### **Viewing Logs**
 
-By default logs are written to stderr. Control verbosity with `RUST_LOG` and optionally redirect to a file.
+Default behavior:
+
+- Interactive TTY: logs are appended to `oxidized.log` in the working
+   directory.
+- Non-TTY (CI/headless): logs are written to stderr.
+- Warnings and errors are mirrored to stderr when file logging is active.
 
 ```powershell
 # Windows PowerShell
-$env:RUST_LOG="debug"; cargo run filename.txt
-
-# Redirect logs to a file
-$env:RUST_LOG="debug"; cargo run filename.txt 2>&1 | Tee-Object -FilePath oxidized.log
-
-# Follow a redirected log file
+# Follow the default log file
+cargo run filename.txt
 Get-Content oxidized.log -Wait -Tail 50
+
+# Force stderr output instead of file
+$env:OXY_LOG_DEST="stderr"; $env:RUST_LOG="debug"; cargo run filename.txt
 ```
 
 ```bash
 # Linux/macOS (Bash)
-RUST_LOG=debug cargo run filename.txt
+# Follow the default log file
+cargo run filename.txt & tail -f oxidized.log
 
-# Redirect logs to a file while displaying
-RUST_LOG=debug cargo run filename.txt 2>&1 | tee oxidized.log
-
-# Follow a redirected log file
-tail -f oxidized.log
+# Force stderr output instead of file
+OXY_LOG_DEST=stderr RUST_LOG=debug cargo run filename.txt
 ```
 
 #### **Module-Specific Logging**
