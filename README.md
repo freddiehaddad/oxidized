@@ -521,16 +521,20 @@ cargo run filename.txt
 # Windows - Optimized release build
 cargo build --release
 
-# Run with custom log level (stderr output)
+# Run with custom log level (TTY: logs go to file by default)
 $env:RUST_LOG="debug"; .\target\release\oxy.exe filename.txt
+# To force stderr instead of file:
+# $env:OXY_LOG_DEST="stderr"; $env:RUST_LOG="debug"; .\target\release\oxy.exe filename.txt
 ```
 
 ```bash
 # Linux/macOS - Optimized release build
 cargo build --release
 
-# Run with custom log level (stderr output)
+# Run with custom log level (TTY: logs go to file by default)
 RUST_LOG=debug ./target/release/oxy filename.txt
+# To force stderr instead of file:
+# OXY_LOG_DEST=stderr RUST_LOG=debug ./target/release/oxy filename.txt
 ```
 
 ### 📊 Comprehensive Logging System
@@ -1017,7 +1021,7 @@ When reporting bugs, please include:
 
 ### Development
 
-- **log/env_logger**: Logging infrastructure for debugging
+- **log + tracing-subscriber/appender**: Logging infrastructure (file-by-default in TTY, stderr otherwise)
 - **criterion**: Benchmarking framework for performance testing
 
 ## 🤝 Contributing
