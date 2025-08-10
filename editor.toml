@@ -32,7 +32,8 @@ side_scroll_off = 0
 window_resize_amount = 1
 completion_menu_width = 30
 completion_menu_height = 8
-# Enable '%' prefix in :e/:w path completion to root at current buffer
+# Enable '%' prefix in :e/:w path completion to root at current buffer.
+# Toggle at runtime with :set ppr / :set noppr, query with :set ppr?
 percent_path_root = true
 
 [languages]

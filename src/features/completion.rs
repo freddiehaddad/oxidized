@@ -995,6 +995,24 @@ impl CommandCompletion {
             }
         }
 
+        // Boolean suggestions for percentpathroot / ppr
+        if lower.starts_with("set percentpathroot=") || lower.starts_with("set ppr=") {
+            let val_pref = value_prefix(trimmed);
+            for s in ["true", "false"] {
+                if val_pref.is_empty() || s.starts_with(&val_pref.to_lowercase()) {
+                    out.push(CompletionItem {
+                        text: if lower.starts_with("set ppr=") {
+                            format!("set ppr={}", s)
+                        } else {
+                            format!("set percentpathroot={}", s)
+                        },
+                        description: "Enable/disable '%' root in completion".to_string(),
+                        category: "set".to_string(),
+                    });
+                }
+            }
+        }
+
         // Numeric suggestions for common options
         // tabstop / ts
         if lower.starts_with("set tabstop=") || lower.starts_with("set ts=") {
