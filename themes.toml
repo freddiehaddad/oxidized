@@ -13,6 +13,7 @@ status_fg = "#cccccc"
 status_modified = "#f74c00"
 line_number = "#8c6239"
 line_number_current = "#deb887"
+mark_indicator = "#e6b422"      # Golden mark label in number column
 cursor_line_bg = "#2d2318"
 empty_line = "#4a3728"
 command_line_bg = "#1f1611"

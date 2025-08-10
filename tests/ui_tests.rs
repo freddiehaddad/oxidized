@@ -11,6 +11,9 @@ mod ui_tests {
         assert!(!ui.show_relative_numbers);
         assert!(ui.show_cursor_line);
         assert_eq!(ui.viewport_top(), 0);
+
+        // New: show marks in number column default
+        assert!(ui.show_marks_in_number_column);
     }
 
     #[test]

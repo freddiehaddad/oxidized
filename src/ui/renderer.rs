@@ -28,6 +28,8 @@ pub struct UI {
     pub show_relative_numbers: bool,
     /// Highlight the current cursor line
     pub show_cursor_line: bool,
+    /// Show mark indicator in the number column when a line has a mark
+    pub show_marks_in_number_column: bool,
     /// Current UI theme from themes.toml
     theme: UITheme,
     /// Current syntax theme from themes.toml
@@ -51,6 +53,7 @@ impl UI {
             show_line_numbers: true,            // Enable by default like Vim
             show_relative_numbers: false,       // Disabled by default
             show_cursor_line: true,             // Enable by default
+            show_marks_in_number_column: true,  // Default to on per request
             theme: current_theme.ui,            // Use theme from themes.toml
             syntax_theme: current_theme.syntax, // Use syntax theme from themes.toml
         }
@@ -1294,8 +1297,55 @@ impl UI {
                 buffer_row + 1
             };
 
-            let line_num_str = format!("{:>width$} ", line_num, width = width - 1);
-            terminal.queue_print(&line_num_str)?;
+            // Build number column text with optional mark indicator
+            let num_str = format!("{:>width$}", line_num, width = width - 1);
+            let trailing_space = " ";
+
+            if self.show_marks_in_number_column {
+                // Check if this line has any mark, and pick a deterministic one to display (smallest char)
+                let mark_char = buffer
+                    .marks
+                    .iter()
+                    .filter(|(_, pos)| pos.row == buffer_row)
+                    .map(|(ch, _)| *ch)
+                    .min();
+                if let Some(mark_ch) = mark_char {
+                    // Save current number fg to restore after painting the bullet
+                    let saved_fg = if is_cursor_line && self.show_cursor_line {
+                        self.theme.line_number_current
+                    } else {
+                        self.theme.line_number
+                    };
+
+                    // If there is left padding, replace the first padding space with a bullet.
+                    let has_left_padding = num_str.as_bytes().first() == Some(&b' ');
+                    if has_left_padding {
+                        // Print mark letter in mark color, then the rest of the padded number, then trailing space
+                        terminal.queue_set_fg_color(self.theme.mark_indicator)?;
+                        let mut buf = [0u8; 4];
+                        let s = mark_ch.encode_utf8(&mut buf);
+                        terminal.queue_print(s)?;
+                        terminal.queue_set_fg_color(saved_fg)?;
+                        if num_str.len() > 1 {
+                            terminal.queue_print(&num_str[1..])?;
+                        }
+                        terminal.queue_print(trailing_space)?;
+                    } else {
+                        // No padding (wide line numbers). Print number, then mark letter instead of trailing space.
+                        terminal.queue_set_fg_color(saved_fg)?;
+                        terminal.queue_print(&num_str)?;
+                        terminal.queue_set_fg_color(self.theme.mark_indicator)?;
+                        let mut buf = [0u8; 4];
+                        let s = mark_ch.encode_utf8(&mut buf);
+                        terminal.queue_print(s)?;
+                    }
+                    return Ok(());
+                }
+            }
+
+            // Default: print number and trailing space
+            terminal.queue_print(&num_str)?;
+            terminal.queue_print(trailing_space)?;
         } else {
             // Empty line - just print spaces
             let spaces = " ".repeat(width);

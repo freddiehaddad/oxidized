@@ -60,6 +60,9 @@ pub struct UIColors {
     pub status_modified: String,
     pub line_number: String,
     pub line_number_current: String,
+    /// Color of the mark indicator rendered in the number column
+    #[serde(default = "default_mark_color")]
+    pub mark_indicator: String,
     pub cursor_line_bg: String,
     pub empty_line: String,
     pub command_line_bg: String,
@@ -96,6 +99,8 @@ pub struct UITheme {
     pub status_right_fg: Color,
     pub line_number: Color,
     pub line_number_current: Color,
+    /// Color used for the mark indicator rendered in the number column
+    pub mark_indicator: Color,
     pub cursor_line_bg: Color,
     pub empty_line: Color,
     pub command_line_bg: Color,
@@ -187,6 +192,7 @@ impl ThemeConfig {
             status_modified: "#f74c00".to_string(),
             line_number: "#8c6239".to_string(),
             line_number_current: "#deb887".to_string(),
+            mark_indicator: "#e6b422".to_string(),
             cursor_line_bg: "#2d2318".to_string(),
             empty_line: "#4a3728".to_string(),
             command_line_bg: "#1f1611".to_string(),
@@ -428,6 +434,7 @@ impl UITheme {
             status_right_fg: right_fg,
             line_number: parse_color(&colors.line_number),
             line_number_current: parse_color(&colors.line_number_current),
+            mark_indicator: parse_color(&colors.mark_indicator),
             cursor_line_bg: parse_color(&colors.cursor_line_bg),
             empty_line: parse_color(&colors.empty_line),
             command_line_bg: parse_color(&colors.command_line_bg),
@@ -441,6 +448,10 @@ impl UITheme {
             mode_colors,
         }
     }
+}
+
+fn default_mark_color() -> String {
+    "#e6b422".to_string()
 }
 
 #[derive(Debug, Clone)]

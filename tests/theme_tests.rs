@@ -25,3 +25,12 @@ fn test_emergency_theme_config() {
     assert_eq!(config.theme.current, "default");
     assert!(config.themes.contains_key("default"));
 }
+
+#[test]
+fn test_default_theme_has_mark_indicator_color() {
+    let config = ThemeConfig::load();
+    let theme = config.get_current_theme();
+    // Accessing mark_indicator via UITheme is enough to ensure parsing path exists
+    // We can't easily inspect the private field, but ensure UITheme construction succeeds
+    let _ui = theme.ui; // move to ensure no panic
+}

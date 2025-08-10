@@ -151,6 +151,7 @@ impl Editor {
         ui.show_line_numbers = config.display.show_line_numbers;
         ui.show_relative_numbers = config.display.show_relative_numbers;
         ui.show_cursor_line = config.display.show_cursor_line;
+        ui.show_marks_in_number_column = config.display.show_marks_in_number_column;
         ui.set_theme(&config.display.color_scheme);
 
         let key_handler = KeyHandler::new();
@@ -1194,6 +1195,7 @@ impl Editor {
         self.ui.show_line_numbers = self.config.display.show_line_numbers;
         self.ui.show_relative_numbers = self.config.display.show_relative_numbers;
         self.ui.show_cursor_line = self.config.display.show_cursor_line;
+        self.ui.show_marks_in_number_column = self.config.display.show_marks_in_number_column;
         self.ui.set_theme(&self.config.display.color_scheme);
 
         // Apply specific settings that need immediate effect
@@ -1226,6 +1228,9 @@ impl Editor {
             "autosave" | "aw" => {
                 // Auto save setting changed, check if we should save now
                 self.check_auto_save();
+            }
+            "showmarks" | "smk" => {
+                // Nothing extra to do; UI flag already mirrors config
             }
             _ => {}
         }
@@ -1265,6 +1270,9 @@ impl Editor {
             "number" | "nu" => Some(self.config.display.show_line_numbers.to_string()),
             "relativenumber" | "rnu" => Some(self.config.display.show_relative_numbers.to_string()),
             "cursorline" | "cul" => Some(self.config.display.show_cursor_line.to_string()),
+            "showmarks" | "smk" => {
+                Some(self.config.display.show_marks_in_number_column.to_string())
+            }
             "tabstop" | "ts" => Some(self.config.behavior.tab_width.to_string()),
             "expandtab" | "et" => Some(self.config.behavior.expand_tabs.to_string()),
             "autoindent" | "ai" => Some(self.config.behavior.auto_indent.to_string()),
@@ -1504,6 +1512,7 @@ impl Editor {
         self.ui.show_line_numbers = new_config.display.show_line_numbers;
         self.ui.show_relative_numbers = new_config.display.show_relative_numbers;
         self.ui.show_cursor_line = new_config.display.show_cursor_line;
+        self.ui.show_marks_in_number_column = new_config.display.show_marks_in_number_column;
 
         self.config = new_config;
         self.status_message = "Editor configuration reloaded".to_string();
@@ -2147,6 +2156,8 @@ impl Editor {
                 None
             }
         };
+        // Request an immediate redraw so the number column updates with the mark indicator
+        self.request_redraw();
         if let Some(pos) = pos {
             self.set_status_message(format!(
                 "Set mark '{}' at {}:{}",
@@ -2164,6 +2175,7 @@ impl Editor {
                 false
             }
         };
+        // Jump affects cursor position which already triggers redraw; no extra flag needed
         if ok {
             self.set_status_message(format!("Jumped to mark '{}' (line)", register));
         } else {
@@ -2185,5 +2197,11 @@ impl Editor {
         } else {
             self.set_status_message(format!("Mark '{}' not set", register));
         }
+    }
+
+    /// Request a UI redraw (used for visual state changes not tracked by the input diff)
+    pub fn request_redraw(&self) {
+        self.needs_syntax_refresh
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }

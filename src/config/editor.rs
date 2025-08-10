@@ -24,6 +24,9 @@ pub struct DisplayConfig {
     pub show_cursor_line: bool,
     pub color_scheme: String,
     pub syntax_highlighting: bool,
+    /// Show a mark indicator in the number column for lines that have a mark
+    #[serde(default = "default_true")]
+    pub show_marks_in_number_column: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,6 +175,7 @@ impl Default for EditorConfig {
                 show_cursor_line: false,
                 color_scheme: "default".to_string(), // Match the theme in themes.toml
                 syntax_highlighting: true,
+                show_marks_in_number_column: true,
             },
             behavior: BehaviorConfig {
                 tab_width: 4,
@@ -514,6 +518,17 @@ impl EditorConfig {
                 Ok(format!(
                     "Syntax highlighting: {}",
                     if self.display.syntax_highlighting {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                ))
+            }
+            "showmarks" | "smk" => {
+                self.display.show_marks_in_number_column = value.parse().unwrap_or(true);
+                Ok(format!(
+                    "Marks in number column: {}",
+                    if self.display.show_marks_in_number_column {
                         "enabled"
                     } else {
                         "disabled"

@@ -4,6 +4,7 @@ show_relative_numbers = true
 show_cursor_line = true
 color_scheme = "default"
 syntax_highlighting = true
+show_marks_in_number_column = true
 
 [behavior]
 tab_width = 4
@@ -32,47 +33,32 @@ side_scroll_off = 0
 window_resize_amount = 1
 completion_menu_width = 30
 completion_menu_height = 8
-# Enable '%' prefix in :e/:w path completion to root at current buffer.
-# Toggle at runtime with :set ppr / :set noppr, query with :set ppr?
 percent_path_root = true
 
-[statusline]
-# Toggle individual status line segments (all default to true).
-# Indentation segment: shows Tabs/Spaces and width
-show_indent = true
-# End-of-line marker (placeholder until per-buffer EOL is tracked)
-show_eol = true
-# Encoding detection (ASCII vs UTF-8 heuristic)
-show_encoding = true
-# File type/language name
-show_type = true
-# Macro recording indicator (REC @x)
-show_macro = true
-# Search progress (i/N or N matches)
-show_search = true
-# File progress percentage
-show_progress = true
-# Separator between segments (default two spaces)
-separator = "  "
-
 [languages]
-# Default language to use when no specific language can be detected
 default_language = "text"
 
-# File extension to language mapping
-# Each entry maps file extensions to their corresponding language identifier
 [languages.extensions]
-"rs" = "rust"
-"toml" = "toml"
-"md" = "markdown"
-"txt" = "text"
-"json" = "json"
-"yaml" = "yaml"
-"yml" = "yaml"
+md = "markdown"
+toml = "toml"
+yml = "yaml"
+json = "json"
+rs = "rust"
+yaml = "yaml"
+txt = "text"
 
-# Content-based language detection patterns for unnamed files
 [languages.content_patterns]
+json = ["{", '"']
 rust = ["fn ", "let ", "use ", "impl ", "struct ", "enum "]
 toml = ["[", "="]
 markdown = ["# ", "## ", "```"]
-json = ["{", "\""]
+
+[statusline]
+show_indent = true
+show_eol = true
+show_encoding = true
+show_type = true
+show_macro = true
+show_search = true
+show_progress = true
+separator = "  "

@@ -192,3 +192,20 @@ fn test_editor_config_parsing() {
     assert!(config.display.show_cursor_line);
     assert!(config.display.syntax_highlighting);
 }
+
+#[test]
+fn test_showmarks_setting_defaults_and_set() {
+    let mut config = EditorConfig::load();
+    // Default from editor.toml should be true
+    assert!(config.display.show_marks_in_number_column);
+
+    // Toggle off via :set equivalent
+    let res = config.set_setting("showmarks", "false");
+    assert!(res.is_ok());
+    assert!(!config.display.show_marks_in_number_column);
+
+    // Toggle on via alias
+    let res = config.set_setting("smk", "true");
+    assert!(res.is_ok());
+    assert!(config.display.show_marks_in_number_column);
+}
