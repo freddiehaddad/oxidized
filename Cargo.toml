@@ -30,6 +30,8 @@ chrono = "0.4"
 # Error handling
 thiserror = "2.0"
 anyhow = "1.0"
+unicode-segmentation = "1.11"
+unicode-width = "0.2"
 
 [dev-dependencies]
 # Async runtime for tests only
