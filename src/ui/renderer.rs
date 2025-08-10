@@ -56,6 +56,57 @@ impl UI {
         }
     }
 
+    /// Compute the status line text for a given width. Public for testing.
+    pub fn compute_status_line_text(
+        &self,
+        editor_state: &crate::core::editor::EditorRenderState,
+        width: u16,
+    ) -> String {
+        let mut status_text = String::new();
+
+        // Mode indicator
+        status_text.push_str(&format!(" {} ", editor_state.mode));
+
+        // Buffer information
+        if editor_state.buffer_count > 1
+            && let Some(buffer_id) = editor_state.current_buffer_id
+        {
+            status_text.push_str(&format!(" [{}] ", buffer_id));
+        }
+
+        // File and cursor info (only when a buffer exists)
+        if let Some(buffer) = &editor_state.current_buffer {
+            if let Some(path) = &buffer.file_path {
+                status_text.push_str(&format!(" {} ", path.display()));
+            } else {
+                status_text.push_str(" [No Name] ");
+            }
+
+            if buffer.modified {
+                status_text.push_str("[+] ");
+            }
+
+            status_text.push_str(&format!(
+                "{}:{} ",
+                buffer.cursor.row + 1,
+                buffer.cursor.col + 1
+            ));
+        }
+
+        // Status message
+        if !editor_state.status_message.is_empty() {
+            status_text.push_str(&format!(" | {}", editor_state.status_message));
+        }
+
+        // Pad to full width and truncate if necessary
+        let padding = width as usize - status_text.len().min(width as usize);
+        status_text.push_str(&" ".repeat(padding));
+        if status_text.len() > width as usize {
+            status_text.truncate(width as usize);
+        }
+        status_text
+    }
+
     // --- UTF-8 helpers ---
     /// Convert a character position to a byte index by walking char_indices.
     #[doc(hidden)]
