@@ -2130,4 +2130,9 @@ impl Editor {
     pub fn record_macro_event(&mut self, event: crossterm::event::KeyEvent) {
         self.macro_recorder.record_event(event);
     }
+
+    /// Mark macro playback as finished (resets internal playing flag)
+    pub fn finish_macro_playback(&mut self) {
+        self.macro_recorder.finish_playback();
+    }
 }

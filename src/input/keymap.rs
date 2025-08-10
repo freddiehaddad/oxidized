@@ -33,6 +33,8 @@ pub struct KeyHandler {
     pub last_command: Option<RepeatableCommand>,
     // Macro recording register selection state (after pressing 'q')
     pub pending_macro_register: bool,
+    // Macro execution register selection state (after pressing '@')
+    pub pending_macro_execute: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -77,6 +79,7 @@ impl KeyHandler {
             pending_char_command: None,
             last_command: None,
             pending_macro_register: false,
+            pending_macro_execute: false,
         }
     }
 
@@ -154,6 +157,82 @@ impl KeyHandler {
                 _ => {
                     // Any non-char cancels the pending state without starting
                     self.pending_macro_register = false;
+                    self.pending_sequence.clear();
+                    return Ok(());
+                }
+            }
+        }
+
+        // If we're waiting for a macro execute target after '@', handle next key
+        if self.pending_macro_execute {
+            match key.code {
+                KeyCode::Char('@') => {
+                    // Repeat last executed macro (@@)
+                    self.pending_macro_execute = false;
+                    self.pending_sequence.clear();
+                    match editor.play_last_macro() {
+                        Ok(events) => {
+                            if let Some(last_register) = editor.get_last_played_macro_register() {
+                                info!(
+                                    "Repeating last macro from register '{}' with {} events",
+                                    last_register,
+                                    events.len()
+                                );
+                            }
+                            for key_event in events {
+                                if let Some(action) = self.get_action_for_key(editor, &key_event) {
+                                    self.execute_action_without_recording(
+                                        editor, &action, key_event,
+                                    )?;
+                                }
+                            }
+                            // Mark playback finished
+                            editor.finish_macro_playback();
+                        }
+                        Err(e) => {
+                            warn!("Failed to repeat last macro: {}", e);
+                        }
+                    }
+                    return Ok(());
+                }
+                KeyCode::Char(register) => {
+                    self.pending_macro_execute = false;
+                    self.pending_sequence.clear();
+                    match editor.play_macro(register) {
+                        Ok(events) => {
+                            info!(
+                                "Executing macro from register '{}' with {} events",
+                                register,
+                                events.len()
+                            );
+                            for key_event in events {
+                                if let Some(action) = self.get_action_for_key(editor, &key_event) {
+                                    self.execute_action_without_recording(
+                                        editor, &action, key_event,
+                                    )?;
+                                }
+                            }
+                            // Mark playback finished
+                            editor.finish_macro_playback();
+                        }
+                        Err(e) => {
+                            warn!(
+                                "Failed to execute macro from register '{}': {}",
+                                register, e
+                            );
+                        }
+                    }
+                    return Ok(());
+                }
+                KeyCode::Esc => {
+                    // Cancel pending execute
+                    self.pending_macro_execute = false;
+                    self.pending_sequence.clear();
+                    return Ok(());
+                }
+                _ => {
+                    // Any non-char cancels
+                    self.pending_macro_execute = false;
                     self.pending_sequence.clear();
                     return Ok(());
                 }
@@ -3003,57 +3082,16 @@ impl KeyHandler {
         Ok(())
     }
 
-    fn action_execute_macro(&mut self, editor: &mut Editor, key: KeyEvent) -> Result<()> {
-        match key.code {
-            KeyCode::Char('@') => {
-                // Repeat last executed macro (@@)
-                match editor.play_last_macro() {
-                    Ok(events) => {
-                        if let Some(last_register) = editor.get_last_played_macro_register() {
-                            info!(
-                                "Repeating last macro from register '{}' with {} events",
-                                last_register,
-                                events.len()
-                            );
-                        }
-                        for key_event in events {
-                            if let Some(action) = self.get_action_for_key(editor, &key_event) {
-                                self.execute_action_without_recording(editor, &action, key_event)?;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Failed to repeat last macro: {}", e);
-                    }
-                }
-            }
-            KeyCode::Char(register) => {
-                match editor.play_macro(register) {
-                    Ok(events) => {
-                        info!(
-                            "Executing macro from register '{}' with {} events",
-                            register,
-                            events.len()
-                        );
-                        // Execute the recorded macro events
-                        for key_event in events {
-                            // Get the action for this key in the current mode
-                            if let Some(action) = self.get_action_for_key(editor, &key_event) {
-                                self.execute_action_without_recording(editor, &action, key_event)?;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to execute macro from register '{}': {}",
-                            register, e
-                        );
-                    }
-                }
-            }
-            _ => {
-                warn!("Invalid register for macro execution: expected a character or @");
-            }
+    fn action_execute_macro(&mut self, _editor: &mut Editor, key: KeyEvent) -> Result<()> {
+        // Pressing '@' should arm pending macro execution; next key chooses register or '@' for repeat
+        if let KeyCode::Char('@') = key.code {
+            self.pending_macro_execute = true;
+            self.pending_sequence.clear();
+            debug!("Armed pending macro execution; awaiting register or '@'");
+        } else {
+            // If mapping is triggered with other key (unlikely), fall back to arming as well
+            self.pending_macro_execute = true;
+            self.pending_sequence.clear();
         }
         Ok(())
     }
@@ -3073,7 +3111,25 @@ impl KeyHandler {
         };
 
         let key_str = KeyHandler::key_event_to_string(*key_event);
-        keymap.get(&key_str).cloned()
+        if let Some(action) = keymap.get(&key_str) {
+            return Some(action.clone());
+        }
+
+        // Fallback: for modes that use a generic "Char" mapping, map raw character keys accordingly
+        match editor.mode() {
+            Mode::Insert | Mode::Replace | Mode::Command | Mode::Search => {
+                if let KeyCode::Char(_) = key_event.code
+                    && !key_event.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key_event.modifiers.contains(KeyModifiers::ALT)
+                    && let Some(action) = keymap.get("Char")
+                {
+                    return Some(action.clone());
+                }
+            }
+            _ => {}
+        }
+
+        None
     }
 
     fn is_repeatable_action(&self, action: &str) -> bool {

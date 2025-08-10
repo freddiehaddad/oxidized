@@ -152,6 +152,12 @@ cargo install --path .
 - `@@` - Repeat last executed macro
 - `3@a` - Execute macro 'a' three times
 
+Notes:
+
+- After pressing `q`, the next character selects the macro register. That key is consumed and will not trigger its normal mapping (e.g., `a` won’t enter insert mode).
+- Press `q` again to stop recording. While recording, the statusline shows `REC @<register>`.
+- If you pressed `q` by mistake, press `Esc` to cancel the pending register selection without starting a recording.
+
 ### Advanced Window Management
 
 **Window Creation:**
