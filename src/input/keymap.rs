@@ -92,32 +92,26 @@ impl KeyHandler {
                 info!("Successfully loaded keymap configuration from keymaps.toml");
                 return config;
             } else {
-                warn!("Failed to parse keymaps.toml, falling back to default keymaps");
+                warn!(
+                    "Failed to parse keymaps.toml; no built-in keymaps will be used. Please fix keymaps.toml."
+                );
             }
         } else {
-            debug!("keymaps.toml not found, using default keymaps");
+            warn!(
+                "keymaps.toml not found; no built-in keymaps will be used. Please add keymaps.toml."
+            );
         }
 
-        // Fallback to empty keymaps - this should rarely happen
-        // Users should have a keymaps.toml file
-        eprintln!("Warning: Could not load keymaps.toml, using minimal fallback");
+        // Return empty keymaps to ensure all bindings come from keymaps.toml only
         Self::create_minimal_fallback()
     }
 
     fn create_minimal_fallback() -> KeymapConfig {
-        // Absolute minimal keymaps just to exit gracefully
-        let mut normal_mode = HashMap::new();
-        normal_mode.insert(":".to_string(), "command_mode".to_string());
-
-        let mut command_mode = HashMap::new();
-        command_mode.insert("Escape".to_string(), "normal_mode".to_string());
-        command_mode.insert("Enter".to_string(), "execute_command".to_string());
-        command_mode.insert("Char".to_string(), "append_command".to_string());
-
+        // Return fully empty maps to avoid any hard-coded keybindings in code
         KeymapConfig {
-            normal_mode,
+            normal_mode: HashMap::new(),
             insert_mode: HashMap::new(),
-            command_mode,
+            command_mode: HashMap::new(),
             visual_mode: HashMap::new(),
             visual_line_mode: HashMap::new(),
             visual_block_mode: HashMap::new(),

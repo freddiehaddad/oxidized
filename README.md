@@ -257,12 +257,21 @@ default_language = "text"
 ### Keymap Customization (`keymaps.toml`)
 
 ```toml
+# Default Keymaps Configuration
+# This file defines all keybindings for the editor
+# Format: key = "action" or key = { action = "command", args = ["arg1", "arg2"] }
+
 [normal_mode]
 # Movement
 "h" = "cursor_left"
 "j" = "cursor_down"
 "k" = "cursor_up"
 "l" = "cursor_right"
+"Left" = "cursor_left"
+"Down" = "cursor_down"
+"Up" = "cursor_up"
+"Right" = "cursor_right"
+
 "w" = "word_forward"
 "b" = "word_backward"
 "e" = "word_end"
@@ -274,43 +283,334 @@ default_language = "text"
 
 # Mode transitions
 "i" = "insert_mode"
+"I" = "insert_line_start"
 "a" = "insert_after"
+"A" = "insert_line_end"
 "o" = "insert_line_below"
+"O" = "insert_line_above"
 "v" = "visual_mode"
 "V" = "visual_line_mode"
-"Ctrl+v" = "visual_block_mode"      # Note: some terminals intercept Ctrl+V
-"Alt+v" = "visual_block_mode"       # Alternative binding if Ctrl+V is intercepted
-
-# Delete/Edit operations
-"x" = "delete_char_at_cursor"
-"dd" = "delete_line"
-"yy" = "yank_line"
-"p" = "put_after"
-"P" = "put_before"
+"Ctrl+v" = "visual_block_mode"
+"Alt+v" = "visual_block_mode" # Alternative for terminals that intercept Ctrl+V (e.g., VS Code)
+"R" = "replace_mode"
 
 # Search
 "/" = "search_forward"
+"?" = "search_backward"
 "n" = "search_next"
 "N" = "search_previous"
 
+# Character navigation (find/till)
+"f" = "start_find_char_forward"
+"F" = "start_find_char_backward"
+"t" = "start_till_char_forward"
+"T" = "start_till_char_backward"
+";" = "repeat_char_search"
+"," = "repeat_char_search_reverse"
+
+# Commands
+":" = "command_mode"
+
+# Delete operations
+"x" = "delete_char_at_cursor"
+"X" = "delete_char_before_cursor"
+"dd" = "delete_line"
+"D" = "delete_to_end_of_line"
+
+# Line operations
+"J" = "join_lines"
+"C" = "change_to_end_of_line"
+"S" = "change_entire_line"
+"s" = "substitute_char"
+
+# Bracket matching
+"%" = "bracket_match"
+
+# Paragraph movement
+"{" = "paragraph_backward"
+"}" = "paragraph_forward"
+
+# Sentence movement
+"(" = "sentence_backward"
+
+")" = "sentence_forward"
+
+# Section movement
+"[[" = "section_backward"
+
+"]]" = "section_forward"
+
+# Repeat operations
+"." = "repeat_last_change"
+
+# Operators (enter operator-pending mode)
+"d" = "operator_delete"
+"c" = "operator_change"
+"y" = "operator_yank"
+">" = "operator_indent"
+"<" = "operator_unindent"
+"~" = "operator_toggle_case"
+
+# Yank (copy) operations
+"yy" = "yank_line"
+"yw" = "yank_word"
+"y$" = "yank_to_end_of_line"
+
+# Put (paste) operations
+"p" = "put_after"
+"P" = "put_before"
+
+# File operations
+"Ctrl+s" = "save_file"
+"Ctrl+q" = "quit"
+
+# Macro operations
+"q" = "start_macro_recording"  # q{register} - start/stop recording
+"@" = "execute_macro"          # @{register} - execute macro
+
+# Undo/Redo
+"u" = "undo"
+"Ctrl+r" = "redo"
+
+# Buffer management
+"Ctrl+n" = "buffer_next"
+"Ctrl+p" = "buffer_previous"
+
+# Scrolling operations (Vim-style)
+"Ctrl+e" = "scroll_down_line"      # Scroll down one line
+"Ctrl+y" = "scroll_up_line"        # Scroll up one line
+"Ctrl+f" = "scroll_down_page"      # Scroll down one page (Page Down)
+"Ctrl+b" = "scroll_up_page"        # Scroll up one page (Page Up)
+"Ctrl+d" = "scroll_down_half_page" # Scroll down half page
+"Ctrl+u" = "scroll_up_half_page"   # Scroll up half page
+
+# Centering operations (z commands)
+"zz" = "center_cursor"    # Center current line in viewport
+"zt" = "cursor_to_top"    # Move current line to top of viewport
+"zb" = "cursor_to_bottom" # Move current line to bottom of viewport
+
+# Alternative center commands
+"z." = "center_cursor"     # Center current line (alternative)
+"z-" = "cursor_to_bottom"  # Move current line to bottom (alternative)
+"z Enter" = "cursor_to_top" # Move current line to top (alternative)
+
+# Window/Split navigation
+"Ctrl+w h" = "window_left"      # Move to window left
+"Ctrl+w j" = "window_down"      # Move to window down
+"Ctrl+w k" = "window_up"        # Move to window up
+"Ctrl+w l" = "window_right"     # Move to window right
+"Ctrl+w Left" = "window_left"   # Move to window left (arrow key)
+"Ctrl+w Down" = "window_down"   # Move to window down (arrow key)
+"Ctrl+w Up" = "window_up"       # Move to window up (arrow key)
+"Ctrl+w Right" = "window_right" # Move to window right (arrow key)
+
+# Window splitting - basic
+"Ctrl+w s" = "split_horizontal" # Split horizontally (below)
+"Ctrl+w v" = "split_vertical"   # Split vertically (right)
+
+# Window splitting - directional  
+"Ctrl+w S" = "split_horizontal_above" # Split horizontally above current window
+"Ctrl+w V" = "split_vertical_left"    # Split vertically left of current window
+
 # Window management
-"Ctrl+w s" = "split_horizontal"
-"Ctrl+w v" = "split_vertical"
-"Ctrl+w h" = "window_left"
-"Ctrl+w j" = "window_down"
-"Ctrl+w k" = "window_up"
-"Ctrl+w l" = "window_right"
+"Ctrl+w c" = "close_window" # Close current window
+"Ctrl+w q" = "close_window" # Close current window (alternative)
 
-# Viewport control
-"zz" = "center_cursor"
-"zt" = "cursor_to_top"
-"zb" = "cursor_to_bottom"
+# Window resizing
+"Ctrl+w >" = "resize_window_wider"    # Make window wider
+"Ctrl+w <" = "resize_window_narrower" # Make window narrower
+"Ctrl+w +" = "resize_window_taller"   # Make window taller
+"Ctrl+w -" = "resize_window_shorter"  # Make window shorter
 
-# Scrolling
-"Ctrl+f" = "scroll_down_page"
-"Ctrl+b" = "scroll_up_page"
-"Ctrl+d" = "scroll_down_half_page"
-"Ctrl+u" = "scroll_up_half_page"
+# Additional navigation keys
+"Home" = "line_start"
+"End" = "line_end"
+"PageUp" = "scroll_up_page"     # Map PageUp to scroll up page
+"PageDown" = "scroll_down_page" # Map PageDown to scroll down page
+
+# Function keys for common operations
+"F1" = "command_mode"   # Help/command mode
+"F2" = "save_file"      # Quick save
+"F3" = "search_forward" # Find
+"F10" = "quit"          # Exit
+
+[insert_mode]
+# Basic editing
+"Char" = "insert_char"
+"Enter" = "new_line"
+"Backspace" = "delete_char"
+"Delete" = "delete_char_forward"
+"Tab" = "insert_tab"
+
+# Movement in insert mode
+"Left" = "cursor_left"
+"Right" = "cursor_right"
+"Up" = "cursor_up"
+"Down" = "cursor_down"
+
+# Mode transitions
+"Escape" = "normal_mode"
+"Ctrl+c" = "normal_mode"
+
+# Additional navigation in insert mode
+"Home" = "line_start"
+"End" = "line_end"
+"Ctrl+a" = "line_start"
+"Ctrl+e" = "line_end"
+"Ctrl+w" = "delete_word_backward"
+
+[command_mode]
+# Command execution
+"Enter" = "execute_command"
+"Escape" = "normal_mode"
+"Ctrl+c" = "normal_mode"
+
+# Editing command line
+"Char" = "append_command"
+"Backspace" = "delete_command_char"
+
+# Command completion
+"Tab" = "command_complete"
+"Ctrl+n" = "completion_next"
+"Ctrl+p" = "completion_previous"
+"Ctrl+y" = "completion_accept"
+
+[visual_mode]
+# Movement (inherits from normal mode)
+"h" = "cursor_left"
+"j" = "cursor_down"
+"k" = "cursor_up"
+"l" = "cursor_right"
+"w" = "word_forward"
+"b" = "word_backward"
+"0" = "line_start"
+"$" = "line_end"
+
+# Actions
+"d" = "delete_selection"
+"y" = "yank_selection"
+"c" = "change_selection"
+
+# Mode transitions
+"Escape" = "normal_mode"
+"v" = "normal_mode"
+
+[visual_line_mode]
+# Movement (inherits from normal mode)
+"h" = "cursor_left"
+"j" = "cursor_down"
+"k" = "cursor_up"
+"l" = "cursor_right"
+"w" = "word_forward"
+"b" = "word_backward"
+"0" = "line_start"
+"$" = "line_end"
+
+# Actions
+"d" = "delete_selection"
+"y" = "yank_selection"
+"c" = "change_selection"
+
+# Mode transitions
+"Escape" = "normal_mode"
+"V" = "normal_mode"
+"v" = "visual_mode"
+
+[visual_block_mode]
+# Movement (inherits from normal mode)
+"h" = "cursor_left"
+"j" = "cursor_down"
+"k" = "cursor_up"
+"l" = "cursor_right"
+"w" = "word_forward"
+"b" = "word_backward"
+"0" = "line_start"
+"$" = "line_end"
+
+# Actions
+"d" = "delete_selection"
+"y" = "yank_selection"
+"c" = "change_selection"
+
+# Mode transitions
+"Escape" = "normal_mode"
+"Ctrl+v" = "normal_mode"
+"Alt+v" = "normal_mode" # Alternative exit for Visual Block
+"v" = "visual_mode"
+
+[replace_mode]
+# Character replacement
+"Char" = "replace_char"
+"Escape" = "normal_mode"
+"Ctrl+c" = "normal_mode"
+
+[search_mode]
+# Search input
+"Char" = "append_search"
+"Enter" = "execute_search"
+"Escape" = "normal_mode"
+"Ctrl+c" = "normal_mode"
+"Backspace" = "delete_search_char"
+
+[operator_pending_mode]
+# Compound operator sequences (when already in operator-pending mode)
+"d" = "delete_line"     # dd - delete current line (second d when already in OP mode)
+"c" = "change_entire_line" # cc - change current line  
+"y" = "yank_line"       # yy - yank current line
+
+# Text objects for operators
+# Word text objects
+"iw" = "text_object_iw" # inner word
+"aw" = "text_object_aw" # a word
+"iW" = "text_object_iW" # inner WORD
+"aW" = "text_object_aW" # a WORD
+
+# Sentence and paragraph text objects
+"is" = "text_object_is" # inner sentence
+"as" = "text_object_as" # a sentence
+"ip" = "text_object_ip" # inner paragraph
+"ap" = "text_object_ap" # a paragraph
+
+# Quote text objects
+"i\"" = "text_object_i\"" # inner double quotes
+"a\"" = "text_object_a\"" # a double quotes
+"i'" = "text_object_i'"   # inner single quotes
+"a'" = "text_object_a'"   # a single quotes
+"i`" = "text_object_i`"   # inner backticks
+"a`" = "text_object_a`"   # a backticks
+
+# Bracket text objects
+"i(" = "text_object_i(" # inner parentheses
+"a(" = "text_object_a(" # a parentheses
+"i)" = "text_object_i)" # inner parentheses (alternative)
+"a)" = "text_object_a)" # a parentheses (alternative)
+"ib" = "text_object_ib" # inner parentheses (vim style)
+"ab" = "text_object_ab" # a parentheses (vim style)
+
+"i[" = "text_object_i[" # inner square brackets
+"a[" = "text_object_a[" # a square brackets
+"i]" = "text_object_i]" # inner square brackets (alternative)
+"a]" = "text_object_a]" # a square brackets (alternative)
+
+"i{" = "text_object_i{" # inner curly braces
+"a{" = "text_object_a{" # a curly braces
+"i}" = "text_object_i}" # inner curly braces (alternative)
+"a}" = "text_object_a}" # a curly braces (alternative)
+"iB" = "text_object_iB" # inner curly braces (vim style)
+"aB" = "text_object_aB" # a curly braces (vim style)
+
+"i<" = "text_object_i<" # inner angle brackets
+"a<" = "text_object_a<" # a angle brackets
+"i>" = "text_object_i>" # inner angle brackets (alternative)
+"a>" = "text_object_a>" # a angle brackets (alternative)
+
+# Tag text objects (HTML/XML)
+"it" = "text_object_it" # inner tag
+"at" = "text_object_at" # a tag
+
+# Escape to cancel operator
+"Escape" = "normal_mode"
+"Ctrl+c" = "normal_mode"
 ```
 
 ### Theme Configuration (`themes.toml`)

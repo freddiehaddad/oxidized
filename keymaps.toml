@@ -131,7 +131,7 @@
 # Alternative center commands
 "z." = "center_cursor"     # Center current line (alternative)
 "z-" = "cursor_to_bottom"  # Move current line to bottom (alternative)
-"zEnter" = "cursor_to_top" # Move current line to top (alternative)
+"z Enter" = "cursor_to_top" # Move current line to top (alternative)
 
 # Window/Split navigation
 "Ctrl+w h" = "window_left"      # Move to window left
