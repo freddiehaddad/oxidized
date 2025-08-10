@@ -30,6 +30,10 @@ struct RenderState {
     command_line: String,
     status_message: String,
     needs_full_redraw: bool,
+    // Track command completion state so UI can redraw when it changes
+    completion_active: bool,
+    completion_matches_len: usize,
+    completion_selected_index: usize,
 }
 
 impl EventDrivenEditor {
@@ -71,6 +75,9 @@ impl EventDrivenEditor {
                 command_line: String::new(),
                 status_message: String::new(),
                 needs_full_redraw: true, // Force initial full redraw
+                completion_active: false,
+                completion_matches_len: 0,
+                completion_selected_index: 0,
             })),
         }
     }
@@ -153,6 +160,10 @@ impl EventDrivenEditor {
                     let cursor_before = editor.current_buffer().map(|b| b.cursor);
                     let buffer_id_before = editor.current_buffer_id;
                     let command_line_before = editor.command_line().to_string();
+                    // Snapshot completion state before
+                    let completion_active_before = editor.is_completion_active();
+                    let completion_matches_len_before = editor.completion_matches_len();
+                    let completion_selected_index_before = editor.completion_selected_index();
 
                     // Process the key event
                     editor.handle_key_event(key_event)?;
@@ -162,11 +173,19 @@ impl EventDrivenEditor {
                     let cursor_after = editor.current_buffer().map(|b| b.cursor);
                     let buffer_id_after = editor.current_buffer_id;
                     let command_line_after = editor.command_line();
+                    // Completion state after
+                    let completion_active_after = editor.is_completion_active();
+                    let completion_matches_len_after = editor.completion_matches_len();
+                    let completion_selected_index_after = editor.completion_selected_index();
 
                     let needs_redraw = mode_before != mode_after
                         || cursor_before != cursor_after
                         || buffer_id_before != buffer_id_after
                         || command_line_before != command_line_after
+                        // Redraw when completion state changes (activation, matches, selection)
+                        || completion_active_before != completion_active_after
+                        || completion_matches_len_before != completion_matches_len_after
+                        || completion_selected_index_before != completion_selected_index_after
                         || editor
                             .needs_syntax_refresh
                             .load(std::sync::atomic::Ordering::Relaxed);
@@ -222,12 +241,21 @@ impl EventDrivenEditor {
                     let current_buffer_id = editor.current_buffer_id;
                     let current_command_line = editor.command_line().to_string();
                     let current_status = editor.status_message().to_string();
+                    // Current completion state summary
+                    let current_completion_active = editor.is_completion_active();
+                    let current_completion_matches_len = editor.completion_matches_len();
+                    let current_completion_selected_index = editor.completion_selected_index();
 
                     let needs_redraw = last_state.mode != current_mode
                         || last_state.cursor_position != current_cursor
                         || last_state.buffer_id != current_buffer_id
                         || last_state.command_line != current_command_line
                         || last_state.status_message != current_status
+                        // Redraw when completion state changed
+                        || last_state.completion_active != current_completion_active
+                        || last_state.completion_matches_len != current_completion_matches_len
+                        || last_state.completion_selected_index
+                            != current_completion_selected_index
                         || last_state.needs_full_redraw
                         || editor
                             .needs_syntax_refresh
@@ -244,6 +272,10 @@ impl EventDrivenEditor {
                             last_state.command_line = current_command_line;
                             last_state.status_message = current_status;
                             last_state.needs_full_redraw = false;
+                            last_state.completion_active = current_completion_active;
+                            last_state.completion_matches_len = current_completion_matches_len;
+                            last_state.completion_selected_index =
+                                current_completion_selected_index;
 
                             // Reset syntax refresh flag
                             editor

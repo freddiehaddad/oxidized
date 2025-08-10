@@ -616,6 +616,20 @@ impl Editor {
         self.command_completion.active
     }
 
+    /// Get the number of current completion matches (for UI redraw decisions)
+    pub fn completion_matches_len(&self) -> usize {
+        self.command_completion.matches.len()
+    }
+
+    /// Get the selected completion index (for UI redraw decisions)
+    pub fn completion_selected_index(&self) -> usize {
+        if self.command_completion.matches.is_empty() {
+            0
+        } else {
+            self.command_completion.selected_index
+        }
+    }
+
     pub fn completion_next(&mut self) {
         if self.command_completion.active {
             self.command_completion.next();
