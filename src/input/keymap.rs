@@ -1464,15 +1464,21 @@ impl KeyHandler {
     }
 
     fn action_undo(&self, editor: &mut Editor) -> Result<()> {
-        if let Some(buffer) = editor.current_buffer_mut() {
-            buffer.undo();
+        if let Some(buffer) = editor.current_buffer_mut()
+            && buffer.undo()
+        {
+            // Undo may not move the cursor; request redraw explicitly
+            editor.request_redraw();
         }
         Ok(())
     }
 
     fn action_redo(&self, editor: &mut Editor) -> Result<()> {
-        if let Some(buffer) = editor.current_buffer_mut() {
-            buffer.redo();
+        if let Some(buffer) = editor.current_buffer_mut()
+            && buffer.redo()
+        {
+            // Redo may not move the cursor; request redraw explicitly
+            editor.request_redraw();
         }
         Ok(())
     }
