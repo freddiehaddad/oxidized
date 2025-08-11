@@ -42,14 +42,23 @@ default_language = "text"
 
 [languages.extensions]
 json = "json"
-toml = "toml"
 md = "markdown"
+toml = "toml"
 txt = "text"
 yaml = "yaml"
 rs = "rust"
 yml = "yaml"
 
 [languages.content_patterns]
+json = [
+    "{",
+    '"',
+]
+markdown = [
+    "# ",
+    "## ",
+    "```",
+]
 toml = [
     "[",
     "=",
@@ -61,15 +70,6 @@ rust = [
     "impl ",
     "struct ",
     "enum ",
-]
-markdown = [
-    "# ",
-    "## ",
-    "```",
-]
-json = [
-    "{",
-    '"',
 ]
 
 [statusline]

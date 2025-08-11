@@ -65,6 +65,14 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
                 editor.quit();
             }
         }
+        // Force write and quit
+        "wq!" | "x!" => {
+            if let Err(e) = editor.save_current_buffer_force() {
+                editor.set_status_message(format!("Error saving: {}", e));
+            } else {
+                editor.quit();
+            }
+        }
 
         // Create a new empty buffer and switch to it
         "enew" => match editor.create_buffer(None) {
@@ -132,11 +140,27 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
                     Ok(msg) => editor.set_status_message(msg),
                     Err(e) => editor.set_status_message(format!("Error writing file: {}", e)),
                 }
+            } else if let Some(filename) = command.strip_prefix("w! ") {
+                let filename = filename.trim();
+                match editor.write_current_buffer_to_force(filename) {
+                    Ok(msg) => editor.set_status_message(msg),
+                    Err(e) => editor.set_status_message(format!("Error writing file: {}", e)),
+                }
             } else if let Some(filename) = command.strip_prefix("saveas ") {
                 let filename = filename.trim();
                 match editor.save_as_current_buffer(filename) {
                     Ok(msg) => editor.set_status_message(msg),
                     Err(e) => editor.set_status_message(format!("Error saving as: {}", e)),
+                }
+            } else if let Some(filename) = command.strip_prefix("saveas! ") {
+                let filename = filename.trim();
+                match editor.save_as_current_buffer_force(filename) {
+                    Ok(msg) => editor.set_status_message(msg),
+                    Err(e) => editor.set_status_message(format!("Error saving as: {}", e)),
+                }
+            } else if command == "w!" {
+                if let Err(e) = editor.save_current_buffer_force() {
+                    editor.set_status_message(format!("Error saving: {}", e));
                 }
             } else if let Some(buffer_ref) = command.strip_prefix("b ") {
                 let buffer_ref = buffer_ref.trim();

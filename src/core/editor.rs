@@ -1026,9 +1026,49 @@ impl Editor {
         Ok(())
     }
 
+    /// Force save current buffer, attempting to write even if file attributes prevent it
+    pub fn save_current_buffer_force(&mut self) -> Result<()> {
+        if let Some(buffer) = self.current_buffer_mut() {
+            // If there is a file path, try to make it writable first
+            if let Some(path) = &buffer.file_path {
+                let _ = Self::make_writable(path);
+            }
+            match buffer.save() {
+                Ok(_) => {
+                    self.status_message = "File saved".to_string();
+                    Ok(())
+                }
+                Err(e) => {
+                    self.status_message = format!("Error saving file: {}", e);
+                    Err(e)
+                }
+            }
+        } else {
+            self.status_message = "No file to save".to_string();
+            Ok(())
+        }
+    }
+
     /// Write current buffer contents to a specific file path without changing buffer name
     pub fn write_current_buffer_to(&mut self, filename: &str) -> Result<String> {
         use std::fs;
+        if let Some(buffer) = self.current_buffer() {
+            let sep = match buffer.eol {
+                crate::core::buffer::LineEnding::LF => "\n",
+                crate::core::buffer::LineEnding::CRLF => "\r\n",
+                crate::core::buffer::LineEnding::CR => "\r",
+            };
+            let content = buffer.lines.join(sep);
+            fs::write(filename, content)?;
+            Ok(format!("Wrote '{}'", filename))
+        } else {
+            Ok("No buffer to write".to_string())
+        }
+    }
+
+    pub fn write_current_buffer_to_force(&mut self, filename: &str) -> Result<String> {
+        use std::fs;
+        let _ = Self::make_writable(std::path::Path::new(filename));
         if let Some(buffer) = self.current_buffer() {
             let sep = match buffer.eol {
                 crate::core::buffer::LineEnding::LF => "\n",
@@ -1059,6 +1099,43 @@ impl Editor {
             Ok(format!("Saved as '{}'", filename))
         } else {
             Ok("No buffer to save".to_string())
+        }
+    }
+
+    pub fn save_as_current_buffer_force(&mut self, filename: &str) -> Result<String> {
+        use std::fs;
+        let _ = Self::make_writable(std::path::Path::new(filename));
+        if let Some(buffer) = self.current_buffer_mut() {
+            let sep = match buffer.eol {
+                crate::core::buffer::LineEnding::LF => "\n",
+                crate::core::buffer::LineEnding::CRLF => "\r\n",
+                crate::core::buffer::LineEnding::CR => "\r",
+            };
+            let content = buffer.lines.join(sep);
+            fs::write(filename, content)?;
+            buffer.file_path = Some(std::path::PathBuf::from(filename));
+            buffer.modified = false;
+            Ok(format!("Saved as '{}'", filename))
+        } else {
+            Ok("No buffer to save".to_string())
+        }
+    }
+
+    #[cfg_attr(windows, allow(clippy::permissions_set_readonly_false))]
+    fn make_writable(path: &std::path::Path) -> std::io::Result<()> {
+        use std::fs;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(path)?.permissions();
+            perms.set_mode(0o644);
+            fs::set_permissions(path, perms)
+        }
+        #[cfg(windows)]
+        {
+            let mut perms = fs::metadata(path)?.permissions();
+            perms.set_readonly(false);
+            fs::set_permissions(path, perms)
         }
     }
 
