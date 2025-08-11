@@ -1,0 +1,66 @@
+name: Render PlantUML SVGs
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+      - 'docs/**/*.puml'
+      - '.github/workflows/render-plantum**'
+  pull_request:
+    paths:
+      - 'docs/**/*.puml'
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install PlantUML and Graphviz
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y plantuml graphviz
+
+      - name: Render PlantUML to SVG
+        run: |
+          shopt -s nullglob
+          mkdir -p docs
+          files=(docs/*.puml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No .puml files found in docs/; nothing to render."
+            exit 0
+          fi
+          plantuml -tsvg -DPLANTUML_LIMIT_SIZE=16384 docs/*.puml
+
+      - name: Upload SVGs as artifact (PRs)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plantuml-svg
+          path: |
+            docs/*.svg
+
+      - name: Commit and push updated SVGs (push events)
+        if: github.event_name == 'push'
+        run: |
+          if git status --porcelain | grep -E '^\s*M|^\?\?' >/dev/null; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add docs/*.svg
+            git commit -m "docs(diagrams): update rendered SVGs [skip ci]"
+            git push
+          else
+            echo "No SVG changes to commit."
+          fi
