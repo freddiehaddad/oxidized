@@ -1,0 +1,29 @@
+@startuml
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+package "oxidized" {
+  [main.rs] --> (EventDrivenEditor)
+  (EventDrivenEditor) ..> (Input Thread)
+  (EventDrivenEditor) ..> (Config Watcher Thread)
+  (EventDrivenEditor) ..> (Syntax Thread)
+  (EventDrivenEditor) ..> (Render Thread)
+
+  (Input Thread) --> (Event Bus)
+  (Config Watcher Thread) --> (Event Bus)
+  (Syntax Thread) --> (Event Bus)
+
+  (Event Bus) --> (EventDrivenEditor)
+  (EventDrivenEditor) --> (Editor)
+  (Editor) --> (UI Renderer)
+  (UI Renderer) --> (Terminal)
+
+  (Editor) --> (WindowManager)
+  (Editor) --> (Buffer)
+  (Editor) ..> (SearchEngine)
+  (Editor) ..> (AsyncSyntaxHighlighter)
+  (Editor) ..> (CommandCompletion)
+  (Editor) ..> (ConfigWatcher)
+  (Editor) ..> (ThemeConfig)
+}
+@enduml

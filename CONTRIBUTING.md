@@ -2,6 +2,14 @@
 
 Thanks for your interest in contributing!
 
+Before you start, skim the developer docs under `docs/` for an overview and
+diagrams of the architecture:
+
+- docs/ARCHITECTURE.md — high-level guide
+- docs/component-overview.puml — components/threads (PlantUML)
+- docs/sequence-runtime.puml — runtime sequence (PlantUML)
+- docs/class-core.puml — core classes (PlantUML)
+
 ## Commit message conventions (50/72)
 
 We follow the classic 50/72 commit message style:
@@ -27,9 +35,13 @@ Common types: build, chore, ci, docs, feat, fix, perf, refactor, test
 
 ## Git hooks and templates
 
-This repository includes a `commit-msg` Git hook under `.githooks` to
-validate the 50/72 rule locally, plus a commit message template at
-`.gitmessage`.
+This repository includes helpful Git hooks under `.githooks`:
+
+- `commit-msg`: validates the 50/72 rule for commit messages
+- `pre-commit`: runs `cargo fmt` and `cargo clippy -D warnings` and restages
+ formatted files
+
+There is also a commit message template at `.gitmessage`.
 
 To enable them:
 
@@ -42,3 +54,11 @@ git config commit.template .gitmessage
 ```
 
 You can set these globally with `--global` if you prefer.
+
+## Expectations before opening a PR
+
+- Format: `cargo fmt` (pre-commit will do this automatically)
+- Lint: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+- Test: `cargo test` (close any running oxy.exe on Windows if test teardown
+ fails to remove the binary)
+- Docs: Update README and/or docs/ when changing user-visible behavior

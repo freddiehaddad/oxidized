@@ -258,6 +258,11 @@ Note: The left number column acts as a gutter. When `show_line_numbers` is false
 `show_marks` is true, a minimal gutter is still rendered so marks remain
 visible without enabling line numbers. The mark indicator uses the theme color `ui.mark_indicator`.
 
+You can toggle marks at runtime with:
+
+- `:set showmarks` or `:set smk` to enable
+- `:set noshowmarks` or `:set nosmk` to disable
+
 #### Search behavior
 
 - ignore_case (ic): When true, searches are case-insensitive by default.
@@ -725,6 +730,13 @@ constant = "#d33682"      # Same as numbers
 
 ## 🏗️ Architecture Overview
 
+Developer docs and diagrams:
+
+- docs/ARCHITECTURE.md — high-level guide
+- docs/component-overview.puml — component/thread overview (PlantUML)
+- docs/sequence-runtime.puml — runtime sequence (PlantUML)
+- docs/class-core.puml — core classes (PlantUML)
+
 ### Core Components
 
 **Editor Engine:**
@@ -889,6 +901,10 @@ cargo build
 
 # Run (debug builds default to debug-level logging)
 cargo run filename.txt
+
+Troubleshooting (Windows): if `cargo test` fails to remove `target\\debug\\oxy.exe`
+with "Access is denied (os error 5)", ensure no running editor instance is
+holding a file lock (close the editor or kill the process) and retry.
 ```
 
 **Release Build:**

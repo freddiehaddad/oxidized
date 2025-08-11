@@ -1,0 +1,25 @@
+@startuml
+skinparam shadowing false
+
+actor User as U
+participant Terminal as T
+participant "Input Thread" as IT
+participant "Event Bus" as EB
+participant EventDrivenEditor as EDE
+participant Editor as ED
+participant UI as UI
+
+U -> T : keypress
+T -> IT : crossterm::event::read()
+IT -> EB : Input(KeyPress)
+EB -> EDE : EditorEvent::Input
+activate EDE
+EDE -> ED : handle_key_event()
+ED --> EDE : state changed?
+EDE -> EB : UI(RedrawRequest)
+EB -> EDE : UI(RedrawRequest)
+EDE -> ED : render()
+ED -> UI : draw(editor_state)
+UI -> T : paint frame
+EDE --> U : updated screen
+@enduml

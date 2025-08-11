@@ -1,0 +1,49 @@
+@startuml
+skinparam shadowing false
+
+class Editor {
+  - buffers: HashMap<usize, Buffer>
+  - current_buffer_id: Option<usize>
+  - window_manager: WindowManager
+  - mode: Mode
+  - terminal: Terminal
+  - ui: UI
+  - config: EditorConfig
+  - theme_config: ThemeConfig
+  - async_syntax_highlighter: Option<AsyncSyntaxHighlighter>
+  - needs_syntax_refresh: Arc<AtomicBool>
+  - command_completion: CommandCompletion
+  + render(): Result<()>
+  + create_buffer(path): Result<usize>
+  + handle_key_event(key): Result<()>
+}
+
+class Buffer {
+  + id: usize
+  + file_path: Option<PathBuf>
+  + lines: Vec<String>
+  + cursor: Position
+  + selection: Option<Selection>
+  + undo_stack: VecDeque<BufferDelta>
+  + redo_stack: VecDeque<BufferDelta>
+  + marks: HashMap<char, Position>
+  + insert_char(ch)
+  + delete_char_at_cursor() -> bool
+  + delete_char_before_cursor() -> bool
+  + undo() -> bool
+  + redo() -> bool
+}
+
+class UI {
+  + show_line_numbers: bool
+  + show_relative_numbers: bool
+  + show_cursor_line: bool
+  + show_marks: bool
+  + compute_gutter_width(total_lines) -> usize
+}
+
+Editor "1" o-- "*" Buffer
+Editor "1" o-- "1" WindowManager
+Editor "1" o-- "1" UI
+Buffer "*" o-- "1" Position
+@enduml
