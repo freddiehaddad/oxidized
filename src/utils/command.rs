@@ -1,7 +1,7 @@
 // Command parsing and execution
 // This handles Ex-style commands (:w, :q, etc.) in a central place.
 
-use log::{debug, warn};
+use log::{debug, error, warn};
 
 use crate::core::editor::Editor;
 use crate::core::mode::Mode;
@@ -44,6 +44,7 @@ impl Command {
 /// - Always returns with editor back in Normal mode and command line cleared
 pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
     let command = raw.trim();
+    debug!("Executing Ex command: '{}'", command);
 
     match command {
         // Quit commands
@@ -53,6 +54,7 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
         // Write/save commands
         "w" | "write" => {
             if let Err(e) = editor.save_current_buffer() {
+                error!("Save failed: {}", e);
                 editor.set_status_message(format!("Error saving: {}", e));
             }
         }
@@ -60,6 +62,7 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
         // Write and quit
         "wq" | "x" => {
             if let Err(e) = editor.save_current_buffer() {
+                error!("Save before quit failed: {}", e);
                 editor.set_status_message(format!("Error saving: {}", e));
             } else {
                 editor.quit();
@@ -68,6 +71,7 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
         // Force write and quit
         "wq!" | "x!" => {
             if let Err(e) = editor.save_current_buffer_force() {
+                error!("Force save before quit failed: {}", e);
                 editor.set_status_message(format!("Error saving: {}", e));
             } else {
                 editor.quit();
@@ -131,35 +135,54 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
             if let Some(filename) = command.strip_prefix("e ") {
                 let filename = filename.trim();
                 match editor.open_file(filename) {
-                    Ok(msg) => editor.set_status_message(msg),
-                    Err(e) => editor.set_status_message(format!("Error opening file: {}", e)),
+                    Ok(msg) => {
+                        debug!("Opened file '{}'", filename);
+                        editor.set_status_message(msg)
+                    }
+                    Err(e) => {
+                        error!("Open file '{}' failed: {}", filename, e);
+                        editor.set_status_message(format!("Error opening file: {}", e))
+                    }
                 }
             } else if let Some(filename) = command.strip_prefix("w ") {
                 let filename = filename.trim();
                 match editor.write_current_buffer_to(filename) {
                     Ok(msg) => editor.set_status_message(msg),
-                    Err(e) => editor.set_status_message(format!("Error writing file: {}", e)),
+                    Err(e) => {
+                        error!("Write to '{}' failed: {}", filename, e);
+                        editor.set_status_message(format!("Error writing file: {}", e))
+                    }
                 }
             } else if let Some(filename) = command.strip_prefix("w! ") {
                 let filename = filename.trim();
                 match editor.write_current_buffer_to_force(filename) {
                     Ok(msg) => editor.set_status_message(msg),
-                    Err(e) => editor.set_status_message(format!("Error writing file: {}", e)),
+                    Err(e) => {
+                        error!("Force write to '{}' failed: {}", filename, e);
+                        editor.set_status_message(format!("Error writing file: {}", e))
+                    }
                 }
             } else if let Some(filename) = command.strip_prefix("saveas ") {
                 let filename = filename.trim();
                 match editor.save_as_current_buffer(filename) {
                     Ok(msg) => editor.set_status_message(msg),
-                    Err(e) => editor.set_status_message(format!("Error saving as: {}", e)),
+                    Err(e) => {
+                        error!("Save-as '{}' failed: {}", filename, e);
+                        editor.set_status_message(format!("Error saving as: {}", e))
+                    }
                 }
             } else if let Some(filename) = command.strip_prefix("saveas! ") {
                 let filename = filename.trim();
                 match editor.save_as_current_buffer_force(filename) {
                     Ok(msg) => editor.set_status_message(msg),
-                    Err(e) => editor.set_status_message(format!("Error saving as: {}", e)),
+                    Err(e) => {
+                        error!("Force save-as '{}' failed: {}", filename, e);
+                        editor.set_status_message(format!("Error saving as: {}", e))
+                    }
                 }
             } else if command == "w!" {
                 if let Err(e) = editor.save_current_buffer_force() {
+                    error!("Force save failed: {}", e);
                     editor.set_status_message(format!("Error saving: {}", e));
                 }
             } else if let Some(buffer_ref) = command.strip_prefix("b ") {
@@ -173,11 +196,13 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
                 } else if editor.switch_to_buffer_by_name(buffer_ref) {
                     editor.set_status_message(format!("Switched to buffer '{}'", buffer_ref));
                 } else {
+                    warn!("Unknown buffer reference in command: '{}'", command);
                     editor.set_status_message(format!("Unknown command: {}", command));
                 }
             } else if let Some(set_args) = command.strip_prefix("set ") {
                 handle_set_command(editor, set_args);
             } else {
+                warn!("Unknown Ex command: '{}'", command);
                 editor.set_status_message(format!("Unknown command: {}", command));
             }
         }
@@ -299,7 +324,10 @@ pub fn handle_set_command(editor: &mut Editor, args: &str) {
             "showcmd" | "sc" => editor.set_config_setting("showcmd", "false"),
             "syntax" | "syn" => editor.set_config_setting("syntax", "false"),
             "percentpathroot" | "ppr" => editor.set_config_setting("percentpathroot", "false"),
-            _ => editor.set_status_message(format!("Unknown option: no{}", setting)),
+            _ => {
+                warn!("Unknown :set option: no{}", setting);
+                editor.set_status_message(format!("Unknown option: no{}", setting))
+            }
         }
         return;
     }
@@ -397,6 +425,9 @@ pub fn handle_set_command(editor: &mut Editor, args: &str) {
         "showcmd" | "sc" => editor.set_config_setting("showcmd", "true"),
         "syntax" | "syn" => editor.set_config_setting("syntax", "true"),
         "percentpathroot" | "ppr" => editor.set_config_setting("percentpathroot", "true"),
-        _ => editor.set_status_message(format!("Unknown option: {}", args)),
+        _ => {
+            warn!("Unknown :set option: {}", args);
+            editor.set_status_message(format!("Unknown option: {}", args))
+        }
     }
 }
