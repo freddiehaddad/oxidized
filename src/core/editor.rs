@@ -115,6 +115,8 @@ pub struct Editor {
     async_syntax_highlighter: Option<AsyncSyntaxHighlighter>,
     /// Flag to trigger re-render when async syntax highlighting completes
     pub needs_syntax_refresh: Arc<AtomicBool>,
+    /// Flag to request a UI redraw for non-syntax changes (e.g., undo/delete with no cursor move)
+    pub needs_redraw: Arc<AtomicBool>,
     /// Command completion system
     command_completion: CommandCompletion,
     /// Current pending operator (for operator + text object combinations)
@@ -207,6 +209,7 @@ impl Editor {
             theme_config,
             async_syntax_highlighter,
             needs_syntax_refresh: Arc::new(AtomicBool::new(false)),
+            needs_redraw: Arc::new(AtomicBool::new(false)),
             command_completion: CommandCompletion::new(),
             pending_operator: None,
             text_object_finder: crate::features::text_objects::TextObjectFinder::new(),
@@ -2199,7 +2202,7 @@ impl Editor {
 
     /// Request a UI redraw (used for visual state changes not tracked by the input diff)
     pub fn request_redraw(&self) {
-        self.needs_syntax_refresh
+        self.needs_redraw
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }

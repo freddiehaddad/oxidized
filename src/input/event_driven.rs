@@ -196,6 +196,9 @@ impl EventDrivenEditor {
                         || completion_selected_index_before != completion_selected_index_after
                         || editor
                             .needs_syntax_refresh
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                        || editor
+                            .needs_redraw
                             .load(std::sync::atomic::Ordering::Relaxed);
 
                     // Only request render if something actually changed
@@ -269,6 +272,9 @@ impl EventDrivenEditor {
                         || last_state.needs_full_redraw
                         || editor
                             .needs_syntax_refresh
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                        || editor
+                            .needs_redraw
                             .load(std::sync::atomic::Ordering::Relaxed);
 
                     if needs_redraw {
@@ -288,9 +294,12 @@ impl EventDrivenEditor {
                             last_state.completion_selected_index =
                                 current_completion_selected_index;
 
-                            // Reset syntax refresh flag
+                            // Reset refresh flags
                             editor
                                 .needs_syntax_refresh
+                                .store(false, std::sync::atomic::Ordering::Relaxed);
+                            editor
+                                .needs_redraw
                                 .store(false, std::sync::atomic::Ordering::Relaxed);
                         }
                     }
