@@ -120,6 +120,24 @@ impl EventDrivenEditor {
         Ok(())
     }
 
+    /// Capture a condensed render state snapshot from the editor for change detection
+    fn snapshot(editor: &Editor) -> RenderState {
+        RenderState {
+            mode: editor.mode(),
+            cursor_position: editor
+                .current_buffer()
+                .map(|b| (b.cursor.row, b.cursor.col)),
+            buffer_id: editor.current_buffer_id,
+            command_line: editor.command_line().to_string(),
+            status_message: editor.status_message().to_string(),
+            macro_recording_active: editor.is_macro_recording(),
+            needs_full_redraw: false, // managed separately
+            completion_active: editor.is_completion_active(),
+            completion_matches_len: editor.completion_matches_len(),
+            completion_selected_index: editor.completion_selected_index(),
+        }
+    }
+
     /// Send initial setup events
     fn send_initial_events(&self) -> Result<()> {
         // Create initial buffer if needed
@@ -158,42 +176,17 @@ impl EventDrivenEditor {
         match event {
             InputEvent::KeyPress(key_event) => {
                 if let Ok(mut editor) = self.editor.lock() {
-                    // Store the editor state before processing input
-                    let mode_before = editor.mode();
-                    let cursor_before = editor.current_buffer().map(|b| b.cursor);
-                    let buffer_id_before = editor.current_buffer_id;
-                    let command_line_before = editor.command_line().to_string();
-                    // Macro state before
-                    let macro_recording_before = editor.is_macro_recording();
-                    // Snapshot completion state before
-                    let completion_active_before = editor.is_completion_active();
-                    let completion_matches_len_before = editor.completion_matches_len();
-                    let completion_selected_index_before = editor.completion_selected_index();
+                    // Snapshot before
+                    let before = Self::snapshot(&editor);
 
                     // Process the key event
                     editor.handle_key_event(key_event)?;
 
-                    // Check what actually changed to decide if we need a redraw
-                    let mode_after = editor.mode();
-                    let cursor_after = editor.current_buffer().map(|b| b.cursor);
-                    let buffer_id_after = editor.current_buffer_id;
-                    let command_line_after = editor.command_line();
-                    // Macro state after
-                    let macro_recording_after = editor.is_macro_recording();
-                    // Completion state after
-                    let completion_active_after = editor.is_completion_active();
-                    let completion_matches_len_after = editor.completion_matches_len();
-                    let completion_selected_index_after = editor.completion_selected_index();
+                    // Snapshot after
+                    let after = Self::snapshot(&editor);
 
-                    let needs_redraw = mode_before != mode_after
-                        || cursor_before != cursor_after
-                        || buffer_id_before != buffer_id_after
-                        || command_line_before != command_line_after
-                        || macro_recording_before != macro_recording_after
-                        // Redraw when completion state changes (activation, matches, selection)
-                        || completion_active_before != completion_active_after
-                        || completion_matches_len_before != completion_matches_len_after
-                        || completion_selected_index_before != completion_selected_index_after
+                    // Check what actually changed to decide if we need a redraw
+                    let needs_redraw = before != after
                         || editor
                             .needs_syntax_refresh
                             .load(std::sync::atomic::Ordering::Relaxed)
@@ -244,31 +237,12 @@ impl EventDrivenEditor {
                 if let (Ok(mut editor), Ok(mut last_state)) =
                     (self.editor.try_lock(), self.last_render_state.try_lock())
                 {
-                    // Check what actually needs to be redrawn
-                    let current_mode = editor.mode();
-                    let current_cursor = editor
-                        .current_buffer()
-                        .map(|b| (b.cursor.row, b.cursor.col));
-                    let current_buffer_id = editor.current_buffer_id;
-                    let current_command_line = editor.command_line().to_string();
-                    let current_status = editor.status_message().to_string();
-                    let current_macro_recording = editor.is_macro_recording();
-                    // Current completion state summary
-                    let current_completion_active = editor.is_completion_active();
-                    let current_completion_matches_len = editor.completion_matches_len();
-                    let current_completion_selected_index = editor.completion_selected_index();
-
-                    let needs_redraw = last_state.mode != current_mode
-                        || last_state.cursor_position != current_cursor
-                        || last_state.buffer_id != current_buffer_id
-                        || last_state.command_line != current_command_line
-                        || last_state.status_message != current_status
-                        || last_state.macro_recording_active != current_macro_recording
-                        // Redraw when completion state changed
-                        || last_state.completion_active != current_completion_active
-                        || last_state.completion_matches_len != current_completion_matches_len
-                        || last_state.completion_selected_index
-                            != current_completion_selected_index
+                    // Snapshot current state and compare with last snapshot
+                    let current = Self::snapshot(&editor);
+                    // Compare ignoring the last_state.needs_full_redraw flag
+                    let mut last_cmp = last_state.clone();
+                    last_cmp.needs_full_redraw = false;
+                    let needs_redraw = last_cmp != current
                         || last_state.needs_full_redraw
                         || editor
                             .needs_syntax_refresh
@@ -282,17 +256,8 @@ impl EventDrivenEditor {
                             error!("Render failed: {}", e);
                         } else {
                             // Update our cached state
-                            last_state.mode = current_mode;
-                            last_state.cursor_position = current_cursor;
-                            last_state.buffer_id = current_buffer_id;
-                            last_state.command_line = current_command_line;
-                            last_state.status_message = current_status;
-                            last_state.macro_recording_active = current_macro_recording;
+                            *last_state = current;
                             last_state.needs_full_redraw = false;
-                            last_state.completion_active = current_completion_active;
-                            last_state.completion_matches_len = current_completion_matches_len;
-                            last_state.completion_selected_index =
-                                current_completion_selected_index;
 
                             // Reset refresh flags
                             editor
