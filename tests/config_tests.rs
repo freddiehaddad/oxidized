@@ -187,7 +187,7 @@ fn test_editor_config_parsing() {
 
     // Should match the values in editor.toml
     assert_eq!(config.display.color_scheme, "default");
-    assert!(!config.display.show_line_numbers);
+    assert!(config.display.show_line_numbers);
     assert!(config.display.show_relative_numbers);
     assert!(config.display.show_cursor_line);
     assert!(config.display.syntax_highlighting);

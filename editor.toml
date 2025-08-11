@@ -1,5 +1,5 @@
 [display]
-show_line_numbers = false
+show_line_numbers = true
 show_relative_numbers = true
 show_cursor_line = true
 color_scheme = "default"
@@ -41,19 +41,36 @@ syntax_poll_ms = 100
 default_language = "text"
 
 [languages.extensions]
-yaml = "yaml"
-yml = "yaml"
-json = "json"
 rs = "rust"
-md = "markdown"
 toml = "toml"
 txt = "text"
+yaml = "yaml"
+md = "markdown"
+json = "json"
+yml = "yaml"
 
 [languages.content_patterns]
-markdown = ["# ", "## ", "```"]
-json = ["{", '"']
-rust = ["fn ", "let ", "use ", "impl ", "struct ", "enum "]
-toml = ["[", "="]
+json = [
+    "{",
+    '"',
+]
+toml = [
+    "[",
+    "=",
+]
+markdown = [
+    "# ",
+    "## ",
+    "```",
+]
+rust = [
+    "fn ",
+    "let ",
+    "use ",
+    "impl ",
+    "struct ",
+    "enum ",
+]
 
 [statusline]
 show_indent = true
