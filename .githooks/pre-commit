@@ -22,4 +22,11 @@ if [ -n "${changed_rs}" ]; then
   git add -- ${changed_rs}
 fi
 
+# Run clippy with all targets/features and deny warnings
+if ! cargo clippy --workspace --all-targets --all-features -- -D warnings; then
+  echo "cargo clippy failed (warnings treated as errors); aborting commit" >&2
+  echo "Hint: install with 'rustup component add clippy' if not found." >&2
+  exit 1
+fi
+
 exit 0
