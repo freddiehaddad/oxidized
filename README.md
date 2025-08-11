@@ -2,6 +2,8 @@
 
 **Oxidized** is a modern terminal-based text editor that brings Vim's powerful modal editing to the 21st century. Built from the ground up in Rust, it combines Vim's time-tested editing philosophy with cutting-edge architecture, delivering exceptional performance, memory safety, and extensibility.
 
+> Note: This project is under active development. Features, behavior, and APIs may change.
+
 ## 📋 Table of Contents
 
 - [🚀 Key Features](#-key-features)
