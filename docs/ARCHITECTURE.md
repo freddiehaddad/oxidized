@@ -1,6 +1,6 @@
 # Oxidized Architecture Guide
 
-This document gives contributors a high-level and practical overview of how Oxidized works under the hood. It includes links to code, key flows, and PlantUML diagrams to help you get oriented fast.
+This document gives contributors a high-level and practical overview of how Oxidized works under the hood. It includes links to code, key flows, and inline ASCII diagrams to help you get oriented fast.
 
 - Target audience: developers/contributors
 - Prereqs: Rust, terminal UI basics
@@ -30,7 +30,17 @@ This document gives contributors a high-level and practical overview of how Oxid
 2. EventDrivenEditor processes events, mutates Editor as needed, and sends UI RedrawRequest when state changes.
 3. Editor::render() snapshots EditorRenderState and asks UI to draw via Terminal.
 
-See PlantUML sequence: sequence-runtime.puml
+Sequence (input → state → render):
+
+  +-------------+     +--------------------+     +-----------+
+  |  Terminal   | --> | Input/Event Thread | --> |  Editor   |
+  +-------------+     +--------------------+     +-----------+
+                                             \              \
+                                              \ Redraw req.  \
+                                               v              v
+                                           +--------+   +-----------+
+                                           |  UI    |<- | Renderer  |
+                                           +--------+   +-----------+
 
 ## Data Model
 
@@ -39,7 +49,25 @@ See PlantUML sequence: sequence-runtime.puml
 - UI: theme, syntax theme, flags; computes gutter/columns; renders status/command lines.
 - Events: strongly-typed enums for Input/UI/Config/Window/Search/Macro/System/LSP.
 
-See diagrams: component-overview.puml, class-core.puml
+Component overview (simplified):
+
+  +---------+    owns     +---------+     manages     +-----------+
+  | Editor  | ----------> | Buffers | <-------------  |  Windows  |
+  +---------+              +---------+                 +-----------+
+       |                         |                           |
+       | uses                    | contains                  | displays
+       v                         v                           v
+  +---------+             +------------+               +-----------+
+  |  Modes  |             |   Marks    |               |   UI/   |
+  +---------+             +------------+               | Renderer |
+                                                      +-----------+
+
+Core classes and relationships (high-level):
+
+  Buffer <--> Editor <--> WindowManager
+      ^            |
+      |            v
+     Marks       Mode
 
 ## Rendering and Cursor
 

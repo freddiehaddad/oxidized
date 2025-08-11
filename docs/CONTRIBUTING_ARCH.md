@@ -29,10 +29,8 @@ This guide complements CONTRIBUTING.md with deeper technical context to help you
 - Implement minimal change; keep public APIs stable.
 - Verify: build, clippy -D warnings, tests, manual smoke (optional).
 
-## PlantUML Diagrams
+## Architecture Diagrams
 
-- component-overview.puml: High-level components and threads
-- sequence-runtime.puml: Input-to-render flow
-- class-core.puml: Core classes and relationships
-
-You can render these locally with any PlantUML tool or online renderer.
+The repository now uses simple inline ASCII diagrams embedded in Markdown
+documents (see ARCHITECTURE.md). There are no external diagram sources or
+rendered SVGs to maintain.

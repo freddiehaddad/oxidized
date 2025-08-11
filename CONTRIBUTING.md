@@ -3,12 +3,9 @@
 Thanks for your interest in contributing!
 
 Before you start, skim the developer docs under `docs/` for an overview and
-diagrams of the architecture:
+inline ASCII diagrams of the architecture:
 
 - docs/ARCHITECTURE.md — high-level guide
-- docs/component-overview.puml — components/threads (PlantUML)
-- docs/sequence-runtime.puml — runtime sequence (PlantUML)
-- docs/class-core.puml — core classes (PlantUML)
 
 ## Commit message conventions (50/72)
 
