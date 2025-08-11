@@ -1027,12 +1027,28 @@ impl UI {
                         .cursor
                         .row
                         .saturating_sub(current_window.viewport_top);
-                    // Account for horizontal offset when positioning the cursor
-                    let rel_col = buffer
-                        .cursor
-                        .col
-                        .saturating_sub(current_window.horiz_offset);
-                    let screen_col = rel_col + line_number_width;
+
+                    // Compute visual column width from horiz_offset to cursor using Unicode width
+                    let line = if buffer.cursor.row < buffer.lines.len() {
+                        &buffer.lines[buffer.cursor.row]
+                    } else {
+                        ""
+                    };
+                    let start_byte = Self::floor_char_boundary(line, current_window.horiz_offset);
+                    let cur_byte = buffer.cursor.col.min(line.len());
+                    let cur_byte = if cur_byte <= line.len() {
+                        cur_byte
+                    } else {
+                        line.len()
+                    };
+                    let cur_byte = if cur_byte >= start_byte {
+                        cur_byte
+                    } else {
+                        start_byte
+                    };
+                    let slice = &line[start_byte..cur_byte];
+                    let rel_cols = UnicodeWidthStr::width(slice);
+                    let screen_col = line_number_width + rel_cols;
 
                     // Ensure cursor is within window bounds
                     if screen_row < content_height {

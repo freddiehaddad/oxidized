@@ -3,6 +3,7 @@ use anyhow::Result;
 use log::{debug, info, trace, warn};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Types of content that can be yanked
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -274,7 +275,9 @@ impl Buffer {
         } else {
             0
         };
-        let col = new_pos.col.min(max_col);
+        let mut col = new_pos.col.min(max_col);
+        // Snap to a valid grapheme boundary at or before requested column
+        col = self.prev_grapheme_boundary_inclusive(row, col);
 
         self.cursor = Position::new(row, col);
     }
@@ -345,7 +348,7 @@ impl Buffer {
         }
     }
 
-    /// Internal method to insert character without saving undo state
+    /// Internal method to insert character without saving undo state (grapheme-aware)
     fn insert_char_raw(&mut self, ch: char) {
         if self.cursor.row >= self.lines.len() {
             self.lines.push(String::new());
@@ -354,7 +357,8 @@ impl Buffer {
         let line = &mut self.lines[self.cursor.row];
         if self.cursor.col <= line.len() {
             line.insert(self.cursor.col, ch);
-            self.cursor.col += 1;
+            // Advance by the inserted character's UTF-8 byte length
+            self.cursor.col += ch.len_utf8();
         }
     }
 
@@ -373,13 +377,15 @@ impl Buffer {
         }
     }
 
-    /// Internal method to delete character without saving undo state
+    /// Internal method to delete the previous grapheme without saving undo state
     fn delete_char_raw(&mut self) -> bool {
         if self.cursor.col > 0 {
-            let line = &mut self.lines[self.cursor.row];
-            if self.cursor.col <= line.len() {
-                line.remove(self.cursor.col - 1);
-                self.cursor.col -= 1;
+            let row = self.cursor.row;
+            let start = self.prev_grapheme_boundary_exclusive(row, self.cursor.col);
+            if start < self.cursor.col {
+                let line = &mut self.lines[row];
+                line.drain(start..self.cursor.col);
+                self.cursor.col = start;
                 return true;
             }
         } else if self.cursor.row > 0 {
@@ -393,14 +399,36 @@ impl Buffer {
         false
     }
 
-    /// Move cursor right for position calculation
-    fn move_cursor_right(&mut self) {
-        if self.cursor.row < self.lines.len() {
-            let line = &self.lines[self.cursor.row];
-            if self.cursor.col < line.len() {
-                self.cursor.col += 1;
-            } else if self.cursor.row + 1 < self.lines.len() {
-                self.cursor.row += 1;
+    /// Move cursor right by one grapheme cluster
+    pub fn move_cursor_right(&mut self) {
+        if self.cursor.row >= self.lines.len() {
+            return;
+        }
+        let row = self.cursor.row;
+        let line = &self.lines[row];
+        if self.cursor.col < line.len() {
+            let next = self.next_grapheme_boundary(row, self.cursor.col);
+            self.cursor.col = next;
+        } else if row + 1 < self.lines.len() {
+            self.cursor.row = row + 1;
+            self.cursor.col = 0;
+        }
+    }
+
+    /// Move cursor left by one grapheme cluster
+    pub fn move_cursor_left(&mut self) {
+        if self.cursor.row >= self.lines.len() {
+            return;
+        }
+        if self.cursor.col > 0 {
+            let new_col = self.prev_grapheme_boundary_exclusive(self.cursor.row, self.cursor.col);
+            self.cursor.col = new_col;
+        } else if self.cursor.row > 0 {
+            // Move to end of previous line
+            self.cursor.row -= 1;
+            if let Some(line) = self.lines.get(self.cursor.row) {
+                self.cursor.col = line.len();
+            } else {
                 self.cursor.col = 0;
             }
         }
@@ -527,61 +555,126 @@ impl Buffer {
         Ok(())
     }
 
-    /// Delete character at cursor position (like 'x' in Vim)
+    /// Delete grapheme at cursor position (like 'x' in Vim)
     pub fn delete_char_at_cursor(&mut self) -> bool {
         trace!(
             "Attempting to delete character at cursor position {}:{}",
             self.cursor.row, self.cursor.col
         );
-        if self.cursor.row < self.lines.len() && self.cursor.col < self.lines[self.cursor.row].len()
-        {
-            let deleted_char = self.lines[self.cursor.row]
-                .chars()
-                .nth(self.cursor.col)
-                .unwrap_or(' ');
-            let operation = EditOperation::Delete {
-                pos: self.cursor,
-                text: deleted_char.to_string(),
-            };
-            self.save_operation(operation);
+        if self.cursor.row < self.lines.len() {
+            let row = self.cursor.row;
+            let line = &self.lines[row];
+            if self.cursor.col < line.len() {
+                let start = self.cursor.col;
+                let end = self.next_grapheme_boundary(row, start);
+                if end > start {
+                    let deleted_text = line[start..end].to_string();
+                    let operation = EditOperation::Delete {
+                        pos: self.cursor,
+                        text: deleted_text.clone(),
+                    };
+                    self.save_operation(operation);
 
-            let line = &mut self.lines[self.cursor.row];
-            line.remove(self.cursor.col);
-            self.modified = true;
-            trace!(
-                "Deleted character '{}' at position {}:{}",
-                deleted_char, self.cursor.row, self.cursor.col
-            );
-            return true;
+                    let line_mut = &mut self.lines[row];
+                    line_mut.drain(start..end);
+                    self.modified = true;
+                    trace!(
+                        "Deleted grapheme at {}:{} ({} bytes)",
+                        row,
+                        start,
+                        end - start
+                    );
+                    return true;
+                }
+            }
         }
         false
     }
 
-    /// Delete character before cursor (like 'X' in Vim)
+    /// Delete grapheme before cursor (like 'X' in Vim)
     pub fn delete_char_before_cursor(&mut self) -> bool {
         if self.cursor.col > 0 {
-            let deleted_char = self.lines[self.cursor.row]
-                .chars()
-                .nth(self.cursor.col - 1)
-                .unwrap_or(' ');
-            let operation = EditOperation::Delete {
-                pos: Position {
-                    row: self.cursor.row,
-                    col: self.cursor.col - 1,
-                },
-                text: deleted_char.to_string(),
-            };
-            self.save_operation(operation);
+            let row = self.cursor.row;
+            let start = self.prev_grapheme_boundary_exclusive(row, self.cursor.col);
+            if start < self.cursor.col {
+                let deleted_text = self.lines[row][start..self.cursor.col].to_string();
+                let operation = EditOperation::Delete {
+                    pos: Position { row, col: start },
+                    text: deleted_text,
+                };
+                self.save_operation(operation);
 
-            let line = &mut self.lines[self.cursor.row];
-            if self.cursor.col <= line.len() {
-                line.remove(self.cursor.col - 1);
-                self.cursor.col -= 1;
+                let line = &mut self.lines[row];
+                line.drain(start..self.cursor.col);
+                self.cursor.col = start;
                 self.modified = true;
                 return true;
             }
         }
         false
+    }
+
+    /// Find the next grapheme boundary strictly after `col`
+    fn next_grapheme_boundary(&self, row: usize, col: usize) -> usize {
+        if row >= self.lines.len() {
+            return 0;
+        }
+        let s = &self.lines[row];
+        if col >= s.len() {
+            return s.len();
+        }
+        let mut iter = s.grapheme_indices(true).peekable();
+        while let Some((idx, _)) = iter.next() {
+            if idx >= col {
+                // current cluster starts at idx; next boundary is next idx or len
+                if let Some((next_idx, _)) = iter.peek() {
+                    return *next_idx;
+                }
+                return s.len();
+            }
+        }
+        s.len()
+    }
+
+    /// Find the previous grapheme boundary strictly before `col`
+    fn prev_grapheme_boundary_exclusive(&self, row: usize, col: usize) -> usize {
+        if row >= self.lines.len() {
+            return 0;
+        }
+        let s = &self.lines[row];
+        if col == 0 {
+            return 0;
+        }
+        let mut prev = 0usize;
+        for (idx, _) in s.grapheme_indices(true) {
+            if idx >= col {
+                break;
+            }
+            prev = idx;
+        }
+        prev
+    }
+
+    /// Find the previous grapheme boundary at or before `col`
+    pub(crate) fn prev_grapheme_boundary_inclusive(&self, row: usize, col: usize) -> usize {
+        if row >= self.lines.len() {
+            return 0;
+        }
+        let s = &self.lines[row];
+        if col == 0 {
+            return 0;
+        }
+        if col >= s.len() {
+            return s.len();
+        }
+        let mut prev = 0usize;
+        for (idx, _) in s.grapheme_indices(true) {
+            if idx > col {
+                break;
+            }
+            prev = idx;
+        }
+        prev
     }
 
     /// Delete entire line (like 'dd' in Vim)

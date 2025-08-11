@@ -951,10 +951,8 @@ impl KeyHandler {
             editor.mode(),
             Mode::Visual | Mode::VisualLine | Mode::VisualBlock
         );
-        if let Some(buffer) = editor.current_buffer_mut()
-            && buffer.cursor.col > 0
-        {
-            buffer.cursor.col -= 1;
+        if let Some(buffer) = editor.current_buffer_mut() {
+            buffer.move_cursor_left();
             // Update visual selection if in any visual mode
             if is_visual_mode {
                 buffer.update_visual_selection(buffer.cursor);
@@ -968,11 +966,8 @@ impl KeyHandler {
             editor.mode(),
             Mode::Visual | Mode::VisualLine | Mode::VisualBlock
         );
-        if let Some(buffer) = editor.current_buffer_mut()
-            && let Some(line) = buffer.get_line(buffer.cursor.row)
-            && buffer.cursor.col < line.len()
-        {
-            buffer.cursor.col += 1;
+        if let Some(buffer) = editor.current_buffer_mut() {
+            buffer.move_cursor_right();
             // Update visual selection if in any visual mode
             if is_visual_mode {
                 buffer.update_visual_selection(buffer.cursor);
@@ -989,9 +984,13 @@ impl KeyHandler {
         if let Some(buffer) = editor.current_buffer_mut()
             && buffer.cursor.row > 0
         {
+            let desired_col = buffer.cursor.col; // byte index preserved
             buffer.cursor.row -= 1;
             if let Some(line) = buffer.get_line(buffer.cursor.row) {
-                buffer.cursor.col = buffer.cursor.col.min(line.len());
+                let max = line.len();
+                let mut col = desired_col.min(max);
+                col = buffer.prev_grapheme_boundary_inclusive(buffer.cursor.row, col);
+                buffer.cursor.col = col;
             }
             // Update visual selection if in any visual mode
             if is_visual_mode {
@@ -1009,9 +1008,13 @@ impl KeyHandler {
         if let Some(buffer) = editor.current_buffer_mut()
             && buffer.cursor.row < buffer.lines.len() - 1
         {
+            let desired_col = buffer.cursor.col; // byte index preserved
             buffer.cursor.row += 1;
             if let Some(line) = buffer.get_line(buffer.cursor.row) {
-                buffer.cursor.col = buffer.cursor.col.min(line.len());
+                let max = line.len();
+                let mut col = desired_col.min(max);
+                col = buffer.prev_grapheme_boundary_inclusive(buffer.cursor.row, col);
+                buffer.cursor.col = col;
             }
             // Update visual selection if in any visual mode
             if is_visual_mode {
@@ -2097,15 +2100,21 @@ impl KeyHandler {
     }
 
     fn action_delete_char_at_cursor(&self, editor: &mut Editor) -> Result<()> {
-        if let Some(buffer) = editor.current_buffer_mut() {
-            buffer.delete_char_at_cursor();
+        if let Some(buffer) = editor.current_buffer_mut()
+            && buffer.delete_char_at_cursor()
+        {
+            // Deletion may not move the cursor; request redraw explicitly
+            editor.request_redraw();
         }
         Ok(())
     }
 
     fn action_delete_char_before_cursor(&self, editor: &mut Editor) -> Result<()> {
-        if let Some(buffer) = editor.current_buffer_mut() {
-            buffer.delete_char_before_cursor();
+        if let Some(buffer) = editor.current_buffer_mut()
+            && buffer.delete_char_before_cursor()
+        {
+            // Deletion may not move the cursor; request redraw explicitly
+            editor.request_redraw();
         }
         Ok(())
     }
