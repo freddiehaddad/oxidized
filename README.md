@@ -29,7 +29,7 @@
 
 - **TOML-Based Configuration**: Replace Vim's cryptic rc files with intuitive, structured TOML configuration
 - **Live Reloading**: Configuration changes apply instantly without restart
-- **Automatic Persistence**: `:set` commands automatically save to configuration files
+- **Flexible Persistence**: `:set` updates settings for the current session only; use `:setp` (persist) to write changes back to configuration files
 
 ### Advanced Text Editing Engine  
 
@@ -251,7 +251,6 @@ default_language = "text"
 "toml" = "toml"
 "md" = "markdown"
 "txt" = "text"
-"json" = "json"
 ```
 
 Note: The left number column acts as a gutter. When `show_line_numbers` is false but
@@ -260,8 +259,10 @@ visible without enabling line numbers. The mark indicator uses the theme color `
 
 You can toggle marks at runtime with:
 
-- `:set showmarks` or `:set smk` to enable
-- `:set noshowmarks` or `:set nosmk` to disable
+- `:set showmarks` / `:set smk` enable for this session
+- `:setp showmarks` / `:setp smk` enable and persist
+- `:set noshowmarks` / `:set nosmk` disable for this session
+- `:setp noshowmarks` / `:setp nosmk` disable and persist
 
 #### Search behavior
 
@@ -276,7 +277,7 @@ You can toggle marks at runtime with:
 
 - percent_path_root (alias: ppr): When enabled (default), file path completion for :e/:w treats a leading '%' as the current buffer's directory. Examples:
   - :e %/src completes files under the current buffer's folder
-  - Toggle with :set ppr / :set noppr, query with :set ppr?
+  - Toggle with `:set ppr` / `:set noppr` (session only) or `:setp ppr` / `:setp noppr` (persist); query with `:set ppr?`
 
 - line_break: When wrapping, prefer breaking at whitespace boundaries (word
    wrapping). When false, wrap strictly by display columns.
@@ -754,7 +755,7 @@ Developer docs and diagrams:
 
 - **TOML Parser**: Structured configuration with automatic validation
 - **Hot Reloading**: Live configuration updates with file system watching
-- **Command Integration**: `:set` commands persist automatically to TOML files
+- **Command Integration**: `:set` (session) and `:setp` (persistent) command pair for runtime configuration
 - **Theme Engine**: Dynamic theme switching with semantic color schemes
 
 ### Performance Features
@@ -815,7 +816,7 @@ Developer docs and diagrams:
 
 - TOML-based configuration files (`editor.toml`, `keymaps.toml`, `themes.toml`)
 - Live configuration reloading with file system watching
-- Automatic persistence of `:set` commands
+- Distinct ephemeral (`:set`) vs persistent (`:setp`) configuration updates
 - Over 30 configurable editor settings
 
 **Syntax Highlighting:**
@@ -1460,7 +1461,7 @@ This section outlines our plan to achieve complete feature parity with Vim/Neovi
 - **Syntax Highlighting**: Tree-sitter integration with async processing
 - **Clipboard Operations**: Basic yank/put with character and line modes
 - **Scrolling**: Complete scrolling system (Ctrl+f/b/d/u, zz/zt/zb)
-- **Command System**: Ex-commands with completion (:w, :q, :set, etc.)
+- **Command System**: Ex-commands with completion (:w, :q, :set, :setp, etc.)
 - **Cursor Shape**: Mode-aware cursor changes (block/line/underline)
 
 ### 🚧 **Phase 1: Essential Vim Features (High Priority)**

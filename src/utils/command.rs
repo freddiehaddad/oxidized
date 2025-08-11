@@ -84,16 +84,16 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
             Err(e) => editor.set_status_message(format!("Error creating buffer: {}", e)),
         },
 
-        // Line number toggles
-        "set nu" | "set number" => editor.set_line_numbers(true, false),
-        "set nonu" | "set nonumber" => editor.set_line_numbers(false, false),
-        "set rnu" | "set relativenumber" => editor.set_line_numbers(false, true),
-        "set nornu" | "set norelativenumber" => editor.set_line_numbers(true, false),
-        "set nu rnu" | "set number relativenumber" => editor.set_line_numbers(true, true),
+        // Line number toggles (ephemeral; use :setp for persistence)
+        "set nu" | "set number" => editor.set_line_numbers_ephemeral(true, false),
+        "set nonu" | "set nonumber" => editor.set_line_numbers_ephemeral(false, false),
+        "set rnu" | "set relativenumber" => editor.set_line_numbers_ephemeral(false, true),
+        "set nornu" | "set norelativenumber" => editor.set_line_numbers_ephemeral(true, false),
+        "set nu rnu" | "set number relativenumber" => editor.set_line_numbers_ephemeral(true, true),
 
-        // Cursor line toggles
-        "set cul" | "set cursorline" => editor.set_cursor_line(true),
-        "set nocul" | "set nocursorline" => editor.set_cursor_line(false),
+        // Cursor line toggles (ephemeral; use :setp cursorline / :setp nocursorline for persistence)
+        "set cul" | "set cursorline" => editor.set_cursor_line_ephemeral(true),
+        "set nocul" | "set nocursorline" => editor.set_cursor_line_ephemeral(false),
 
         // Buffer management
         "bn" | "bnext" => {
@@ -199,8 +199,12 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
                     warn!("Unknown buffer reference in command: '{}'", command);
                     editor.set_status_message(format!("Unknown command: {}", command));
                 }
+            } else if let Some(set_args) = command.strip_prefix("setp ") {
+                // Persistent set (writes to editor.toml)
+                handle_set_command(editor, set_args, true);
             } else if let Some(set_args) = command.strip_prefix("set ") {
-                handle_set_command(editor, set_args);
+                // Ephemeral set (does not persist)
+                handle_set_command(editor, set_args, false);
             } else {
                 warn!("Unknown Ex command: '{}'", command);
                 editor.set_status_message(format!("Unknown command: {}", command));
@@ -214,7 +218,7 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
 }
 
 /// Comprehensive :set handler (boolean toggles, key=value, queries, and \"all\").
-pub fn handle_set_command(editor: &mut Editor, args: &str) {
+pub fn handle_set_command(editor: &mut Editor, args: &str, persist: bool) {
     let args = args.trim();
 
     // Empty shows a subset of common settings
@@ -294,36 +298,159 @@ pub fn handle_set_command(editor: &mut Editor, args: &str) {
     if let Some(setting) = args.strip_prefix("no") {
         match setting {
             "number" | "nu" => {
-                editor.set_config_setting("number", "false");
+                if persist {
+                    editor.set_config_setting("number", "false");
+                } else {
+                    editor.set_config_setting_ephemeral("number", "false");
+                }
                 let (_, relative) = editor.get_line_number_state();
-                editor.set_line_numbers(false, relative);
+                if persist {
+                    editor.set_line_numbers(false, relative);
+                } else {
+                    editor.set_line_numbers_ephemeral(false, relative);
+                }
             }
             "relativenumber" | "rnu" => {
-                editor.set_config_setting("relativenumber", "false");
+                if persist {
+                    editor.set_config_setting("relativenumber", "false");
+                } else {
+                    editor.set_config_setting_ephemeral("relativenumber", "false");
+                }
                 let (absolute, _) = editor.get_line_number_state();
-                editor.set_line_numbers(absolute, false);
+                if persist {
+                    editor.set_line_numbers(absolute, false);
+                } else {
+                    editor.set_line_numbers_ephemeral(absolute, false);
+                }
             }
             "cursorline" | "cul" => {
-                editor.set_config_setting("cursorline", "false");
-                editor.set_cursor_line(false);
+                if persist {
+                    editor.set_config_setting("cursorline", "false");
+                    editor.set_cursor_line(false);
+                } else {
+                    editor.set_config_setting_ephemeral("cursorline", "false");
+                    editor.set_cursor_line_ephemeral(false);
+                }
             }
-            "showmarks" | "smk" => editor.set_config_setting("showmarks", "false"),
-            "ignorecase" | "ic" => editor.set_config_setting("ignorecase", "false"),
-            "smartcase" | "scs" => editor.set_config_setting("smartcase", "false"),
-            "hlsearch" | "hls" => editor.set_config_setting("hlsearch", "false"),
-            "expandtab" | "et" => editor.set_config_setting("expandtab", "false"),
-            "autoindent" | "ai" => editor.set_config_setting("autoindent", "false"),
-            "incsearch" | "is" => editor.set_config_setting("incsearch", "false"),
-            "wrap" => editor.set_config_setting("wrap", "false"),
-            "linebreak" | "lbr" => editor.set_config_setting("linebreak", "false"),
-            "undofile" | "udf" => editor.set_config_setting("undofile", "false"),
-            "backup" | "bk" => editor.set_config_setting("backup", "false"),
-            "swapfile" | "swf" => editor.set_config_setting("swapfile", "false"),
-            "autosave" | "aw" => editor.set_config_setting("autosave", "false"),
-            "laststatus" | "ls" => editor.set_config_setting("laststatus", "false"),
-            "showcmd" | "sc" => editor.set_config_setting("showcmd", "false"),
-            "syntax" | "syn" => editor.set_config_setting("syntax", "false"),
-            "percentpathroot" | "ppr" => editor.set_config_setting("percentpathroot", "false"),
+            "showmarks" | "smk" => {
+                if persist {
+                    editor.set_config_setting("showmarks", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("showmarks", "false")
+                }
+            }
+            "ignorecase" | "ic" => {
+                if persist {
+                    editor.set_config_setting("ignorecase", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("ignorecase", "false")
+                }
+            }
+            "smartcase" | "scs" => {
+                if persist {
+                    editor.set_config_setting("smartcase", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("smartcase", "false")
+                }
+            }
+            "hlsearch" | "hls" => {
+                if persist {
+                    editor.set_config_setting("hlsearch", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("hlsearch", "false")
+                }
+            }
+            "expandtab" | "et" => {
+                if persist {
+                    editor.set_config_setting("expandtab", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("expandtab", "false")
+                }
+            }
+            "autoindent" | "ai" => {
+                if persist {
+                    editor.set_config_setting("autoindent", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("autoindent", "false")
+                }
+            }
+            "incsearch" | "is" => {
+                if persist {
+                    editor.set_config_setting("incsearch", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("incsearch", "false")
+                }
+            }
+            "wrap" => {
+                if persist {
+                    editor.set_config_setting("wrap", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("wrap", "false")
+                }
+            }
+            "linebreak" | "lbr" => {
+                if persist {
+                    editor.set_config_setting("linebreak", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("linebreak", "false")
+                }
+            }
+            "undofile" | "udf" => {
+                if persist {
+                    editor.set_config_setting("undofile", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("undofile", "false")
+                }
+            }
+            "backup" | "bk" => {
+                if persist {
+                    editor.set_config_setting("backup", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("backup", "false")
+                }
+            }
+            "swapfile" | "swf" => {
+                if persist {
+                    editor.set_config_setting("swapfile", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("swapfile", "false")
+                }
+            }
+            "autosave" | "aw" => {
+                if persist {
+                    editor.set_config_setting("autosave", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("autosave", "false")
+                }
+            }
+            "laststatus" | "ls" => {
+                if persist {
+                    editor.set_config_setting("laststatus", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("laststatus", "false")
+                }
+            }
+            "showcmd" | "sc" => {
+                if persist {
+                    editor.set_config_setting("showcmd", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("showcmd", "false")
+                }
+            }
+            "syntax" | "syn" => {
+                if persist {
+                    editor.set_config_setting("syntax", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("syntax", "false")
+                }
+            }
+            "percentpathroot" | "ppr" => {
+                if persist {
+                    editor.set_config_setting("percentpathroot", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("percentpathroot", "false")
+                }
+            }
             _ => {
                 warn!("Unknown :set option: no{}", setting);
                 editor.set_status_message(format!("Unknown option: no{}", setting))
@@ -337,7 +464,11 @@ pub fn handle_set_command(editor: &mut Editor, args: &str) {
         match setting.trim() {
             "tabstop" | "ts" => {
                 if value.parse::<usize>().is_ok() {
-                    editor.set_config_setting("tabstop", value);
+                    if persist {
+                        editor.set_config_setting("tabstop", value);
+                    } else {
+                        editor.set_config_setting_ephemeral("tabstop", value);
+                    }
                     editor.set_status_message(format!("Tab width set to {}", value));
                 } else {
                     editor.set_status_message("Invalid tab width value".to_string());
@@ -345,7 +476,11 @@ pub fn handle_set_command(editor: &mut Editor, args: &str) {
             }
             "undolevels" | "ul" => {
                 if value.parse::<usize>().is_ok() {
-                    editor.set_config_setting("undolevels", value);
+                    if persist {
+                        editor.set_config_setting("undolevels", value);
+                    } else {
+                        editor.set_config_setting_ephemeral("undolevels", value);
+                    }
                     editor.set_status_message(format!("Undo levels set to {}", value));
                 } else {
                     editor.set_status_message("Invalid undo levels value".to_string());
@@ -353,7 +488,11 @@ pub fn handle_set_command(editor: &mut Editor, args: &str) {
             }
             "scrolloff" | "so" => {
                 if value.parse::<usize>().is_ok() {
-                    editor.set_config_setting("scrolloff", value);
+                    if persist {
+                        editor.set_config_setting("scrolloff", value);
+                    } else {
+                        editor.set_config_setting_ephemeral("scrolloff", value);
+                    }
                     editor.set_status_message(format!("Scroll offset set to {}", value));
                 } else {
                     editor.set_status_message("Invalid scroll offset value".to_string());
@@ -361,7 +500,11 @@ pub fn handle_set_command(editor: &mut Editor, args: &str) {
             }
             "sidescrolloff" | "siso" => {
                 if value.parse::<usize>().is_ok() {
-                    editor.set_config_setting("sidescrolloff", value);
+                    if persist {
+                        editor.set_config_setting("sidescrolloff", value);
+                    } else {
+                        editor.set_config_setting_ephemeral("sidescrolloff", value);
+                    }
                     editor.set_status_message(format!("Side scroll offset set to {}", value));
                 } else {
                     editor.set_status_message("Invalid side scroll offset value".to_string());
@@ -369,19 +512,31 @@ pub fn handle_set_command(editor: &mut Editor, args: &str) {
             }
             "timeoutlen" | "tm" => {
                 if value.parse::<u64>().is_ok() {
-                    editor.set_config_setting("timeoutlen", value);
+                    if persist {
+                        editor.set_config_setting("timeoutlen", value);
+                    } else {
+                        editor.set_config_setting_ephemeral("timeoutlen", value);
+                    }
                     editor.set_status_message(format!("Command timeout set to {} ms", value));
                 } else {
                     editor.set_status_message("Invalid timeout value".to_string());
                 }
             }
             "colorscheme" | "colo" => {
-                editor.set_config_setting("colorscheme", value);
+                if persist {
+                    editor.set_config_setting("colorscheme", value);
+                } else {
+                    editor.set_config_setting_ephemeral("colorscheme", value);
+                }
                 editor.set_status_message(format!("Color scheme set to {}", value));
             }
             "percentpathroot" | "ppr" => {
                 if value.parse::<bool>().is_ok() {
-                    editor.set_config_setting("percentpathroot", value);
+                    if persist {
+                        editor.set_config_setting("percentpathroot", value);
+                    } else {
+                        editor.set_config_setting_ephemeral("percentpathroot", value);
+                    }
                     editor.set_status_message(format!("Percent path root set to {}", value));
                 } else {
                     editor.set_status_message("Invalid boolean value".to_string());
@@ -395,36 +550,159 @@ pub fn handle_set_command(editor: &mut Editor, args: &str) {
     // Booleans enable
     match args {
         "number" | "nu" => {
-            editor.set_config_setting("number", "true");
+            if persist {
+                editor.set_config_setting("number", "true");
+            } else {
+                editor.set_config_setting_ephemeral("number", "true");
+            }
             let (_, relative) = editor.get_line_number_state();
-            editor.set_line_numbers(true, relative);
+            if persist {
+                editor.set_line_numbers(true, relative);
+            } else {
+                editor.set_line_numbers_ephemeral(true, relative);
+            }
         }
         "relativenumber" | "rnu" => {
-            editor.set_config_setting("relativenumber", "true");
+            if persist {
+                editor.set_config_setting("relativenumber", "true");
+            } else {
+                editor.set_config_setting_ephemeral("relativenumber", "true");
+            }
             let (absolute, _) = editor.get_line_number_state();
-            editor.set_line_numbers(absolute, true);
+            if persist {
+                editor.set_line_numbers(absolute, true);
+            } else {
+                editor.set_line_numbers_ephemeral(absolute, true);
+            }
         }
         "cursorline" | "cul" => {
-            editor.set_config_setting("cursorline", "true");
-            editor.set_cursor_line(true);
+            if persist {
+                editor.set_config_setting("cursorline", "true");
+                editor.set_cursor_line(true);
+            } else {
+                editor.set_config_setting_ephemeral("cursorline", "true");
+                editor.set_cursor_line_ephemeral(true);
+            }
         }
-        "showmarks" | "smk" => editor.set_config_setting("showmarks", "true"),
-        "ignorecase" | "ic" => editor.set_config_setting("ignorecase", "true"),
-        "smartcase" | "scs" => editor.set_config_setting("smartcase", "true"),
-        "hlsearch" | "hls" => editor.set_config_setting("hlsearch", "true"),
-        "expandtab" | "et" => editor.set_config_setting("expandtab", "true"),
-        "autoindent" | "ai" => editor.set_config_setting("autoindent", "true"),
-        "incsearch" | "is" => editor.set_config_setting("incsearch", "true"),
-        "wrap" => editor.set_config_setting("wrap", "true"),
-        "linebreak" | "lbr" => editor.set_config_setting("linebreak", "true"),
-        "undofile" | "udf" => editor.set_config_setting("undofile", "true"),
-        "backup" | "bk" => editor.set_config_setting("backup", "true"),
-        "swapfile" | "swf" => editor.set_config_setting("swapfile", "true"),
-        "autosave" | "aw" => editor.set_config_setting("autosave", "true"),
-        "laststatus" | "ls" => editor.set_config_setting("laststatus", "true"),
-        "showcmd" | "sc" => editor.set_config_setting("showcmd", "true"),
-        "syntax" | "syn" => editor.set_config_setting("syntax", "true"),
-        "percentpathroot" | "ppr" => editor.set_config_setting("percentpathroot", "true"),
+        "showmarks" | "smk" => {
+            if persist {
+                editor.set_config_setting("showmarks", "true")
+            } else {
+                editor.set_config_setting_ephemeral("showmarks", "true")
+            }
+        }
+        "ignorecase" | "ic" => {
+            if persist {
+                editor.set_config_setting("ignorecase", "true")
+            } else {
+                editor.set_config_setting_ephemeral("ignorecase", "true")
+            }
+        }
+        "smartcase" | "scs" => {
+            if persist {
+                editor.set_config_setting("smartcase", "true")
+            } else {
+                editor.set_config_setting_ephemeral("smartcase", "true")
+            }
+        }
+        "hlsearch" | "hls" => {
+            if persist {
+                editor.set_config_setting("hlsearch", "true")
+            } else {
+                editor.set_config_setting_ephemeral("hlsearch", "true")
+            }
+        }
+        "expandtab" | "et" => {
+            if persist {
+                editor.set_config_setting("expandtab", "true")
+            } else {
+                editor.set_config_setting_ephemeral("expandtab", "true")
+            }
+        }
+        "autoindent" | "ai" => {
+            if persist {
+                editor.set_config_setting("autoindent", "true")
+            } else {
+                editor.set_config_setting_ephemeral("autoindent", "true")
+            }
+        }
+        "incsearch" | "is" => {
+            if persist {
+                editor.set_config_setting("incsearch", "true")
+            } else {
+                editor.set_config_setting_ephemeral("incsearch", "true")
+            }
+        }
+        "wrap" => {
+            if persist {
+                editor.set_config_setting("wrap", "true")
+            } else {
+                editor.set_config_setting_ephemeral("wrap", "true")
+            }
+        }
+        "linebreak" | "lbr" => {
+            if persist {
+                editor.set_config_setting("linebreak", "true")
+            } else {
+                editor.set_config_setting_ephemeral("linebreak", "true")
+            }
+        }
+        "undofile" | "udf" => {
+            if persist {
+                editor.set_config_setting("undofile", "true")
+            } else {
+                editor.set_config_setting_ephemeral("undofile", "true")
+            }
+        }
+        "backup" | "bk" => {
+            if persist {
+                editor.set_config_setting("backup", "true")
+            } else {
+                editor.set_config_setting_ephemeral("backup", "true")
+            }
+        }
+        "swapfile" | "swf" => {
+            if persist {
+                editor.set_config_setting("swapfile", "true")
+            } else {
+                editor.set_config_setting_ephemeral("swapfile", "true")
+            }
+        }
+        "autosave" | "aw" => {
+            if persist {
+                editor.set_config_setting("autosave", "true")
+            } else {
+                editor.set_config_setting_ephemeral("autosave", "true")
+            }
+        }
+        "laststatus" | "ls" => {
+            if persist {
+                editor.set_config_setting("laststatus", "true")
+            } else {
+                editor.set_config_setting_ephemeral("laststatus", "true")
+            }
+        }
+        "showcmd" | "sc" => {
+            if persist {
+                editor.set_config_setting("showcmd", "true")
+            } else {
+                editor.set_config_setting_ephemeral("showcmd", "true")
+            }
+        }
+        "syntax" | "syn" => {
+            if persist {
+                editor.set_config_setting("syntax", "true")
+            } else {
+                editor.set_config_setting_ephemeral("syntax", "true")
+            }
+        }
+        "percentpathroot" | "ppr" => {
+            if persist {
+                editor.set_config_setting("percentpathroot", "true")
+            } else {
+                editor.set_config_setting_ephemeral("percentpathroot", "true")
+            }
+        }
         _ => {
             warn!("Unknown :set option: {}", args);
             editor.set_status_message(format!("Unknown option: {}", args))

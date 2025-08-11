@@ -203,7 +203,7 @@ fn test_file_extension_handling() {
 
     // Create files with various extensions
     fs::write(temp_path.join("script.rs"), "fn main() {}").unwrap();
-    fs::write(temp_path.join("data.json"), "{}").unwrap();
+    fs::write(temp_path.join("data.txt"), "{}").unwrap();
     fs::write(temp_path.join("README"), "readme content").unwrap();
     fs::write(temp_path.join(".hidden"), "hidden file").unwrap();
 
@@ -219,7 +219,7 @@ fn test_file_extension_handling() {
     // Check that all expected files are present
     let names: Vec<&str> = contents.iter().map(|f| f.name.as_str()).collect();
     assert!(names.contains(&"script.rs"));
-    assert!(names.contains(&"data.json"));
+    assert!(names.contains(&"data.txt"));
     assert!(names.contains(&"README"));
     assert!(names.contains(&".hidden"));
 }

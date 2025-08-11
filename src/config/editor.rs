@@ -114,8 +114,14 @@ fn default_separator() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LanguageConfig {
+    /// Mapping from file extension (no dot) to language name
+    #[serde(default)]
     pub extensions: HashMap<String, String>,
+    /// Disabled feature; kept for backward-compat. Empty by default.
+    #[serde(default)]
     pub content_patterns: HashMap<String, Vec<String>>,
+    /// Default language when detection fails
+    #[serde(default)]
     pub default_language: Option<String>,
 }
 
@@ -255,16 +261,6 @@ impl EditorConfig {
     }
 
     pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // In tests, never write editor.toml to disk
-        if cfg!(test) {
-            debug!("Config save disabled in test build");
-            return Ok(());
-        }
-        // Allow tests to disable saving to avoid mutating repo editor.toml
-        if std::env::var("OX_DISABLE_CONFIG_SAVE").ok().as_deref() == Some("1") {
-            debug!("Config save disabled by OX_DISABLE_CONFIG_SAVE");
-            return Ok(());
-        }
         debug!("Saving editor configuration to editor.toml");
         let toml_string = toml::to_string_pretty(self)?;
         fs::write("editor.toml", toml_string)?;

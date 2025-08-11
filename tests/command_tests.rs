@@ -108,7 +108,7 @@ fn test_command_parse_file_operations() {
             vec!["/home/user/document.md"],
         ),
         ("r input.txt", "r", vec!["input.txt"]),
-        ("read data.json", "read", vec!["data.json"]),
+        ("read data.txt", "read", vec!["data.txt"]),
     ];
 
     for (input, expected_name, expected_args) in test_cases {

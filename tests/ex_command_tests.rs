@@ -32,7 +32,7 @@ fn set_toggles_and_queries() -> Result<()> {
     assert_eq!(editor.status_message(), "number: true");
 
     // key=value via centralized handler
-    handle_set_command(&mut editor, "tabstop=4");
+    handle_set_command(&mut editor, "tabstop=4", false);
     assert_eq!(editor.get_config_value("tabstop").as_deref(), Some("4"));
 
     Ok(())

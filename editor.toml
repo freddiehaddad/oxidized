@@ -1,76 +1,48 @@
+# ###############################################################################
+# Oxidized Editor Configuration
+#
+# This file enumerates all supported settings with their default values.
+# Use :set for session-only changes (not persisted) and :setp for persistence.
+# ###############################################################################
+
 [display]
-show_line_numbers = true
-show_relative_numbers = true
-show_cursor_line = true
-color_scheme = "default"
-syntax_highlighting = true
-show_marks = true
+show_line_numbers = true     # Absolute line numbers
+show_relative_numbers = true # Relative line numbers
+show_cursor_line = true      # Highlight current line
+color_scheme = "default"     # Theme name from themes.toml
+syntax_highlighting = true   # Enable syntax highlighting
+show_marks = true            # Show marks in gutter
 
 [behavior]
-tab_width = 4
-expand_tabs = false
-auto_indent = true
-ignore_case = false
-smart_case = false
-highlight_search = true
-incremental_search = true
-wrap_lines = false
-line_break = false
+tab_width = 4             # Display width of a tab
+expand_tabs = false       # Insert spaces instead of tab chars
+auto_indent = true        # Maintain indentation on new lines
+ignore_case = false       # Case-insensitive search by default
+smart_case = false        # Override ignore_case when pattern has capitals
+highlight_search = true   # Highlight matches after a search
+incremental_search = true # Show matches while typing pattern
+wrap_lines = false        # Soft wrap long lines
+line_break = false        # Break lines at word boundaries when wrapping
 
 [editing]
-undo_levels = 1000
-persistent_undo = false
-backup = false
-swap_file = false
-auto_save = false
+undo_levels = 1000      # Max undo history entries
+persistent_undo = false # Persist undo history to disk
+backup = false          # Create backup files on write
+swap_file = false       # Create swap/backup for crash recovery
+auto_save = false       # Auto-save modified named buffers
 
 [interface]
-show_status_line = true
-command_timeout = 1000
-show_command = true
-scroll_off = 3
-side_scroll_off = 0
-window_resize_amount = 1
-completion_menu_width = 30
-completion_menu_height = 8
-percent_path_root = true
-config_poll_ms = 500
-syntax_poll_ms = 100
-
-[languages]
-default_language = "text"
-
-[languages.extensions]
-json = "json"
-md = "markdown"
-toml = "toml"
-txt = "text"
-yaml = "yaml"
-rs = "rust"
-yml = "yaml"
-
-[languages.content_patterns]
-json = [
-    "{",
-    '"',
-]
-markdown = [
-    "# ",
-    "## ",
-    "```",
-]
-toml = [
-    "[",
-    "=",
-]
-rust = [
-    "fn ",
-    "let ",
-    "use ",
-    "impl ",
-    "struct ",
-    "enum ",
-]
+show_status_line = true    # Show status line
+command_timeout = 1000     # Mapping timeout (ms)
+show_command = true        # Show pending keys in statusline
+scroll_off = 0             # Context lines above/below cursor
+side_scroll_off = 0        # Horizontal context columns
+window_resize_amount = 1   # Amount for :resize commands
+completion_menu_width = 30 # Popup completion width (chars)
+completion_menu_height = 8 # Popup completion height (rows)
+percent_path_root = true   # % prefix roots paths at current buffer dir
+config_poll_ms = 500       # Poll interval for config reload (ms)
+syntax_poll_ms = 100       # Poll interval for async syntax tasks (ms)
 
 [statusline]
 show_indent = true
@@ -80,4 +52,16 @@ show_type = true
 show_macro = true
 show_search = true
 show_progress = true
-separator = "  "
+separator = "  "     # Spacing between right-aligned segments
+
+[languages]
+# Default language used when detection fails
+default_language = "text"
+
+[languages.extensions]
+md = "markdown"
+toml = "toml"
+txt = "text"
+rs = "rust"
+
+# content_patterns removed (feature disabled)

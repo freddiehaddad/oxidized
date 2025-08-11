@@ -38,27 +38,9 @@ fn test_language_config_from_file() {
         None
     );
 
-    // Should have content patterns from editor.toml
+    // Content pattern detection is disabled
     assert_eq!(
-        config
-            .languages
-            .detect_language_from_content("fn main() { let x = 5; }"),
-        Some("rust".to_string())
-    );
-    assert_eq!(
-        config
-            .languages
-            .detect_language_from_content("[package]\nname = \"test\""),
-        Some("toml".to_string())
-    );
-    assert_eq!(
-        config
-            .languages
-            .detect_language_from_content("# Heading\n## Subheading"),
-        Some("markdown".to_string())
-    );
-    assert_eq!(
-        config.languages.detect_language_from_content("plain text"),
+        config.languages.detect_language_from_content("anything"),
         None
     );
 }
@@ -67,7 +49,7 @@ fn test_language_config_from_file() {
 fn test_editor_config_has_languages() {
     let config = EditorConfig::load(); // Load from actual file
     assert!(!config.languages.extensions.is_empty());
-    assert!(!config.languages.content_patterns.is_empty());
+    assert!(config.languages.content_patterns.is_empty());
 }
 
 #[test]

@@ -1269,6 +1269,15 @@ impl Editor {
 
     /// Set line number display options
     pub fn set_line_numbers(&mut self, absolute: bool, relative: bool) {
+        self.set_line_numbers_internal(absolute, relative, true);
+    }
+
+    /// Set line number display options without persisting to editor.toml
+    pub fn set_line_numbers_ephemeral(&mut self, absolute: bool, relative: bool) {
+        self.set_line_numbers_internal(absolute, relative, false);
+    }
+
+    fn set_line_numbers_internal(&mut self, absolute: bool, relative: bool, persist: bool) {
         self.config.display.show_line_numbers = absolute;
         self.config.display.show_relative_numbers = relative;
 
@@ -1284,8 +1293,9 @@ impl Editor {
         };
         self.status_message = status.to_string();
 
-        // Save config changes
-        let _ = self.config.save();
+        if persist {
+            let _ = self.config.save();
+        }
     }
 
     /// Toggle cursor line highlighting
@@ -1305,6 +1315,15 @@ impl Editor {
 
     /// Set cursor line highlighting
     pub fn set_cursor_line(&mut self, enabled: bool) {
+        self.set_cursor_line_internal(enabled, true);
+    }
+
+    /// Set cursor line highlighting without persisting to editor.toml
+    pub fn set_cursor_line_ephemeral(&mut self, enabled: bool) {
+        self.set_cursor_line_internal(enabled, false);
+    }
+
+    fn set_cursor_line_internal(&mut self, enabled: bool, persist: bool) {
         self.config.display.show_cursor_line = enabled;
         self.ui.show_cursor_line = enabled;
 
@@ -1315,12 +1334,22 @@ impl Editor {
         };
         self.status_message = status.to_string();
 
-        // Save config changes
-        let _ = self.config.save();
+        if persist {
+            let _ = self.config.save();
+        }
     }
 
-    /// Set a configuration setting by name
+    /// Set a configuration setting by name (persistent)
     pub fn set_config_setting(&mut self, setting: &str, value: &str) {
+        self.set_config_setting_internal(setting, value, true);
+    }
+
+    /// Set a configuration setting by name without persisting to disk
+    pub fn set_config_setting_ephemeral(&mut self, setting: &str, value: &str) {
+        self.set_config_setting_internal(setting, value, false);
+    }
+
+    fn set_config_setting_internal(&mut self, setting: &str, value: &str, persist: bool) {
         let _ = self.config.set_setting(setting, value);
 
         // Update UI to reflect config changes
@@ -1367,8 +1396,9 @@ impl Editor {
             _ => {}
         }
 
-        // Save config changes
-        let _ = self.config.save();
+        if persist {
+            let _ = self.config.save();
+        }
     }
 
     /// Apply tab settings to current buffer
