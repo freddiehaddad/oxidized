@@ -743,14 +743,36 @@ impl CommandCompletion {
 
     /// Update matches based on input
     fn update_matches(&mut self, input: &str) {
+        // Detect whether the user typed `setp` and normalize to `set` for matching
         let input_lower = input.to_lowercase();
+        let (normalized_for_match, desired_set_prefix): (String, Option<&'static str>) =
+            if let Some(rest) = input_lower.strip_prefix("setp ") {
+                (format!("set {}", rest), Some("setp "))
+            } else if input_lower == "setp" || input_lower.starts_with("setp") {
+                // Handle `setp` without trailing space
+                ("set".to_string(), Some("setp "))
+            } else if input_lower.starts_with("set ") || input_lower == "set" {
+                (input_lower.clone(), Some("set "))
+            } else {
+                (input_lower.clone(), None)
+            };
 
         // Static matches from the predefined command list
         let mut combined: Vec<CompletionItem> = self
             .commands
             .iter()
-            .filter(|cmd| cmd.text.to_lowercase().starts_with(&input_lower))
+            .filter(|cmd| cmd.text.to_lowercase().starts_with(&normalized_for_match))
             .cloned()
+            .map(|mut item| {
+                // If the user typed `setp`, remap suggestions from `set ...` to `setp ...`
+                if let Some(prefix) = desired_set_prefix
+                    && prefix == "setp "
+                    && item.text.starts_with("set ")
+                {
+                    item.text = format!("setp {}", &item.text[4..]);
+                }
+                item
+            })
             .collect();
 
         // Dynamic matches based on current input (e.g., values after '=')
@@ -777,6 +799,11 @@ impl CommandCompletion {
         let trimmed = input.trim_start();
         let lower = trimmed.to_lowercase();
         let mut out: Vec<CompletionItem> = Vec::new();
+        let set_prefix: &str = if lower.starts_with("setp ") {
+            "setp "
+        } else {
+            "set "
+        };
         // Buffer name/id completion: b <...> or buffer <...>
         if (lower.starts_with("b ") || lower.starts_with("buffer ")) && self.context.is_some() {
             let ctx = self.context.as_ref().unwrap();
@@ -832,7 +859,9 @@ impl CommandCompletion {
         }
 
         // colorscheme / colo dynamic values from themes.toml
-        if lower.starts_with("set colorscheme=") || lower.starts_with("set colo=") {
+        if lower.starts_with(&format!("{set_prefix}colorscheme="))
+            || lower.starts_with(&format!("{set_prefix}colo="))
+        {
             let val_pref = value_prefix(trimmed);
             let cfg = ThemeConfig::load();
             // Build list of (name, description)
@@ -840,7 +869,7 @@ impl CommandCompletion {
                 if val_pref.is_empty() || name.to_lowercase().starts_with(&val_pref.to_lowercase())
                 {
                     out.push(CompletionItem {
-                        text: format!("set colorscheme={}", name),
+                        text: format!("{}colorscheme={}", set_prefix, name),
                         description: format!("Theme: {}", theme.description),
                         category: "set".to_string(),
                     });
@@ -1018,15 +1047,17 @@ impl CommandCompletion {
         }
 
         // Boolean suggestions for percentpathroot / ppr
-        if lower.starts_with("set percentpathroot=") || lower.starts_with("set ppr=") {
+        if lower.starts_with(&format!("{set_prefix}percentpathroot="))
+            || lower.starts_with(&format!("{set_prefix}ppr="))
+        {
             let val_pref = value_prefix(trimmed);
             for s in ["true", "false"] {
                 if val_pref.is_empty() || s.starts_with(&val_pref.to_lowercase()) {
                     out.push(CompletionItem {
-                        text: if lower.starts_with("set ppr=") {
-                            format!("set ppr={}", s)
+                        text: if lower.starts_with(&format!("{set_prefix}ppr=")) {
+                            format!("{}ppr={}", set_prefix, s)
                         } else {
-                            format!("set percentpathroot={}", s)
+                            format!("{}percentpathroot={}", set_prefix, s)
                         },
                         description: "Enable/disable '%' root in completion".to_string(),
                         category: "set".to_string(),
@@ -1037,13 +1068,15 @@ impl CommandCompletion {
 
         // Numeric suggestions for common options
         // tabstop / ts
-        if lower.starts_with("set tabstop=") || lower.starts_with("set ts=") {
+        if lower.starts_with(&format!("{set_prefix}tabstop="))
+            || lower.starts_with(&format!("{set_prefix}ts="))
+        {
             let val_pref = value_prefix(trimmed);
             let suggestions = ["2", "4", "8"]; // common tab widths
             for s in suggestions.iter() {
                 if val_pref.is_empty() || s.starts_with(val_pref) {
                     out.push(CompletionItem {
-                        text: format!("set tabstop={}", s),
+                        text: format!("{}tabstop={}", set_prefix, s),
                         description: "Set tab width".to_string(),
                         category: "set".to_string(),
                     });
@@ -1052,13 +1085,15 @@ impl CommandCompletion {
         }
 
         // scrolloff / so
-        if lower.starts_with("set scrolloff=") || lower.starts_with("set so=") {
+        if lower.starts_with(&format!("{set_prefix}scrolloff="))
+            || lower.starts_with(&format!("{set_prefix}so="))
+        {
             let val_pref = value_prefix(trimmed);
             let suggestions = ["0", "1", "2", "3", "5", "8", "10"];
             for s in suggestions.iter() {
                 if val_pref.is_empty() || s.starts_with(val_pref) {
                     out.push(CompletionItem {
-                        text: format!("set scrolloff={}", s),
+                        text: format!("{}scrolloff={}", set_prefix, s),
                         description: "Lines to keep around cursor".to_string(),
                         category: "set".to_string(),
                     });
@@ -1067,13 +1102,15 @@ impl CommandCompletion {
         }
 
         // sidescrolloff / siso
-        if lower.starts_with("set sidescrolloff=") || lower.starts_with("set siso=") {
+        if lower.starts_with(&format!("{set_prefix}sidescrolloff="))
+            || lower.starts_with(&format!("{set_prefix}siso="))
+        {
             let val_pref = value_prefix(trimmed);
             let suggestions = ["0", "1", "2", "3", "5", "8", "10"];
             for s in suggestions.iter() {
                 if val_pref.is_empty() || s.starts_with(val_pref) {
                     out.push(CompletionItem {
-                        text: format!("set sidescrolloff={}", s),
+                        text: format!("{}sidescrolloff={}", set_prefix, s),
                         description: "Columns to keep around cursor".to_string(),
                         category: "set".to_string(),
                     });
@@ -1082,13 +1119,15 @@ impl CommandCompletion {
         }
 
         // timeoutlen / tm
-        if lower.starts_with("set timeoutlen=") || lower.starts_with("set tm=") {
+        if lower.starts_with(&format!("{set_prefix}timeoutlen="))
+            || lower.starts_with(&format!("{set_prefix}tm="))
+        {
             let val_pref = value_prefix(trimmed);
             let suggestions = ["200", "300", "500", "700", "1000"];
             for s in suggestions.iter() {
                 if val_pref.is_empty() || s.starts_with(val_pref) {
                     out.push(CompletionItem {
-                        text: format!("set timeoutlen={}", s),
+                        text: format!("{}timeoutlen={}", set_prefix, s),
                         description: "Command timeout in ms".to_string(),
                         category: "set".to_string(),
                     });
@@ -1097,13 +1136,15 @@ impl CommandCompletion {
         }
 
         // undolevels / ul
-        if lower.starts_with("set undolevels=") || lower.starts_with("set ul=") {
+        if lower.starts_with(&format!("{set_prefix}undolevels="))
+            || lower.starts_with(&format!("{set_prefix}ul="))
+        {
             let val_pref = value_prefix(trimmed);
             let suggestions = ["100", "1000"]; // sensible defaults
             for s in suggestions.iter() {
                 if val_pref.is_empty() || s.starts_with(val_pref) {
                     out.push(CompletionItem {
-                        text: format!("set undolevels={}", s),
+                        text: format!("{}undolevels={}", set_prefix, s),
                         description: "Number of undo levels".to_string(),
                         category: "set".to_string(),
                     });

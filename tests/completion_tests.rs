@@ -65,3 +65,30 @@ fn buffer_and_numeric_hints_present() {
             .any(|i| i.text.starts_with("set ts=") || i.text.starts_with("set tabstop="))
     );
 }
+
+#[test]
+fn setp_completes_like_set_with_proper_prefix() {
+    let mut cc = CommandCompletion::new();
+    // No special context needed for set completions
+    cc.start_completion("setp ");
+    assert!(cc.should_show());
+    // Ensure we don't see mixed prefixes
+    assert!(
+        cc.matches
+            .iter()
+            .all(|i| !i.text.starts_with("set ") || !i.text.contains(' '))
+    );
+    // And that we do see setp-based suggestions
+    assert!(cc.matches.iter().any(|i| i.text.starts_with("setp ")));
+}
+
+#[test]
+fn setp_dynamic_numeric_suggestions_present() {
+    let mut cc = CommandCompletion::new();
+    cc.start_completion("setp ts=");
+    assert!(cc.should_show());
+    // Should suggest common numbers with setp prefix
+    let items: Vec<String> = cc.matches.iter().map(|i| i.text.clone()).collect();
+    assert!(items.iter().any(|t| t == "setp tabstop=2"));
+    assert!(items.iter().any(|t| t == "setp tabstop=4"));
+}
