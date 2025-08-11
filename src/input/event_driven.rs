@@ -23,8 +23,9 @@ pub struct EventDrivenEditor {
 }
 
 // Centralized timing constants for event loop cadence
-const RECV_TIMEOUT_MS: u64 = 16;
-const INPUT_POLL_MS: u64 = 16;
+// Single tick used for both main event recv timeout and input polling
+const EVENT_TICK_MS: u64 = 16;
+// Background polling intervals (not on the hot path)
 const CONFIG_POLL_MS: u64 = 500;
 const SYNTAX_POLL_MS: u64 = 100;
 
@@ -102,7 +103,7 @@ impl EventDrivenEditor {
         loop {
             match self
                 .event_receiver
-                .recv_timeout(Duration::from_millis(RECV_TIMEOUT_MS))
+                .recv_timeout(Duration::from_millis(EVENT_TICK_MS))
             {
                 Ok(event) => {
                     let should_quit = self.process_event(event)?;
@@ -387,7 +388,7 @@ impl EventDrivenEditor {
                 }
 
                 // Poll for terminal events
-                match event::poll(Duration::from_millis(INPUT_POLL_MS)) {
+                match event::poll(Duration::from_millis(EVENT_TICK_MS)) {
                     Ok(true) => {
                         match event::read() {
                             Ok(Event::Key(key_event)) => {
@@ -514,8 +515,7 @@ impl EventDrivenEditor {
             // In the future, this could handle background rendering optimizations
 
             // TODO: Implement background rendering optimizations
-            // Remove temporary loop structure
-            thread::sleep(Duration::from_secs(1));
+            // Currently no background work is done here.
 
             info!("Render thread finished");
         })
