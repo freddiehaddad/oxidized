@@ -466,57 +466,9 @@ impl Editor {
         let command_line = self.command_line.clone();
         let status_message = self.status_message.clone();
 
-        // Update window viewport based on cursor position and scroll_off setting
-        if let Some(buffer) = &current_buffer
-            && let Some(current_window) = self.window_manager.current_window_mut()
-        {
-            let content_height = current_window.content_height();
-            let cursor_row = buffer.cursor.row;
-            let scroll_off = self.config.interface.scroll_off;
-
-            // Calculate effective scroll boundaries considering scroll_off
-            let scroll_off_top = current_window.viewport_top + scroll_off;
-            let scroll_off_bottom =
-                current_window.viewport_top + content_height.saturating_sub(scroll_off + 1);
-
-            if cursor_row < scroll_off_top {
-                // Cursor is too close to top of viewport - scroll up
-                current_window.viewport_top = cursor_row.saturating_sub(scroll_off);
-            } else if cursor_row > scroll_off_bottom {
-                // Cursor is too close to bottom of viewport - scroll down
-                current_window.viewport_top =
-                    cursor_row.saturating_sub(content_height.saturating_sub(scroll_off + 1));
-            }
-
-            // Ensure viewport doesn't go below zero or beyond buffer end
-            let max_viewport_top = buffer.lines.len().saturating_sub(content_height);
-            current_window.viewport_top = current_window.viewport_top.min(max_viewport_top);
-
-            // Maintain horizontal offset when wrapping is disabled
-            if !self.config.behavior.wrap_lines {
-                // Visible text columns within window (excluding line number column in UI)
-                // We can't access UI's line number width here; use full window width as an approximation
-                let text_width = current_window.width as usize;
-                let col = buffer.cursor.col;
-                let siso = self.config.interface.side_scroll_off;
-
-                // Adjust horiz_offset to keep cursor within [offset+siso, offset+text_width-siso-1]
-                if col < current_window.horiz_offset.saturating_add(siso) {
-                    current_window.horiz_offset = col.saturating_sub(siso);
-                } else if col
-                    >= current_window
-                        .horiz_offset
-                        .saturating_add(text_width.saturating_sub(siso.max(1)))
-                {
-                    let target = col
-                        .saturating_sub(text_width.saturating_sub(siso.max(1)))
-                        .saturating_add(1);
-                    current_window.horiz_offset = target;
-                }
-            } else {
-                // Reset horizontal offset when wrap is enabled
-                current_window.horiz_offset = 0;
-            }
+        // Update viewport and horizontal scroll based on current cursor and config
+        if let Some(buffer) = &current_buffer {
+            self.update_viewport_for_current_window(buffer);
         }
 
         // Generate syntax highlights for all visible windows
@@ -614,6 +566,60 @@ impl Editor {
         // Use the existing UI render method but with optimized state
         self.ui.render(&mut self.terminal, &editor_state)?;
         Ok(())
+    }
+
+    /// Update the current window's viewport and horizontal scroll based on the given buffer's
+    /// cursor position and the editor's scroll-related settings.
+    fn update_viewport_for_current_window(&mut self, buffer: &Buffer) {
+        if let Some(current_window) = self.window_manager.current_window_mut() {
+            let content_height = current_window.content_height();
+            let cursor_row = buffer.cursor.row;
+            let scroll_off = self.config.interface.scroll_off;
+
+            // Calculate effective scroll boundaries considering scroll_off
+            let scroll_off_top = current_window.viewport_top + scroll_off;
+            let scroll_off_bottom =
+                current_window.viewport_top + content_height.saturating_sub(scroll_off + 1);
+
+            if cursor_row < scroll_off_top {
+                // Cursor is too close to top of viewport - scroll up
+                current_window.viewport_top = cursor_row.saturating_sub(scroll_off);
+            } else if cursor_row > scroll_off_bottom {
+                // Cursor is too close to bottom of viewport - scroll down
+                current_window.viewport_top =
+                    cursor_row.saturating_sub(content_height.saturating_sub(scroll_off + 1));
+            }
+
+            // Ensure viewport doesn't go below zero or beyond buffer end
+            let max_viewport_top = buffer.lines.len().saturating_sub(content_height);
+            current_window.viewport_top = current_window.viewport_top.min(max_viewport_top);
+
+            // Maintain horizontal offset when wrapping is disabled
+            if !self.config.behavior.wrap_lines {
+                // Visible text columns within window (excluding line number column in UI)
+                // We can't access UI's line number width here; use full window width as an approximation
+                let text_width = current_window.width as usize;
+                let col = buffer.cursor.col;
+                let siso = self.config.interface.side_scroll_off;
+
+                // Adjust horiz_offset to keep cursor within [offset+siso, offset+text_width-siso-1]
+                if col < current_window.horiz_offset.saturating_add(siso) {
+                    current_window.horiz_offset = col.saturating_sub(siso);
+                } else if col
+                    >= current_window
+                        .horiz_offset
+                        .saturating_add(text_width.saturating_sub(siso.max(1)))
+                {
+                    let target = col
+                        .saturating_sub(text_width.saturating_sub(siso.max(1)))
+                        .saturating_add(1);
+                    current_window.horiz_offset = target;
+                }
+            } else {
+                // Reset horizontal offset when wrap is enabled
+                current_window.horiz_offset = 0;
+            }
+        }
     }
 
     // Getters for UI and other components
