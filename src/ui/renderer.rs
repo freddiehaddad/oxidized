@@ -1,4 +1,5 @@
 use crate::config::theme::{SyntaxTheme, ThemeConfig, UITheme};
+use crate::core::buffer::LineEnding;
 use crate::core::editor::EditorRenderState;
 use crate::core::mode::{Mode, Position};
 use crate::features::syntax::HighlightRange;
@@ -160,9 +161,13 @@ impl UI {
             }
 
             if editor_state.config.statusline.show_eol {
-                // TODO: track actual EOL per buffer; default to LF for now
                 right.push_str(sep);
-                right.push_str("LF");
+                let eol = match buffer.eol {
+                    LineEnding::LF => "LF",
+                    LineEnding::CRLF => "CRLF",
+                    LineEnding::CR => "CR",
+                };
+                right.push_str(eol);
             }
 
             // File type

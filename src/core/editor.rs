@@ -1272,6 +1272,11 @@ impl Editor {
         // Smart case logic would be implemented in search methods
     }
 
+    /// Enable or disable regex mode for subsequent searches
+    pub fn set_use_regex(&mut self, use_regex: bool) {
+        self.search_engine.set_use_regex(use_regex);
+    }
+
     /// Check if auto save is enabled and save if needed
     pub fn check_auto_save(&mut self) {
         if self.config.editing.auto_save

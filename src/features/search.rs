@@ -236,9 +236,135 @@ impl SearchEngine {
         results
     }
 
-    pub fn replace(&self, _pattern: &str, _replacement: &str, _text: &mut [String]) -> usize {
-        // TODO: Implement replace functionality
-        0
+    pub fn replace(&self, pattern: &str, replacement: &str, text: &mut [String]) -> usize {
+        // No-op on empty pattern
+        if pattern.is_empty() {
+            return 0;
+        }
+
+        let mut total_replacements = 0usize;
+
+        if self.use_regex {
+            // Build regex, honoring case sensitivity via inline flag
+            let pat = if self.case_sensitive {
+                pattern.to_string()
+            } else {
+                format!("(?i){}", pattern)
+            };
+            if let Ok(regex) = Regex::new(&pat) {
+                for line in text.iter_mut() {
+                    // Count matches first to update total_replacements accurately
+                    let count = regex.find_iter(line.as_str()).count();
+                    if count > 0 {
+                        let replaced = regex.replace_all(line.as_str(), replacement);
+                        *line = replaced.into_owned();
+                        total_replacements += count;
+                    }
+                }
+            }
+            return total_replacements;
+        }
+
+        // Non-regex path: Unicode-aware char-by-char replacement matching search() semantics
+        let pattern_chars: Vec<char> = pattern.chars().collect();
+        let pattern_is_ascii = pattern.is_ascii();
+        let pattern_search_chars: Vec<char> = if self.case_sensitive {
+            pattern_chars.clone()
+        } else if pattern_is_ascii {
+            pattern_chars
+                .iter()
+                .map(|c| c.to_ascii_lowercase())
+                .collect()
+        } else {
+            pattern.to_lowercase().chars().collect()
+        };
+
+        for line in text.iter_mut() {
+            if line.is_empty() {
+                continue;
+            }
+
+            let line_chars: Vec<char> = line.chars().collect();
+            let mut out = String::with_capacity(line.len());
+
+            if self.case_sensitive {
+                let mut i = 0usize;
+                while i + pattern_search_chars.len() <= line_chars.len() {
+                    let mut matches = true;
+                    for (j, &p) in pattern_search_chars.iter().enumerate() {
+                        if line_chars[i + j] != p {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if matches {
+                        out.push_str(replacement);
+                        i += pattern_chars.len();
+                        total_replacements += 1;
+                    } else {
+                        out.push(line_chars[i]);
+                        i += 1;
+                    }
+                }
+                // Remainder
+                while i < line_chars.len() {
+                    out.push(line_chars[i]);
+                    i += 1;
+                }
+            } else if line.is_ascii() && pattern_is_ascii {
+                let mut i = 0usize;
+                while i + pattern_search_chars.len() <= line_chars.len() {
+                    let mut matches = true;
+                    for (j, &p) in pattern_search_chars.iter().enumerate() {
+                        if line_chars[i + j].to_ascii_lowercase() != p {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if matches {
+                        out.push_str(replacement);
+                        i += pattern_chars.len();
+                        total_replacements += 1;
+                    } else {
+                        out.push(line_chars[i]);
+                        i += 1;
+                    }
+                }
+                while i < line_chars.len() {
+                    out.push(line_chars[i]);
+                    i += 1;
+                }
+            } else {
+                // Unicode-insensitive: compare lowercased view
+                let search_chars: Vec<char> = line.to_lowercase().chars().collect();
+                let mut i = 0usize;
+                while i + pattern_search_chars.len() <= search_chars.len() {
+                    let mut matches = true;
+                    for (j, &p) in pattern_search_chars.iter().enumerate() {
+                        if search_chars[i + j] != p {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if matches {
+                        out.push_str(replacement);
+                        i += pattern_chars.len();
+                        total_replacements += 1;
+                    } else {
+                        out.push(line_chars[i]);
+                        i += 1;
+                    }
+                }
+                while i < line_chars.len() {
+                    out.push(line_chars[i]);
+                    i += 1;
+                }
+            }
+
+            *line = out;
+        }
+
+        total_replacements
     }
 }
 

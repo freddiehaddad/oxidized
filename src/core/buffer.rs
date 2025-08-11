@@ -5,6 +5,14 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use unicode_segmentation::UnicodeSegmentation;
 
+/// Supported line ending styles
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineEnding {
+    LF,
+    CRLF,
+    CR,
+}
+
 /// Types of content that can be yanked
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum YankType {
@@ -56,6 +64,8 @@ pub struct Buffer {
     pub undo_levels: usize,
     /// Named marks within this buffer (e.g., 'ma, 'mb)
     pub marks: HashMap<char, Position>,
+    /// Preferred line ending for this buffer
+    pub eol: LineEnding,
 }
 
 /// Represents a single edit operation for delta-based undo system
@@ -112,6 +122,7 @@ impl Buffer {
             clipboard: ClipboardContent::default(),
             undo_levels,
             marks: HashMap::new(),
+            eol: LineEnding::LF,
         }
     }
 
@@ -121,6 +132,14 @@ impl Buffer {
             id, path, undo_levels
         );
         let content = std::fs::read_to_string(&path)?;
+        // Detect line endings from original content
+        let detected_eol = if content.contains("\r\n") {
+            LineEnding::CRLF
+        } else if content.contains('\r') {
+            LineEnding::CR
+        } else {
+            LineEnding::LF
+        };
         let lines: Vec<String> = if content.is_empty() {
             debug!("File {:?} is empty, creating single empty line", path);
             vec![String::new()]
@@ -143,6 +162,7 @@ impl Buffer {
             clipboard: ClipboardContent::default(),
             undo_levels,
             marks: HashMap::new(),
+            eol: detected_eol,
         })
     }
 
@@ -545,7 +565,12 @@ impl Buffer {
     pub fn save(&mut self) -> Result<()> {
         if let Some(path) = &self.file_path {
             info!("Saving buffer {} to file: {:?}", self.id, path);
-            let content = self.lines.join("\n");
+            let sep = match self.eol {
+                LineEnding::LF => "\n",
+                LineEnding::CRLF => "\r\n",
+                LineEnding::CR => "\r",
+            };
+            let content = self.lines.join(sep);
             std::fs::write(path, content)?;
             self.modified = false;
             info!("Buffer {} saved successfully", self.id);

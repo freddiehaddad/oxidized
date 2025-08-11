@@ -299,14 +299,98 @@ impl EventDrivenEditor {
     }
 
     /// Handle buffer events
-    fn handle_buffer_event(&self, _event: BufferEvent) -> Result<bool> {
-        // TODO: Implement buffer event handling
+    fn handle_buffer_event(&self, event: BufferEvent) -> Result<bool> {
+        if let Ok(mut editor) = self.editor.lock() {
+            match event {
+                BufferEvent::Created { buffer_id, path } => {
+                    let name = path
+                        .as_ref()
+                        .and_then(|p| p.file_name())
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "[No Name]".to_string());
+                    editor.set_status_message(format!("Buffer {} created ({})", buffer_id, name));
+                }
+                BufferEvent::Opened { buffer_id, path } => {
+                    editor.set_status_message(format!(
+                        "Opened '{}' in buffer {}",
+                        path.to_string_lossy(),
+                        buffer_id
+                    ));
+                }
+                BufferEvent::Modified { buffer_id } => {
+                    editor.set_status_message(format!("Buffer {} modified", buffer_id));
+                }
+                BufferEvent::Saved { buffer_id, path } => {
+                    editor.set_status_message(format!(
+                        "Buffer {} saved to {}",
+                        buffer_id,
+                        path.to_string_lossy()
+                    ));
+                }
+                BufferEvent::Closed { buffer_id } => {
+                    editor.set_status_message(format!("Buffer {} closed", buffer_id));
+                }
+                BufferEvent::ContentChanged { .. }
+                | BufferEvent::CursorMoved { .. }
+                | BufferEvent::SelectionChanged { .. }
+                | BufferEvent::SyntaxHighlighted { .. } => {
+                    // For now, just request a redraw
+                }
+            }
+
+            // Request redraw after handling buffer events
+            let _ = self
+                .event_sender
+                .send(EditorEvent::UI(UIEvent::RedrawRequest));
+        }
         Ok(false)
     }
 
     /// Handle window events
-    fn handle_window_event(&self, _event: WindowEvent) -> Result<bool> {
-        // TODO: Implement window event handling
+    fn handle_window_event(&self, event: WindowEvent) -> Result<bool> {
+        if let Ok(mut editor) = self.editor.lock() {
+            match event {
+                WindowEvent::Created { window_id } => {
+                    editor.set_status_message(format!("Window {} created", window_id));
+                }
+                WindowEvent::Closed { window_id } => {
+                    editor.set_status_message(format!("Window {} closed", window_id));
+                }
+                WindowEvent::Split {
+                    parent_id,
+                    new_window_id,
+                    direction,
+                } => {
+                    editor.set_status_message(format!(
+                        "Window {} split {:?} -> {}",
+                        parent_id, direction, new_window_id
+                    ));
+                }
+                WindowEvent::FocusChanged {
+                    old_window_id: _,
+                    new_window_id,
+                } => {
+                    // Update focus in window manager and sync current buffer from focused window
+                    editor.window_manager.set_current_window(new_window_id);
+                    if let Some(win) = editor.window_manager.current_window() {
+                        editor.current_buffer_id = win.buffer_id;
+                    }
+                }
+                WindowEvent::Resized {
+                    window_id,
+                    width,
+                    height,
+                } => {
+                    editor.set_status_message(format!(
+                        "Window {} resized to {}x{}",
+                        window_id, width, height
+                    ));
+                }
+            }
+            let _ = self
+                .event_sender
+                .send(EditorEvent::UI(UIEvent::RedrawRequest));
+        }
         Ok(false)
     }
 
@@ -355,8 +439,32 @@ impl EventDrivenEditor {
     }
 
     /// Handle search events
-    fn handle_search_event(&self, _event: SearchEvent) -> Result<bool> {
-        // TODO: Implement search event handling
+    fn handle_search_event(&self, event: SearchEvent) -> Result<bool> {
+        if let Ok(mut editor) = self.editor.lock() {
+            match event {
+                SearchEvent::Started { pattern, is_regex } => {
+                    editor.set_use_regex(is_regex);
+                    editor.search(&pattern);
+                }
+                SearchEvent::ResultsFound(_results) => {
+                    // Results are computed by editor.search; no-op for now.
+                }
+                SearchEvent::Navigate { direction } => match direction {
+                    SearchDirection::Forward => {
+                        editor.search_next();
+                    }
+                    SearchDirection::Backward => {
+                        editor.search_previous();
+                    }
+                },
+                SearchEvent::Cancelled => {
+                    editor.clear_search();
+                }
+            }
+            let _ = self
+                .event_sender
+                .send(EditorEvent::UI(UIEvent::RedrawRequest));
+        }
         Ok(false)
     }
 
