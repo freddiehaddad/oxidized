@@ -41,27 +41,18 @@ syntax_poll_ms = 100
 default_language = "text"
 
 [languages.extensions]
-rs = "rust"
+json = "json"
 toml = "toml"
+md = "markdown"
 txt = "text"
 yaml = "yaml"
-md = "markdown"
-json = "json"
+rs = "rust"
 yml = "yaml"
 
 [languages.content_patterns]
-json = [
-    "{",
-    '"',
-]
 toml = [
     "[",
     "=",
-]
-markdown = [
-    "# ",
-    "## ",
-    "```",
 ]
 rust = [
     "fn ",
@@ -70,6 +61,15 @@ rust = [
     "impl ",
     "struct ",
     "enum ",
+]
+markdown = [
+    "# ",
+    "## ",
+    "```",
+]
+json = [
+    "{",
+    '"',
 ]
 
 [statusline]

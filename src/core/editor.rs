@@ -1026,6 +1026,42 @@ impl Editor {
         Ok(())
     }
 
+    /// Write current buffer contents to a specific file path without changing buffer name
+    pub fn write_current_buffer_to(&mut self, filename: &str) -> Result<String> {
+        use std::fs;
+        if let Some(buffer) = self.current_buffer() {
+            let sep = match buffer.eol {
+                crate::core::buffer::LineEnding::LF => "\n",
+                crate::core::buffer::LineEnding::CRLF => "\r\n",
+                crate::core::buffer::LineEnding::CR => "\r",
+            };
+            let content = buffer.lines.join(sep);
+            fs::write(filename, content)?;
+            Ok(format!("Wrote '{}'", filename))
+        } else {
+            Ok("No buffer to write".to_string())
+        }
+    }
+
+    /// Save-as: write to path and update buffer file_path, clear modified flag
+    pub fn save_as_current_buffer(&mut self, filename: &str) -> Result<String> {
+        use std::fs;
+        if let Some(buffer) = self.current_buffer_mut() {
+            let sep = match buffer.eol {
+                crate::core::buffer::LineEnding::LF => "\n",
+                crate::core::buffer::LineEnding::CRLF => "\r\n",
+                crate::core::buffer::LineEnding::CR => "\r",
+            };
+            let content = buffer.lines.join(sep);
+            fs::write(filename, content)?;
+            buffer.file_path = Some(std::path::PathBuf::from(filename));
+            buffer.modified = false;
+            Ok(format!("Saved as '{}'", filename))
+        } else {
+            Ok("No buffer to save".to_string())
+        }
+    }
+
     /// Perform a search in the current buffer
     pub fn search(&mut self, pattern: &str) -> bool {
         debug!("Performing search for pattern: '{}'", pattern);

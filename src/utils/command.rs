@@ -66,6 +66,12 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
             }
         }
 
+        // Create a new empty buffer and switch to it
+        "enew" => match editor.create_buffer(None) {
+            Ok(id) => editor.set_status_message(format!("New empty buffer {}", id)),
+            Err(e) => editor.set_status_message(format!("Error creating buffer: {}", e)),
+        },
+
         // Line number toggles
         "set nu" | "set number" => editor.set_line_numbers(true, false),
         "set nonu" | "set nonumber" => editor.set_line_numbers(false, false),
@@ -119,6 +125,18 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
                 match editor.open_file(filename) {
                     Ok(msg) => editor.set_status_message(msg),
                     Err(e) => editor.set_status_message(format!("Error opening file: {}", e)),
+                }
+            } else if let Some(filename) = command.strip_prefix("w ") {
+                let filename = filename.trim();
+                match editor.write_current_buffer_to(filename) {
+                    Ok(msg) => editor.set_status_message(msg),
+                    Err(e) => editor.set_status_message(format!("Error writing file: {}", e)),
+                }
+            } else if let Some(filename) = command.strip_prefix("saveas ") {
+                let filename = filename.trim();
+                match editor.save_as_current_buffer(filename) {
+                    Ok(msg) => editor.set_status_message(msg),
+                    Err(e) => editor.set_status_message(format!("Error saving as: {}", e)),
                 }
             } else if let Some(buffer_ref) = command.strip_prefix("b ") {
                 let buffer_ref = buffer_ref.trim();
