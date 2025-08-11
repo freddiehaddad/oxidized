@@ -22,6 +22,12 @@ pub struct EventDrivenEditor {
     last_render_state: Arc<Mutex<RenderState>>,
 }
 
+// Centralized timing constants for event loop cadence
+const RECV_TIMEOUT_MS: u64 = 16;
+const INPUT_POLL_MS: u64 = 16;
+const CONFIG_POLL_MS: u64 = 500;
+const SYNTAX_POLL_MS: u64 = 100;
+
 #[derive(Debug, Clone, PartialEq)]
 struct RenderState {
     mode: crate::core::mode::Mode,
@@ -94,7 +100,10 @@ impl EventDrivenEditor {
 
         // Main event processing loop
         loop {
-            match self.event_receiver.recv_timeout(Duration::from_millis(16)) {
+            match self
+                .event_receiver
+                .recv_timeout(Duration::from_millis(RECV_TIMEOUT_MS))
+            {
                 Ok(event) => {
                     let should_quit = self.process_event(event)?;
                     if should_quit {
@@ -378,7 +387,7 @@ impl EventDrivenEditor {
                 }
 
                 // Poll for terminal events
-                match event::poll(Duration::from_millis(16)) {
+                match event::poll(Duration::from_millis(INPUT_POLL_MS)) {
                     Ok(true) => {
                         match event::read() {
                             Ok(Event::Key(key_event)) => {
@@ -421,7 +430,8 @@ impl EventDrivenEditor {
             info!("Config watcher thread started");
 
             loop {
-                thread::sleep(Duration::from_millis(500)); // Check every 500ms
+                // Poll at a steady interval
+                thread::sleep(Duration::from_millis(CONFIG_POLL_MS));
 
                 if let Ok(editor) = editor.try_lock() {
                     if editor.should_quit() {
@@ -451,8 +461,6 @@ impl EventDrivenEditor {
                         }
                     }
                 }
-
-                thread::sleep(Duration::from_millis(100));
             }
 
             info!("Config watcher thread finished");
@@ -468,7 +476,7 @@ impl EventDrivenEditor {
             info!("Syntax highlighting thread started");
 
             loop {
-                thread::sleep(Duration::from_millis(100)); // Check every 100ms
+                thread::sleep(Duration::from_millis(SYNTAX_POLL_MS));
 
                 if let Ok(editor) = editor.try_lock() {
                     if editor.should_quit() {
@@ -488,8 +496,6 @@ impl EventDrivenEditor {
                         }
                     }
                 }
-
-                thread::sleep(Duration::from_millis(50));
             }
 
             info!("Syntax highlighting thread finished");
