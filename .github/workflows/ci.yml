@@ -6,8 +6,6 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
-  schedule:
-    - cron: "0 6 * * 1" # Weekly Monday 06:00 UTC scheduled benches and checks
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
