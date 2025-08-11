@@ -151,7 +151,7 @@ impl Editor {
         ui.show_line_numbers = config.display.show_line_numbers;
         ui.show_relative_numbers = config.display.show_relative_numbers;
         ui.show_cursor_line = config.display.show_cursor_line;
-        ui.show_marks_in_number_column = config.display.show_marks_in_number_column;
+        ui.show_marks = config.display.show_marks;
         ui.set_theme(&config.display.color_scheme);
 
         let key_handler = KeyHandler::new();
@@ -1195,7 +1195,7 @@ impl Editor {
         self.ui.show_line_numbers = self.config.display.show_line_numbers;
         self.ui.show_relative_numbers = self.config.display.show_relative_numbers;
         self.ui.show_cursor_line = self.config.display.show_cursor_line;
-        self.ui.show_marks_in_number_column = self.config.display.show_marks_in_number_column;
+        self.ui.show_marks = self.config.display.show_marks;
         self.ui.set_theme(&self.config.display.color_scheme);
 
         // Apply specific settings that need immediate effect
@@ -1270,9 +1270,7 @@ impl Editor {
             "number" | "nu" => Some(self.config.display.show_line_numbers.to_string()),
             "relativenumber" | "rnu" => Some(self.config.display.show_relative_numbers.to_string()),
             "cursorline" | "cul" => Some(self.config.display.show_cursor_line.to_string()),
-            "showmarks" | "smk" => {
-                Some(self.config.display.show_marks_in_number_column.to_string())
-            }
+            "showmarks" | "smk" => Some(self.config.display.show_marks.to_string()),
             "tabstop" | "ts" => Some(self.config.behavior.tab_width.to_string()),
             "expandtab" | "et" => Some(self.config.behavior.expand_tabs.to_string()),
             "autoindent" | "ai" => Some(self.config.behavior.auto_indent.to_string()),
@@ -1512,7 +1510,7 @@ impl Editor {
         self.ui.show_line_numbers = new_config.display.show_line_numbers;
         self.ui.show_relative_numbers = new_config.display.show_relative_numbers;
         self.ui.show_cursor_line = new_config.display.show_cursor_line;
-        self.ui.show_marks_in_number_column = new_config.display.show_marks_in_number_column;
+        self.ui.show_marks = new_config.display.show_marks;
 
         self.config = new_config;
         self.status_message = "Editor configuration reloaded".to_string();

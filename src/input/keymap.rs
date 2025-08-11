@@ -2335,6 +2335,10 @@ impl KeyHandler {
                 editor.get_config_value("cursorline").unwrap_or_default()
             ));
             settings.push(format!(
+                "showmarks: {}",
+                editor.get_config_value("showmarks").unwrap_or_default()
+            ));
+            settings.push(format!(
                 "tabstop: {}",
                 editor.get_config_value("tabstop").unwrap_or_default()
             ));
@@ -2360,6 +2364,7 @@ impl KeyHandler {
                 "number",
                 "relativenumber",
                 "cursorline",
+                "showmarks",
                 "tabstop",
                 "expandtab",
                 "autoindent",
@@ -2422,6 +2427,10 @@ impl KeyHandler {
                 "cursorline" | "cul" => {
                     editor.set_config_setting("cursorline", "false");
                     editor.set_cursor_line(false);
+                }
+                "showmarks" | "smk" => {
+                    editor.set_config_setting("showmarks", "false");
+                    editor.set_status_message("Marks in gutter disabled".to_string());
                 }
                 "ignorecase" | "ic" => {
                     editor.set_config_setting("ignorecase", "false");
@@ -2551,6 +2560,10 @@ impl KeyHandler {
             "cursorline" | "cul" => {
                 editor.set_config_setting("cursorline", "true");
                 editor.set_cursor_line(true);
+            }
+            "showmarks" | "smk" => {
+                editor.set_config_setting("showmarks", "true");
+                editor.set_status_message("Marks in gutter enabled".to_string());
             }
             "ignorecase" | "ic" => {
                 editor.set_config_setting("ignorecase", "true");

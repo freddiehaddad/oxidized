@@ -28,8 +28,8 @@ pub struct UI {
     pub show_relative_numbers: bool,
     /// Highlight the current cursor line
     pub show_cursor_line: bool,
-    /// Show mark indicator in the number column when a line has a mark
-    pub show_marks_in_number_column: bool,
+    /// Show mark indicator in the gutter/number column when a line has a mark
+    pub show_marks: bool,
     /// Current UI theme from themes.toml
     theme: UITheme,
     /// Current syntax theme from themes.toml
@@ -53,9 +53,23 @@ impl UI {
             show_line_numbers: true,            // Enable by default like Vim
             show_relative_numbers: false,       // Disabled by default
             show_cursor_line: true,             // Enable by default
-            show_marks_in_number_column: true,  // Default to on per request
+            show_marks: true,                   // Default to on per request
             theme: current_theme.ui,            // Use theme from themes.toml
             syntax_theme: current_theme.syntax, // Use syntax theme from themes.toml
+        }
+    }
+
+    /// Compute the left gutter width. When absolute or relative line numbers are enabled,
+    /// reserve enough space for the largest line number plus a space. If only marks are
+    /// enabled, reserve a small fixed gutter so marks can be shown without numbers.
+    pub fn compute_gutter_width(&self, total_lines: usize) -> usize {
+        if self.show_line_numbers || self.show_relative_numbers {
+            let width = total_lines.max(1).to_string().len();
+            (width + 1).max(4) // At least 4 chars wide, +1 for space
+        } else if self.show_marks {
+            2 // Minimal gutter to display a single mark glyph/letter
+        } else {
+            0
         }
     }
 
@@ -463,14 +477,8 @@ impl UI {
     ) -> io::Result<()> {
         let content_height = window.content_height();
 
-        // Calculate line number column width for this window
-        let line_number_width = if self.show_line_numbers || self.show_relative_numbers {
-            let max_line_num = buffer.lines.len();
-            let width = max_line_num.to_string().len();
-            (width + 1).max(4) // At least 4 chars wide, +1 for space
-        } else {
-            0
-        };
+        // Calculate gutter width for this window (numbers or marks)
+        let line_number_width = self.compute_gutter_width(buffer.lines.len());
 
         let text_start_col = window.x as usize + line_number_width;
         let text_width = window.width.saturating_sub(line_number_width as u16) as usize;
@@ -510,8 +518,8 @@ impl UI {
                 terminal.queue_move_cursor(Position::new(screen_row, window.x as usize))?;
 
                 if buf_row < buffer.lines.len() {
-                    // Render line number only for first visual row of the logical line
-                    if self.show_line_numbers || self.show_relative_numbers {
+                    // Render gutter (numbers or marks) only for first visual row
+                    if line_number_width > 0 {
                         self.render_line_number(
                             terminal,
                             buffer,
@@ -609,8 +617,8 @@ impl UI {
                         terminal
                             .queue_move_cursor(Position::new(next_screen_row, window.x as usize))?;
 
-                        // In wrapped continuation rows, line numbers are blank
-                        if self.show_line_numbers || self.show_relative_numbers {
+                        // In wrapped continuation rows, gutter is blank
+                        if line_number_width > 0 {
                             let blanks = " ".repeat(line_number_width);
                             terminal.queue_print(&blanks)?;
                         }
@@ -620,8 +628,8 @@ impl UI {
                             .queue_move_cursor(Position::new(next_screen_row, text_start_col))?;
                     }
                 } else {
-                    // Beyond buffer end: draw empty line indicator
-                    if self.show_line_numbers || self.show_relative_numbers {
+                    // Beyond buffer end: draw gutter then empty line indicator
+                    if line_number_width > 0 {
                         self.render_line_number(
                             terminal,
                             buffer,
@@ -676,8 +684,8 @@ impl UI {
             terminal.queue_move_cursor(Position::new(screen_row, window.x as usize))?;
 
             if buffer_row < buffer.lines.len() {
-                // Render line number if enabled
-                if self.show_line_numbers || self.show_relative_numbers {
+                // Render gutter (numbers or marks) if enabled
+                if line_number_width > 0 {
                     self.render_line_number(
                         terminal,
                         buffer,
@@ -813,8 +821,8 @@ impl UI {
                     terminal.queue_print(&filler)?;
                 }
             } else {
-                // Empty line - render line number if enabled
-                if self.show_line_numbers || self.show_relative_numbers {
+                // Empty line - render gutter if enabled
+                if line_number_width > 0 {
                     self.render_line_number(
                         terminal,
                         buffer,
@@ -916,14 +924,8 @@ impl UI {
             if let Some(buffer) = buffer {
                 let content_height = current_window.content_height();
 
-                // Calculate line number column width
-                let line_number_width = if self.show_line_numbers || self.show_relative_numbers {
-                    let max_line_num = buffer.lines.len();
-                    let width = max_line_num.to_string().len();
-                    (width + 1).max(4) // At least 4 chars wide, +1 for space
-                } else {
-                    0
-                };
+                // Calculate gutter width
+                let line_number_width = self.compute_gutter_width(buffer.lines.len());
 
                 let wrap_enabled = editor_state.config.behavior.wrap_lines;
                 let word_break = editor_state.config.behavior.line_break;
@@ -1282,6 +1284,7 @@ impl UI {
         }
 
         if buffer_row < buffer.lines.len() {
+            let numbers_enabled = self.show_line_numbers || self.show_relative_numbers;
             let line_num = if self.show_relative_numbers && is_active_window {
                 // Only show relative numbers in the active window
                 let current_line = buffer.cursor.row;
@@ -1297,11 +1300,15 @@ impl UI {
                 buffer_row + 1
             };
 
-            // Build number column text with optional mark indicator
-            let num_str = format!("{:>width$}", line_num, width = width - 1);
+            // Build gutter text: numbers (right-aligned) or just padding when numbers are off
+            let num_str = if numbers_enabled {
+                format!("{:>width$}", line_num, width = width.saturating_sub(1))
+            } else {
+                " ".repeat(width.saturating_sub(1))
+            };
             let trailing_space = " ";
 
-            if self.show_marks_in_number_column {
+            if self.show_marks {
                 // Check if this line has any mark, and pick a deterministic one to display (smallest char)
                 let mark_char = buffer
                     .marks
@@ -1343,7 +1350,7 @@ impl UI {
                 }
             }
 
-            // Default: print number and trailing space
+            // Default: print gutter text and trailing space
             terminal.queue_print(&num_str)?;
             terminal.queue_print(trailing_space)?;
         } else {

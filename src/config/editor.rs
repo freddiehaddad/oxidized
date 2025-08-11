@@ -24,9 +24,9 @@ pub struct DisplayConfig {
     pub show_cursor_line: bool,
     pub color_scheme: String,
     pub syntax_highlighting: bool,
-    /// Show a mark indicator in the number column for lines that have a mark
+    /// Show a mark indicator in the gutter/number column for lines that have a mark
     #[serde(default = "default_true")]
-    pub show_marks_in_number_column: bool,
+    pub show_marks: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,7 +175,7 @@ impl Default for EditorConfig {
                 show_cursor_line: false,
                 color_scheme: "default".to_string(), // Match the theme in themes.toml
                 syntax_highlighting: true,
-                show_marks_in_number_column: true,
+                show_marks: true,
             },
             behavior: BehaviorConfig {
                 tab_width: 4,
@@ -525,10 +525,10 @@ impl EditorConfig {
                 ))
             }
             "showmarks" | "smk" => {
-                self.display.show_marks_in_number_column = value.parse().unwrap_or(true);
+                self.display.show_marks = value.parse().unwrap_or(true);
                 Ok(format!(
-                    "Marks in number column: {}",
-                    if self.display.show_marks_in_number_column {
+                    "Marks in gutter: {}",
+                    if self.display.show_marks {
                         "enabled"
                     } else {
                         "disabled"

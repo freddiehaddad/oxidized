@@ -264,6 +264,26 @@ impl CommandCompletion {
                 description: "Disable cursor line highlight (short)".to_string(),
                 category: "set".to_string(),
             },
+            CompletionItem {
+                text: "set showmarks".to_string(),
+                description: "Show marks in gutter/number column".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set smk".to_string(),
+                description: "Show marks (short)".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set noshowmarks".to_string(),
+                description: "Hide marks in gutter/number column".to_string(),
+                category: "set".to_string(),
+            },
+            CompletionItem {
+                text: "set nosmk".to_string(),
+                description: "Hide marks (short)".to_string(),
+                category: "set".to_string(),
+            },
             // Wrapping and line break
             CompletionItem {
                 text: "set wrap".to_string(),
@@ -674,6 +694,8 @@ impl CommandCompletion {
             "number",
             "relativenumber",
             "cursorline",
+            "showmarks",
+            "smk",
             "tabstop",
             "expandtab",
             "autoindent",

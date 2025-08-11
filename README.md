@@ -208,7 +208,7 @@ show_relative_numbers = true
 show_cursor_line = true
 color_scheme = "default"
 syntax_highlighting = true
-show_marks_in_number_column = true  # Show a mark's letter in the number column
+show_marks = true  # Show a mark's letter in the gutter/number column
 
 [behavior]
 tab_width = 4
@@ -251,6 +251,10 @@ default_language = "text"
 "txt" = "text"
 "json" = "json"
 ```
+
+Note: The left number column acts as a gutter. When `show_line_numbers` is false but
+`show_marks` is true, a minimal gutter is still rendered so marks remain
+visible without enabling line numbers. The mark indicator uses the theme color `ui.mark_indicator`.
 
 #### Search behavior
 
@@ -655,7 +659,7 @@ status_fg = "#cccccc"
 status_modified = "#f74c00"
 line_number = "#8c6239"
 line_number_current = "#deb887"
-mark_indicator = "#e6b422"   # Color of the mark letter shown in number column
+mark_indicator = "#e6b422"   # Color of the mark letter shown in gutter/number column
 cursor_line_bg = "#2d2318"
 empty_line = "#4a3728"
 command_line_bg = "#1f1611"

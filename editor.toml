@@ -4,7 +4,7 @@ show_relative_numbers = true
 show_cursor_line = true
 color_scheme = "default"
 syntax_highlighting = true
-show_marks_in_number_column = true
+show_marks = true
 
 [behavior]
 tab_width = 4
@@ -39,19 +39,19 @@ percent_path_root = true
 default_language = "text"
 
 [languages.extensions]
-md = "markdown"
-toml = "toml"
+yaml = "yaml"
 yml = "yaml"
 json = "json"
 rs = "rust"
-yaml = "yaml"
+md = "markdown"
+toml = "toml"
 txt = "text"
 
 [languages.content_patterns]
+markdown = ["# ", "## ", "```"]
 json = ["{", '"']
 rust = ["fn ", "let ", "use ", "impl ", "struct ", "enum "]
 toml = ["[", "="]
-markdown = ["# ", "## ", "```"]
 
 [statusline]
 show_indent = true

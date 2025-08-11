@@ -13,7 +13,7 @@ mod ui_tests {
         assert_eq!(ui.viewport_top(), 0);
 
         // New: show marks in number column default
-        assert!(ui.show_marks_in_number_column);
+        assert!(ui.show_marks);
     }
 
     #[test]
@@ -58,6 +58,24 @@ mod ui_tests {
 
         ui.show_relative_numbers = true;
         assert!(ui.show_relative_numbers);
+    }
+
+    #[test]
+    fn test_gutter_exists_when_only_marks_enabled() {
+        let mut ui = UI::new();
+        // Simulate config: hide numbers, show marks
+        ui.show_line_numbers = false;
+        ui.show_relative_numbers = false;
+        ui.show_marks = true;
+
+        // With no numbers, gutter should still reserve minimal width for marks
+        let w = ui.compute_gutter_width(1234);
+        assert_eq!(w, 2, "Expected minimal gutter width for marks-only mode");
+
+        // If numbers are enabled, width should scale with total lines
+        ui.show_line_numbers = true;
+        let w2 = ui.compute_gutter_width(1234);
+        assert!(w2 >= 4);
     }
 
     #[test]
