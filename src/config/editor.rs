@@ -64,6 +64,12 @@ pub struct InterfaceConfig {
     /// Enable '%' prefix in file path completion to root at current buffer directory
     #[serde(default = "default_true")]
     pub percent_path_root: bool,
+    /// Interval (ms) for polling config changes (hot reload)
+    #[serde(default)]
+    pub config_poll_ms: u64,
+    /// Interval (ms) for checking async syntax refresh needs
+    #[serde(default)]
+    pub syntax_poll_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,6 +211,8 @@ impl Default for EditorConfig {
                 completion_menu_width: 30,
                 completion_menu_height: 8,
                 percent_path_root: true,
+                config_poll_ms: 500,
+                syntax_poll_ms: 100,
             },
             statusline: StatusLineConfig {
                 show_indent: true,

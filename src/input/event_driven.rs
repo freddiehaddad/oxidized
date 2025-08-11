@@ -25,9 +25,7 @@ pub struct EventDrivenEditor {
 // Centralized timing constants for event loop cadence
 // Single tick used for both main event recv timeout and input polling
 const EVENT_TICK_MS: u64 = 16;
-// Background polling intervals (not on the hot path)
-const CONFIG_POLL_MS: u64 = 500;
-const SYNTAX_POLL_MS: u64 = 100;
+// Background polling intervals (not on the hot path) are configurable via Editor
 
 #[derive(Debug, Clone, PartialEq)]
 struct RenderState {
@@ -431,8 +429,13 @@ impl EventDrivenEditor {
             info!("Config watcher thread started");
 
             loop {
-                // Poll at a steady interval
-                thread::sleep(Duration::from_millis(CONFIG_POLL_MS));
+                // Poll at a steady interval (configurable)
+                let sleep_ms = if let Ok(ed) = editor.lock() {
+                    ed.config_poll_ms()
+                } else {
+                    500
+                };
+                thread::sleep(Duration::from_millis(sleep_ms));
 
                 if let Ok(editor) = editor.try_lock() {
                     if editor.should_quit() {
@@ -477,7 +480,12 @@ impl EventDrivenEditor {
             info!("Syntax highlighting thread started");
 
             loop {
-                thread::sleep(Duration::from_millis(SYNTAX_POLL_MS));
+                let sleep_ms = if let Ok(ed) = editor.lock() {
+                    ed.syntax_poll_ms()
+                } else {
+                    100
+                };
+                thread::sleep(Duration::from_millis(sleep_ms));
 
                 if let Ok(editor) = editor.try_lock() {
                     if editor.should_quit() {

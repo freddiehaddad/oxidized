@@ -34,6 +34,8 @@ window_resize_amount = 1
 completion_menu_width = 30
 completion_menu_height = 8
 percent_path_root = true
+config_poll_ms = 500
+syntax_poll_ms = 100
 
 [languages]
 default_language = "text"

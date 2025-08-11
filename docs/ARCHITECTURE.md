@@ -17,9 +17,18 @@ This document gives contributors a high-level and practical overview of how Oxid
 
 1. main.rs initializes logging and creates an Editor.
 2. EventDrivenEditor wraps Editor and spawns threads (input, config watch, syntax, render stub) and an event bus.
-3. Input thread reads terminal events and sends Input events.
-4. EventDrivenEditor processes events, mutates Editor as needed, and sends UI RedrawRequest when state changes.
-5. Editor::render() snapshots EditorRenderState and asks UI to draw via Terminal.
+
+### Timing and Cadence
+
+- The main loop and input polling share a unified tick (EVENT_TICK_MS, default 16ms) to keep cadence simple and responsive.
+- Background polling is configurable via editor.toml:
+ 	- interface.config_poll_ms (default 500)
+ 	- interface.syntax_poll_ms (default 100)
+- These values can be tuned at runtime via hot reload; the event threads read them before each sleep.
+
+1. Input thread reads terminal events and sends Input events.
+2. EventDrivenEditor processes events, mutates Editor as needed, and sends UI RedrawRequest when state changes.
+3. Editor::render() snapshots EditorRenderState and asks UI to draw via Terminal.
 
 See PlantUML sequence: sequence-runtime.puml
 
