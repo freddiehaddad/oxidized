@@ -783,6 +783,201 @@ impl CommandCompletion {
         combined.sort_by(|a, b| a.text.cmp(&b.text));
         combined.dedup_by(|a, b| a.text == b.text);
 
+        // Additional deduplication for :set/:setp option toggles so that aliases and full names
+        // don't both appear as separate rows (e.g. `set showmarks` + `set smk`). We only keep
+        // one positive form and one negative form per canonical option depending on context.
+        // We do NOT collapse value suggestions containing '=' nor query forms ending with '?'.
+        // Logic mirrors (must stay in sync with) renderer canonicalization.
+        let input_is_negative = normalized_for_match.starts_with("set no");
+        if normalized_for_match.starts_with("set ") || normalized_for_match.starts_with("setp ") {
+            use std::collections::HashSet;
+            let mut seen: HashSet<String> = HashSet::new();
+            combined.retain(|item| {
+                if item.category != "set" {
+                    return true;
+                }
+                // Skip value and query forms from this alias collapsing
+                if item.text.contains('=') || item.text.ends_with('?') {
+                    return true;
+                }
+                // Extract the raw key portion after set/setp
+                let raw_key = item
+                    .text
+                    .strip_prefix("setp ")
+                    .or_else(|| item.text.strip_prefix("set "))
+                    .unwrap_or(&item.text);
+                // Determine negation
+                let (is_neg, remainder) = if let Some(rest) = raw_key.strip_prefix("no") {
+                    (true, rest)
+                } else {
+                    (false, raw_key)
+                };
+                // Map short aliases to canonical positive names
+                let canonical_pos = match remainder {
+                    "nu" => "number",
+                    "rnu" => "relativenumber",
+                    "cul" => "cursorline",
+                    "smk" => "showmarks",
+                    "et" => "expandtab",
+                    "ai" => "autoindent",
+                    "ic" => "ignorecase",
+                    "scs" => "smartcase",
+                    "hls" => "hlsearch",
+                    "is" => "incsearch",
+                    "lbr" => "linebreak",
+                    "udf" => "undofile",
+                    "bk" => "backup",
+                    "swf" => "swapfile",
+                    "aw" => "autosave",
+                    "ls" => "laststatus",
+                    "sc" => "showcmd",
+                    "ppr" => "percentpathroot",
+                    "syn" => "syntax",
+                    "ts" => "tabstop",
+                    "ul" => "undolevels",
+                    "so" => "scrolloff",
+                    "siso" => "sidescrolloff",
+                    "tm" => "timeoutlen",
+                    "colo" => "colorscheme",
+                    other => other,
+                };
+                // Build a dedup key; separate positive/negative namespaces so a user typing
+                // an explicit negative prefix still sees the negative form (but only once).
+                // When the user did not begin with "set no", we suppress duplicates of the
+                // negative forms entirely (keep only positive) by treating negative variants
+                // as the same key as the positive.
+                let key = if is_neg {
+                    if input_is_negative {
+                        format!("neg:{}", canonical_pos)
+                    } else {
+                        format!("pos:{}", canonical_pos)
+                    }
+                } else {
+                    format!("pos:{}", canonical_pos)
+                };
+                if seen.contains(&key) {
+                    false
+                } else {
+                    seen.insert(key);
+                    true
+                }
+            });
+
+            // Secondary filtering: if both a query form (set <opt>?) and a plain form (set <opt>)
+            // would appear, hide the query form unless user actually typed a trailing '?'. This
+            // prevents visually indistinguishable duplicates after renderer canonicalization.
+            if !input_lower.ends_with('?') {
+                // Collect canonical names from non-query items
+                let mut plain_canon: HashSet<String> = HashSet::new();
+                for item in combined
+                    .iter()
+                    .filter(|c| c.category == "set" && !c.text.ends_with('?'))
+                {
+                    if let Some(raw) = item
+                        .text
+                        .strip_prefix("setp ")
+                        .or_else(|| item.text.strip_prefix("set "))
+                    {
+                        let raw = raw.trim();
+                        let is_neg = raw.starts_with("no");
+                        let mut key_part = if is_neg { &raw[2..] } else { raw };
+                        if let Some((k, _)) = key_part.split_once('=') {
+                            key_part = k;
+                        }
+                        // Map aliases to canonical (reuse subset of mapping)
+                        let canonical = match key_part {
+                            "nu" => "number",
+                            "rnu" => "relativenumber",
+                            "cul" => "cursorline",
+                            "smk" => "showmarks",
+                            "et" => "expandtab",
+                            "ai" => "autoindent",
+                            "ic" => "ignorecase",
+                            "scs" => "smartcase",
+                            "hls" => "hlsearch",
+                            "is" => "incsearch",
+                            "lbr" => "linebreak",
+                            "udf" => "undofile",
+                            "bk" => "backup",
+                            "swf" => "swapfile",
+                            "aw" => "autosave",
+                            "ls" => "laststatus",
+                            "sc" => "showcmd",
+                            "ppr" => "percentpathroot",
+                            "syn" => "syntax",
+                            "ts" => "tabstop",
+                            "ul" => "undolevels",
+                            "so" => "scrolloff",
+                            "siso" => "sidescrolloff",
+                            "tm" => "timeoutlen",
+                            "colo" => "colorscheme",
+                            other => other,
+                        };
+                        // Namespace negative so queries of neg and pos both can exist theoretically
+                        let canon_key = if is_neg {
+                            format!("neg:{}", canonical)
+                        } else {
+                            format!("pos:{}", canonical)
+                        };
+                        plain_canon.insert(canon_key);
+                    }
+                }
+                combined.retain(|c| {
+                    if c.category != "set" || !c.text.ends_with('?') {
+                        return true;
+                    }
+                    if let Some(raw) = c
+                        .text
+                        .strip_prefix("setp ")
+                        .or_else(|| c.text.strip_prefix("set "))
+                    {
+                        let raw = raw.trim_end_matches('?');
+                        let is_neg = raw.starts_with("no");
+                        let mut key_part = if is_neg { &raw[2..] } else { raw };
+                        if let Some((k, _)) = key_part.split_once('=') {
+                            key_part = k;
+                        }
+                        let canonical = match key_part {
+                            "nu" => "number",
+                            "rnu" => "relativenumber",
+                            "cul" => "cursorline",
+                            "smk" => "showmarks",
+                            "et" => "expandtab",
+                            "ai" => "autoindent",
+                            "ic" => "ignorecase",
+                            "scs" => "smartcase",
+                            "hls" => "hlsearch",
+                            "is" => "incsearch",
+                            "lbr" => "linebreak",
+                            "udf" => "undofile",
+                            "bk" => "backup",
+                            "swf" => "swapfile",
+                            "aw" => "autosave",
+                            "ls" => "laststatus",
+                            "sc" => "showcmd",
+                            "ppr" => "percentpathroot",
+                            "syn" => "syntax",
+                            "ts" => "tabstop",
+                            "ul" => "undolevels",
+                            "so" => "scrolloff",
+                            "siso" => "sidescrolloff",
+                            "tm" => "timeoutlen",
+                            "colo" => "colorscheme",
+                            other => other,
+                        };
+                        let canon_key = if is_neg {
+                            format!("neg:{}", canonical)
+                        } else {
+                            format!("pos:{}", canonical)
+                        };
+                        // Drop query if we already have plain version
+                        return !plain_canon.contains(&canon_key);
+                    }
+                    true
+                });
+            }
+        }
+
         // Sort matches by length (shorter matches first) and then alphabetically
         combined.sort_by(|a, b| {
             a.text

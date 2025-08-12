@@ -214,7 +214,7 @@ impl Default for EditorConfig {
                 scroll_off: 0,
                 side_scroll_off: 0,
                 window_resize_amount: 1,
-                completion_menu_width: 30,
+                completion_menu_width: 36,
                 completion_menu_height: 8,
                 percent_path_root: true,
                 config_poll_ms: 500,

@@ -67,6 +67,15 @@ pub struct UIColors {
     pub empty_line: String,
     pub command_line_bg: String,
     pub command_line_fg: String,
+    /// Completion popup key column foreground
+    #[serde(default = "default_completion_key_fg")]
+    pub completion_key_fg: String,
+    /// Completion popup alias column foreground
+    #[serde(default = "default_completion_alias_fg")]
+    pub completion_alias_fg: String,
+    /// Completion popup value column foreground
+    #[serde(default = "default_completion_value_fg")]
+    pub completion_value_fg: String,
     pub selection_bg: String,
     pub visual_line_bg: String,  // Line-wise visual selection background
     pub visual_char_bg: String,  // Character-wise visual selection background
@@ -105,6 +114,9 @@ pub struct UITheme {
     pub empty_line: Color,
     pub command_line_bg: Color,
     pub command_line_fg: Color,
+    pub completion_key_fg: Color,
+    pub completion_alias_fg: Color,
+    pub completion_value_fg: Color,
     pub selection_bg: Color,
     pub visual_line_bg: Color,  // Line-wise visual selection background
     pub visual_char_bg: Color,  // Character-wise visual selection background
@@ -197,6 +209,9 @@ impl ThemeConfig {
             empty_line: "#4a3728".to_string(),
             command_line_bg: "#1f1611".to_string(),
             command_line_fg: "#deb887".to_string(),
+            completion_key_fg: "#deb887".to_string(),
+            completion_alias_fg: "#cccccc".to_string(),
+            completion_value_fg: "#ffe6c7".to_string(),
             selection_bg: "#8c4a2b".to_string(),
             visual_line_bg: "#8c4a2b".to_string(),
             visual_char_bg: "#7a3f28".to_string(),
@@ -421,6 +436,11 @@ impl UITheme {
         // Per-mode colors with fallback to base fg/bg
         let mode_colors = ModeThemeColors::from_mode_colors(colors.mode.as_ref(), base_fg, base_bg);
 
+        // Completion columns (explicit fields with defaults)
+        let comp_key_fg = parse_color(&colors.completion_key_fg);
+        let comp_alias_fg = parse_color(&colors.completion_alias_fg);
+        let comp_value_fg = parse_color(&colors.completion_value_fg);
+
         Self {
             background: parse_color(&colors.background),
             status_bg: base_bg,
@@ -439,6 +459,9 @@ impl UITheme {
             empty_line: parse_color(&colors.empty_line),
             command_line_bg: parse_color(&colors.command_line_bg),
             command_line_fg: parse_color(&colors.command_line_fg),
+            completion_key_fg: comp_key_fg,
+            completion_alias_fg: comp_alias_fg,
+            completion_value_fg: comp_value_fg,
             selection_bg: parse_color(&colors.selection_bg),
             visual_line_bg: parse_color(&colors.visual_line_bg),
             visual_char_bg: parse_color(&colors.visual_char_bg),
@@ -452,6 +475,18 @@ impl UITheme {
 
 fn default_mark_color() -> String {
     "#e6b422".to_string()
+}
+
+fn default_completion_key_fg() -> String {
+    "#deb887".to_string()
+}
+
+fn default_completion_alias_fg() -> String {
+    "#cccccc".to_string()
+}
+
+fn default_completion_value_fg() -> String {
+    "#ffe6c7".to_string()
 }
 
 #[derive(Debug, Clone)]

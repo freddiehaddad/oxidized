@@ -92,3 +92,40 @@ fn setp_dynamic_numeric_suggestions_present() {
     assert!(items.iter().any(|t| t == "setp tabstop=2"));
     assert!(items.iter().any(|t| t == "setp tabstop=4"));
 }
+
+#[test]
+fn no_duplicate_set_alias_entries() {
+    let mut cc = CommandCompletion::new();
+    cc.start_completion("set sh"); // e.g. should not show both showmarks and smk duplicates
+    assert!(cc.should_show());
+    let positives: Vec<&String> = cc
+        .matches
+        .iter()
+        .filter(|i| i.text.starts_with("set "))
+        .map(|i| &i.text)
+        .collect();
+    // Ensure we don't have both the canonical and alias positive forms when both match prefix
+    // Accept either `set showmarks` or `set smk` but not both
+    let has_showmarks = positives.iter().any(|t| t.as_str() == "set showmarks");
+    let has_smk = positives.iter().any(|t| t.as_str() == "set smk");
+    assert!(
+        !(has_showmarks && has_smk),
+        "duplicate positive alias entries present"
+    );
+
+    // Now test negative prefix path: we should be able to see one negative form, but not duplicates
+    cc.start_completion("set nosh");
+    assert!(cc.should_show());
+    let negatives: Vec<&String> = cc
+        .matches
+        .iter()
+        .filter(|i| i.text.starts_with("set no"))
+        .map(|i| &i.text)
+        .collect();
+    let has_noshowmarks = negatives.iter().any(|t| t.as_str() == "set noshowmarks");
+    let has_nosmk = negatives.iter().any(|t| t.as_str() == "set nosmk");
+    assert!(
+        !(has_noshowmarks && has_nosmk),
+        "duplicate negative alias entries present"
+    );
+}

@@ -240,8 +240,9 @@ show_command = true
 scroll_off = 3
 side_scroll_off = 0
 window_resize_amount = 1
-completion_menu_width = 30
+completion_menu_width = 36
 completion_menu_height = 8
+percent_path_root = true
 
 [languages]
 default_language = "text"
@@ -263,6 +264,35 @@ You can toggle marks at runtime with:
 - `:setp showmarks` / `:setp smk` enable and persist
 - `:set noshowmarks` / `:set nosmk` disable for this session
 - `:setp noshowmarks` / `:setp nosmk` disable and persist
+
+### Command-line Completion System
+
+The command-line (":" prompt) features an aligned, multi-column popup for `:set` / `:setp` options:
+
+- Column 1: Canonical option name (aliases collapsed; e.g. only `showmarks` not `smk`)
+- Column 2: Known short alias(es) (e.g. `smk`)
+- Column 3: Current value in brackets (e.g. `[true]`, numeric values, or active colorscheme name)
+
+Behavior & rules:
+
+- `:setp` provides the same suggestions as `:set`; suggestions are rewritten to use the exact prefix you typed (`set` vs `setp`).
+- Aliases are suppressed when their canonical form is also present; the popup shows each setting once for clarity.
+- Query forms (`:set option?`) are hidden unless you actually type the trailing `?`.
+- Negative forms (`nooption`) only appear when you begin your input with `:set no…` (to reduce clutter).
+- Value suggestions (after `=`) appear for numeric and boolean options (`tabstop=`, `scrolloff=`, `timeoutlen=`, `undolevels=`, etc.) and for enumerated / dynamic lists like `colorscheme=` (populated from `themes.toml`).
+- File path completion honors `%` as the current buffer directory when `percent_path_root` (alias: `ppr`) is enabled.
+
+Theme integration:
+
+Three dedicated UI colors control the completion popup columns (defined per theme in `themes.toml`):
+
+```toml
+completion_key_fg   = "#deb887"  # Canonical option name
+completion_alias_fg = "#cccccc"  # Alias column
+completion_value_fg = "#ffe6c7"  # Value column
+```
+
+Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in `editor.toml` to size the popup (defaults: width 36, height 8). A sensible minimum width is enforced to keep three columns readable.
 
 #### Search behavior
 
