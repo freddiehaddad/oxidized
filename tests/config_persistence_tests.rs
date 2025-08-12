@@ -35,7 +35,7 @@ fn set_does_not_persist() {
         // Ephemeral changes
         execute_ex_command(&mut editor, "set nu rnu");
         execute_ex_command(&mut editor, "set nocul");
-        execute_ex_command(&mut editor, "set tabstop=8");
+        execute_ex_command(&mut editor, "set tabstop 8");
         assert_eq!(editor.get_config_value("tabstop").as_deref(), Some("8"));
 
         let after = read_editor_toml(&path);
@@ -56,7 +56,7 @@ fn setp_persists() {
         let before = read_editor_toml(&path);
 
         let mut editor = Editor::new().expect("editor construct");
-        execute_ex_command(&mut editor, "setp tabstop=6");
+        execute_ex_command(&mut editor, "setp tabstop 6");
         execute_ex_command(&mut editor, "setp number");
         execute_ex_command(&mut editor, "setp cursorline");
         assert_eq!(editor.get_config_value("tabstop").as_deref(), Some("6"));

@@ -55,15 +55,14 @@ fn buffer_and_numeric_hints_present() {
         allow_percent_path_root: true,
     });
     cc.start_completion("b ");
-    // buffers completion may produce items; then check numeric hints
-    cc.start_completion("set ts=");
+    // buffers completion may produce items; then check numeric hints (positional form)
+    cc.start_completion("set ts ");
     assert!(cc.should_show());
     let items = cc.matches.clone();
-    assert!(
-        items
-            .iter()
-            .any(|i| i.text.starts_with("set ts=") || i.text.starts_with("set tabstop="))
-    );
+    assert!(items.iter().any(|i| i.text.starts_with("set ts ")
+        || i.text.starts_with("set tabstop ")
+        || i.text == "set ts 2"
+        || i.text == "set tabstop 2"));
 }
 
 #[test]
@@ -85,12 +84,20 @@ fn setp_completes_like_set_with_proper_prefix() {
 #[test]
 fn setp_dynamic_numeric_suggestions_present() {
     let mut cc = CommandCompletion::new();
-    cc.start_completion("setp ts=");
+    cc.start_completion("setp ts ");
     assert!(cc.should_show());
     // Should suggest common numbers with setp prefix
     let items: Vec<String> = cc.matches.iter().map(|i| i.text.clone()).collect();
-    assert!(items.iter().any(|t| t == "setp tabstop=2"));
-    assert!(items.iter().any(|t| t == "setp tabstop=4"));
+    assert!(
+        items
+            .iter()
+            .any(|t| t == "setp ts 2" || t == "setp tabstop 2")
+    );
+    assert!(
+        items
+            .iter()
+            .any(|t| t == "setp ts 4" || t == "setp tabstop 4")
+    );
 }
 
 #[test]

@@ -294,6 +294,23 @@ pub fn handle_set_command(editor: &mut Editor, args: &str, persist: bool) {
         return;
     }
 
+    // Positional colorscheme (e.g., "set colorscheme default" or "set colo default")
+    if let Some(rest) = args
+        .strip_prefix("colorscheme ")
+        .or_else(|| args.strip_prefix("colo "))
+    {
+        let value = rest.trim();
+        if !value.is_empty() {
+            if persist {
+                editor.set_config_setting("colorscheme", value);
+            } else {
+                editor.set_config_setting_ephemeral("colorscheme", value);
+            }
+            editor.set_status_message(format!("Color scheme set to {}", value));
+            return;
+        }
+    }
+
     // no<opt>
     if let Some(setting) = args.strip_prefix("no") {
         match setting {
@@ -459,90 +476,106 @@ pub fn handle_set_command(editor: &mut Editor, args: &str, persist: bool) {
         return;
     }
 
-    // key=value
-    if let Some((setting, value)) = args.split_once('=') {
-        match setting.trim() {
-            "tabstop" | "ts" => {
-                if value.parse::<usize>().is_ok() {
-                    if persist {
-                        editor.set_config_setting("tabstop", value);
-                    } else {
-                        editor.set_config_setting_ephemeral("tabstop", value);
-                    }
-                    editor.set_status_message(format!("Tab width set to {}", value));
-                } else {
-                    editor.set_status_message("Invalid tab width value".to_string());
-                }
+    // Positional numeric/argument settings
+    if let Some(value) = args
+        .strip_prefix("tabstop ")
+        .or_else(|| args.strip_prefix("ts "))
+    {
+        let val = value.trim();
+        if val.parse::<usize>().is_ok() {
+            if persist {
+                editor.set_config_setting("tabstop", val);
+            } else {
+                editor.set_config_setting_ephemeral("tabstop", val);
             }
-            "undolevels" | "ul" => {
-                if value.parse::<usize>().is_ok() {
-                    if persist {
-                        editor.set_config_setting("undolevels", value);
-                    } else {
-                        editor.set_config_setting_ephemeral("undolevels", value);
-                    }
-                    editor.set_status_message(format!("Undo levels set to {}", value));
-                } else {
-                    editor.set_status_message("Invalid undo levels value".to_string());
-                }
+            editor.set_status_message(format!("Tab width set to {}", val));
+        } else {
+            editor.set_status_message("Invalid tab width value".to_string());
+        }
+        return;
+    }
+    if let Some(value) = args
+        .strip_prefix("undolevels ")
+        .or_else(|| args.strip_prefix("ul "))
+    {
+        let val = value.trim();
+        if val.parse::<usize>().is_ok() {
+            if persist {
+                editor.set_config_setting("undolevels", val);
+            } else {
+                editor.set_config_setting_ephemeral("undolevels", val);
             }
-            "scrolloff" | "so" => {
-                if value.parse::<usize>().is_ok() {
-                    if persist {
-                        editor.set_config_setting("scrolloff", value);
-                    } else {
-                        editor.set_config_setting_ephemeral("scrolloff", value);
-                    }
-                    editor.set_status_message(format!("Scroll offset set to {}", value));
-                } else {
-                    editor.set_status_message("Invalid scroll offset value".to_string());
-                }
+            editor.set_status_message(format!("Undo levels set to {}", val));
+        } else {
+            editor.set_status_message("Invalid undo levels value".to_string());
+        }
+        return;
+    }
+    if let Some(value) = args
+        .strip_prefix("scrolloff ")
+        .or_else(|| args.strip_prefix("so "))
+    {
+        let val = value.trim();
+        if val.parse::<usize>().is_ok() {
+            if persist {
+                editor.set_config_setting("scrolloff", val);
+            } else {
+                editor.set_config_setting_ephemeral("scrolloff", val);
             }
-            "sidescrolloff" | "siso" => {
-                if value.parse::<usize>().is_ok() {
-                    if persist {
-                        editor.set_config_setting("sidescrolloff", value);
-                    } else {
-                        editor.set_config_setting_ephemeral("sidescrolloff", value);
-                    }
-                    editor.set_status_message(format!("Side scroll offset set to {}", value));
-                } else {
-                    editor.set_status_message("Invalid side scroll offset value".to_string());
-                }
+            editor.set_status_message(format!("Scroll offset set to {}", val));
+        } else {
+            editor.set_status_message("Invalid scroll offset value".to_string());
+        }
+        return;
+    }
+    if let Some(value) = args
+        .strip_prefix("sidescrolloff ")
+        .or_else(|| args.strip_prefix("siso "))
+    {
+        let val = value.trim();
+        if val.parse::<usize>().is_ok() {
+            if persist {
+                editor.set_config_setting("sidescrolloff", val);
+            } else {
+                editor.set_config_setting_ephemeral("sidescrolloff", val);
             }
-            "timeoutlen" | "tm" => {
-                if value.parse::<u64>().is_ok() {
-                    if persist {
-                        editor.set_config_setting("timeoutlen", value);
-                    } else {
-                        editor.set_config_setting_ephemeral("timeoutlen", value);
-                    }
-                    editor.set_status_message(format!("Command timeout set to {} ms", value));
-                } else {
-                    editor.set_status_message("Invalid timeout value".to_string());
-                }
+            editor.set_status_message(format!("Side scroll offset set to {}", val));
+        } else {
+            editor.set_status_message("Invalid side scroll offset value".to_string());
+        }
+        return;
+    }
+    if let Some(value) = args
+        .strip_prefix("timeoutlen ")
+        .or_else(|| args.strip_prefix("tm "))
+    {
+        let val = value.trim();
+        if val.parse::<u64>().is_ok() {
+            if persist {
+                editor.set_config_setting("timeoutlen", val);
+            } else {
+                editor.set_config_setting_ephemeral("timeoutlen", val);
             }
-            "colorscheme" | "colo" => {
-                if persist {
-                    editor.set_config_setting("colorscheme", value);
-                } else {
-                    editor.set_config_setting_ephemeral("colorscheme", value);
-                }
-                editor.set_status_message(format!("Color scheme set to {}", value));
+            editor.set_status_message(format!("Command timeout set to {} ms", val));
+        } else {
+            editor.set_status_message("Invalid timeout value".to_string());
+        }
+        return;
+    }
+    if let Some(value) = args
+        .strip_prefix("percentpathroot ")
+        .or_else(|| args.strip_prefix("ppr "))
+    {
+        let val = value.trim();
+        if val.eq_ignore_ascii_case("true") || val.eq_ignore_ascii_case("false") {
+            if persist {
+                editor.set_config_setting("percentpathroot", val);
+            } else {
+                editor.set_config_setting_ephemeral("percentpathroot", val);
             }
-            "percentpathroot" | "ppr" => {
-                if value.parse::<bool>().is_ok() {
-                    if persist {
-                        editor.set_config_setting("percentpathroot", value);
-                    } else {
-                        editor.set_config_setting_ephemeral("percentpathroot", value);
-                    }
-                    editor.set_status_message(format!("Percent path root set to {}", value));
-                } else {
-                    editor.set_status_message("Invalid boolean value".to_string());
-                }
-            }
-            _ => editor.set_status_message(format!("Unknown setting: {}", setting)),
+            editor.set_status_message(format!("Percent path root set to {}", val));
+        } else {
+            editor.set_status_message("Invalid boolean value".to_string());
         }
         return;
     }

@@ -11,7 +11,7 @@ fn set_queries_and_invalid_options() -> Result<()> {
     assert!(editor.status_message().contains("Unknown setting: nosuch"));
 
     // Invalid numeric value
-    execute_ex_command(&mut editor, "set tabstop=abc");
+    execute_ex_command(&mut editor, "set tabstop abc");
     assert_eq!(editor.status_message(), "Invalid tab width value");
 
     // Unknown enable option

@@ -602,8 +602,9 @@ impl CommandCompletion {
                 description: "Disable '%' root in path completion".to_string(),
                 category: "set".to_string(),
             },
+            // Positional boolean argument form (no '=')
             CompletionItem {
-                text: "set percentpathroot=".to_string(),
+                text: "set percentpathroot ".to_string(),
                 description: "Set '%' root behavior (true/false)".to_string(),
                 category: "set".to_string(),
             },
@@ -619,71 +620,71 @@ impl CommandCompletion {
                 category: "set".to_string(),
             },
             CompletionItem {
-                text: "set ppr=".to_string(),
+                text: "set ppr ".to_string(),
                 description: "Set '%' root behavior (short)".to_string(),
                 category: "set".to_string(),
             },
         ]);
 
-        // Set commands with values
+        // Set commands with positional values (no '=')
         commands.extend(vec![
             CompletionItem {
-                text: "set tabstop=".to_string(),
+                text: "set tabstop ".to_string(),
                 description: "Set tab width".to_string(),
                 category: "set".to_string(),
             },
             CompletionItem {
-                text: "set ts=".to_string(),
+                text: "set ts ".to_string(),
                 description: "Set tab width (short)".to_string(),
                 category: "set".to_string(),
             },
             CompletionItem {
-                text: "set scrolloff=".to_string(),
+                text: "set scrolloff ".to_string(),
                 description: "Lines to keep around cursor".to_string(),
                 category: "set".to_string(),
             },
             CompletionItem {
-                text: "set so=".to_string(),
+                text: "set so ".to_string(),
                 description: "Lines to keep around cursor (short)".to_string(),
                 category: "set".to_string(),
             },
             CompletionItem {
-                text: "set sidescrolloff=".to_string(),
+                text: "set sidescrolloff ".to_string(),
                 description: "Columns to keep around cursor".to_string(),
                 category: "set".to_string(),
             },
             CompletionItem {
-                text: "set siso=".to_string(),
+                text: "set siso ".to_string(),
                 description: "Columns to keep around cursor (short)".to_string(),
                 category: "set".to_string(),
             },
             CompletionItem {
-                text: "set colorscheme=".to_string(),
+                text: "set colorscheme ".to_string(),
                 description: "Change color scheme".to_string(),
                 category: "set".to_string(),
             },
             CompletionItem {
-                text: "set colo=".to_string(),
+                text: "set colo ".to_string(),
                 description: "Change color scheme (short)".to_string(),
                 category: "set".to_string(),
             },
             CompletionItem {
-                text: "set timeoutlen=".to_string(),
+                text: "set timeoutlen ".to_string(),
                 description: "Set command timeout (ms)".to_string(),
                 category: "set".to_string(),
             },
             CompletionItem {
-                text: "set tm=".to_string(),
+                text: "set tm ".to_string(),
                 description: "Set command timeout (ms) (short)".to_string(),
                 category: "set".to_string(),
             },
             CompletionItem {
-                text: "set undolevels=".to_string(),
+                text: "set undolevels ".to_string(),
                 description: "Set number of undo levels".to_string(),
                 category: "set".to_string(),
             },
             CompletionItem {
-                text: "set ul=".to_string(),
+                text: "set ul ".to_string(),
                 description: "Set undo levels (short)".to_string(),
                 category: "set".to_string(),
             },
@@ -1044,32 +1045,122 @@ impl CommandCompletion {
             }
         }
 
-        // Helper to filter suggestions by current value prefix after '='
-        fn value_prefix(s: &str) -> &str {
-            if let Some(idx) = s.find('=') {
-                &s[idx + 1..]
-            } else {
-                ""
-            }
+        // Helper: get the substring after the last space (value prefix for positional args)
+        fn value_prefix_space(s: &str) -> &str {
+            s.rsplit_once(' ').map(|(_, v)| v).unwrap_or("")
         }
 
         // colorscheme / colo dynamic values from themes.toml
-        if lower.starts_with(&format!("{set_prefix}colorscheme="))
-            || lower.starts_with(&format!("{set_prefix}colo="))
+        if lower.starts_with(&format!("{set_prefix}colorscheme "))
+            || lower.starts_with(&format!("{set_prefix}colo "))
         {
-            let val_pref = value_prefix(trimmed);
+            let val_pref = value_prefix_space(trimmed);
             let cfg = ThemeConfig::load();
             // Build list of (name, description)
             for (name, theme) in cfg.themes.iter() {
                 if val_pref.is_empty() || name.to_lowercase().starts_with(&val_pref.to_lowercase())
                 {
                     out.push(CompletionItem {
-                        text: format!("{}colorscheme={}", set_prefix, name),
+                        text: format!("{}colorscheme {}", set_prefix, name),
                         description: format!("Theme: {}", theme.description),
                         category: "set".to_string(),
                     });
                 }
             }
+        }
+
+        // Boolean positional suggestions: percentpathroot / ppr true|false
+        if lower.starts_with(&format!("{set_prefix}percentpathroot "))
+            || lower.starts_with(&format!("{set_prefix}ppr "))
+        {
+            for val in ["true", "false"] {
+                out.push(CompletionItem {
+                    text: if lower.contains(" ppr ") {
+                        format!("{}ppr {}", set_prefix, val)
+                    } else {
+                        format!("{}percentpathroot {}", set_prefix, val)
+                    },
+                    description: "Boolean".to_string(),
+                    category: "set".to_string(),
+                });
+            }
+        }
+
+        // Numeric positional suggestions (common values)
+        let add_numeric_suggestions = |out: &mut Vec<CompletionItem>, key: &str, vals: &[&str]| {
+            for v in vals {
+                out.push(CompletionItem {
+                    text: format!("{}{} {}", set_prefix, key, v),
+                    description: "Value".to_string(),
+                    category: "set".to_string(),
+                });
+            }
+        };
+
+        if lower.starts_with(&format!("{set_prefix}tabstop "))
+            || lower.starts_with(&format!("{set_prefix}ts "))
+        {
+            add_numeric_suggestions(
+                &mut out,
+                if lower.contains(" ts ") {
+                    "ts"
+                } else {
+                    "tabstop"
+                },
+                &["2", "4", "8"],
+            );
+        }
+        if lower.starts_with(&format!("{set_prefix}scrolloff "))
+            || lower.starts_with(&format!("{set_prefix}so "))
+        {
+            add_numeric_suggestions(
+                &mut out,
+                if lower.contains(" so ") {
+                    "so"
+                } else {
+                    "scrolloff"
+                },
+                &["0", "3", "5"],
+            );
+        }
+        if lower.starts_with(&format!("{set_prefix}sidescrolloff "))
+            || lower.starts_with(&format!("{set_prefix}siso "))
+        {
+            add_numeric_suggestions(
+                &mut out,
+                if lower.contains(" siso ") {
+                    "siso"
+                } else {
+                    "sidescrolloff"
+                },
+                &["0", "5", "10"],
+            );
+        }
+        if lower.starts_with(&format!("{set_prefix}timeoutlen "))
+            || lower.starts_with(&format!("{set_prefix}tm "))
+        {
+            add_numeric_suggestions(
+                &mut out,
+                if lower.contains(" tm ") {
+                    "tm"
+                } else {
+                    "timeoutlen"
+                },
+                &["500", "750", "1000"],
+            );
+        }
+        if lower.starts_with(&format!("{set_prefix}undolevels "))
+            || lower.starts_with(&format!("{set_prefix}ul "))
+        {
+            add_numeric_suggestions(
+                &mut out,
+                if lower.contains(" ul ") {
+                    "ul"
+                } else {
+                    "undolevels"
+                },
+                &["100", "200", "1000"],
+            );
         }
 
         // File path completion for :e and :w commands
@@ -1241,111 +1332,7 @@ impl CommandCompletion {
             }
         }
 
-        // Boolean suggestions for percentpathroot / ppr
-        if lower.starts_with(&format!("{set_prefix}percentpathroot="))
-            || lower.starts_with(&format!("{set_prefix}ppr="))
-        {
-            let val_pref = value_prefix(trimmed);
-            for s in ["true", "false"] {
-                if val_pref.is_empty() || s.starts_with(&val_pref.to_lowercase()) {
-                    out.push(CompletionItem {
-                        text: if lower.starts_with(&format!("{set_prefix}ppr=")) {
-                            format!("{}ppr={}", set_prefix, s)
-                        } else {
-                            format!("{}percentpathroot={}", set_prefix, s)
-                        },
-                        description: "Enable/disable '%' root in completion".to_string(),
-                        category: "set".to_string(),
-                    });
-                }
-            }
-        }
-
-        // Numeric suggestions for common options
-        // tabstop / ts
-        if lower.starts_with(&format!("{set_prefix}tabstop="))
-            || lower.starts_with(&format!("{set_prefix}ts="))
-        {
-            let val_pref = value_prefix(trimmed);
-            let suggestions = ["2", "4", "8"]; // common tab widths
-            for s in suggestions.iter() {
-                if val_pref.is_empty() || s.starts_with(val_pref) {
-                    out.push(CompletionItem {
-                        text: format!("{}tabstop={}", set_prefix, s),
-                        description: "Set tab width".to_string(),
-                        category: "set".to_string(),
-                    });
-                }
-            }
-        }
-
-        // scrolloff / so
-        if lower.starts_with(&format!("{set_prefix}scrolloff="))
-            || lower.starts_with(&format!("{set_prefix}so="))
-        {
-            let val_pref = value_prefix(trimmed);
-            let suggestions = ["0", "1", "2", "3", "5", "8", "10"];
-            for s in suggestions.iter() {
-                if val_pref.is_empty() || s.starts_with(val_pref) {
-                    out.push(CompletionItem {
-                        text: format!("{}scrolloff={}", set_prefix, s),
-                        description: "Lines to keep around cursor".to_string(),
-                        category: "set".to_string(),
-                    });
-                }
-            }
-        }
-
-        // sidescrolloff / siso
-        if lower.starts_with(&format!("{set_prefix}sidescrolloff="))
-            || lower.starts_with(&format!("{set_prefix}siso="))
-        {
-            let val_pref = value_prefix(trimmed);
-            let suggestions = ["0", "1", "2", "3", "5", "8", "10"];
-            for s in suggestions.iter() {
-                if val_pref.is_empty() || s.starts_with(val_pref) {
-                    out.push(CompletionItem {
-                        text: format!("{}sidescrolloff={}", set_prefix, s),
-                        description: "Columns to keep around cursor".to_string(),
-                        category: "set".to_string(),
-                    });
-                }
-            }
-        }
-
-        // timeoutlen / tm
-        if lower.starts_with(&format!("{set_prefix}timeoutlen="))
-            || lower.starts_with(&format!("{set_prefix}tm="))
-        {
-            let val_pref = value_prefix(trimmed);
-            let suggestions = ["200", "300", "500", "700", "1000"];
-            for s in suggestions.iter() {
-                if val_pref.is_empty() || s.starts_with(val_pref) {
-                    out.push(CompletionItem {
-                        text: format!("{}timeoutlen={}", set_prefix, s),
-                        description: "Command timeout in ms".to_string(),
-                        category: "set".to_string(),
-                    });
-                }
-            }
-        }
-
-        // undolevels / ul
-        if lower.starts_with(&format!("{set_prefix}undolevels="))
-            || lower.starts_with(&format!("{set_prefix}ul="))
-        {
-            let val_pref = value_prefix(trimmed);
-            let suggestions = ["100", "1000"]; // sensible defaults
-            for s in suggestions.iter() {
-                if val_pref.is_empty() || s.starts_with(val_pref) {
-                    out.push(CompletionItem {
-                        text: format!("{}undolevels={}", set_prefix, s),
-                        description: "Number of undo levels".to_string(),
-                        category: "set".to_string(),
-                    });
-                }
-            }
-        }
+        // Remove legacy '=' based suggestions; replaced by positional logic above
 
         out
     }

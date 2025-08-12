@@ -281,7 +281,8 @@ Behavior & rules:
 - Aliases are suppressed when their canonical form is also present; the popup shows each setting once for clarity.
 - Query forms (`:set option?`) are hidden unless you actually type the trailing `?`.
 - Negative forms (`nooption`) only appear when you begin your input with `:set no…` (to reduce clutter).
-- Value suggestions (after `=`) appear for numeric and boolean options (`tabstop=`, `scrolloff=`, `timeoutlen=`, `undolevels=`, etc.) and for enumerated / dynamic lists like `colorscheme=` (populated from `themes.toml`).
+- Settings that take a value use positional arguments (no `=`). Examples: `:set tabstop 2`, `:set scrolloff 3`, `:set timeoutlen 750`, `:set undolevels 200`, `:set percentpathroot true`, `:set colorscheme default`.
+- Value suggestions appear after a space for numeric/boolean options (`tabstop`, `scrolloff`, `timeoutlen`, `undolevels`, `percentpathroot`) and for enumerated/dynamic lists like `colorscheme` (populated from `themes.toml`).
 - File path completion honors `%` as the current buffer directory when `percent_path_root` (alias: `ppr`) is enabled.
 
 Theme integration:

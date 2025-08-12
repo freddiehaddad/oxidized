@@ -260,11 +260,292 @@ impl EditorConfig {
         Self::default()
     }
 
-    pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
-        debug!("Saving editor configuration to editor.toml");
-        let toml_string = toml::to_string_pretty(self)?;
-        fs::write("editor.toml", toml_string)?;
-        debug!("Editor configuration saved successfully");
+    /// Persist a single setting to editor.toml by editing the file in-place, preserving comments/layout.
+    /// Expects `setting` to be any accepted long or short name (e.g., "number" or "nu").
+    pub fn persist_setting_in_place(
+        &self,
+        setting: &str,
+        value: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::io::{Read, Write};
+        use std::path::Path;
+
+        // Map setting alias to (section, key, kind, normalized_value_string)
+        #[derive(Copy, Clone)]
+        enum Kind {
+            Bool,
+            Int,
+            Str,
+        }
+
+        fn map(setting: &str, val: &str) -> Option<(&'static str, &'static str, Kind, String)> {
+            // Normalize booleans to true/false; ints kept; strings kept
+            let b = |s: &str| {
+                s.eq_ignore_ascii_case("true") || s == "1" || s.eq_ignore_ascii_case("on")
+            };
+            match setting {
+                // Display
+                "number" | "nu" => Some((
+                    "display",
+                    "show_line_numbers",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "relativenumber" | "rnu" => Some((
+                    "display",
+                    "show_relative_numbers",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "cursorline" | "cul" => Some((
+                    "display",
+                    "show_cursor_line",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "showmarks" | "smk" => Some((
+                    "display",
+                    "show_marks",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "colorscheme" | "colo" => {
+                    Some(("display", "color_scheme", Kind::Str, val.to_string()))
+                }
+                "syntax" | "syn" => Some((
+                    "display",
+                    "syntax_highlighting",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+
+                // Behavior
+                "tabstop" | "ts" => Some(("behavior", "tab_width", Kind::Int, val.to_string())),
+                "expandtab" | "et" => Some((
+                    "behavior",
+                    "expand_tabs",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "autoindent" | "ai" => Some((
+                    "behavior",
+                    "auto_indent",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "ignorecase" | "ic" => Some((
+                    "behavior",
+                    "ignore_case",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "smartcase" | "scs" => Some((
+                    "behavior",
+                    "smart_case",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "hlsearch" | "hls" => Some((
+                    "behavior",
+                    "highlight_search",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "incsearch" | "is" => Some((
+                    "behavior",
+                    "incremental_search",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "wrap" => Some((
+                    "behavior",
+                    "wrap_lines",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "linebreak" | "lbr" => Some((
+                    "behavior",
+                    "line_break",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+
+                // Editing
+                "undolevels" | "ul" => Some(("editing", "undo_levels", Kind::Int, val.to_string())),
+                "undofile" | "udf" => Some((
+                    "editing",
+                    "persistent_undo",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "backup" | "bk" => Some((
+                    "editing",
+                    "backup",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "swapfile" | "swf" => Some((
+                    "editing",
+                    "swap_file",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "autosave" | "aw" => Some((
+                    "editing",
+                    "auto_save",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+
+                // Interface
+                "laststatus" | "ls" => Some((
+                    "interface",
+                    "show_status_line",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "showcmd" | "sc" => Some((
+                    "interface",
+                    "show_command",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "scrolloff" | "so" => Some(("interface", "scroll_off", Kind::Int, val.to_string())),
+                "sidescrolloff" | "siso" => {
+                    Some(("interface", "side_scroll_off", Kind::Int, val.to_string()))
+                }
+                "timeoutlen" | "tm" => {
+                    Some(("interface", "command_timeout", Kind::Int, val.to_string()))
+                }
+                "percentpathroot" | "ppr" => Some((
+                    "interface",
+                    "percent_path_root",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+
+                _ => None,
+            }
+        }
+
+        // Determine target (section, key, kind, normalized value)
+        let Some((section, key, kind, normalized)) = map(setting, value) else {
+            // Unknown, nothing to persist
+            return Ok(());
+        };
+
+        // Read or create file
+        let path = Path::new("editor.toml");
+        if !path.exists() {
+            // Create minimal file with just the target section/key
+            let value_literal = match kind {
+                Kind::Bool | Kind::Int => normalized,
+                Kind::Str => format!("\"{}\"", normalized),
+            };
+            let mut file = std::fs::File::create(path)?;
+            let mut out = String::new();
+            out.push_str(&format!("[{}]\n", section));
+            out.push_str(&format!("{} = {}\n", key, value_literal));
+            file.write_all(out.as_bytes())?;
+            return Ok(());
+        }
+
+        let mut content = String::new();
+        std::fs::File::open(path)?.read_to_string(&mut content)?;
+
+        // Helper: find first '#' not inside quotes
+        fn first_unquoted_hash(s: &str) -> Option<usize> {
+            let mut in_str = false;
+            let mut prev = '\0';
+            for (i, ch) in s.char_indices() {
+                if ch == '"' && prev != '\\' {
+                    in_str = !in_str;
+                }
+                if ch == '#' && !in_str {
+                    return Some(i);
+                }
+                prev = ch;
+            }
+            None
+        }
+
+        let value_literal = match kind {
+            Kind::Bool | Kind::Int => normalized,
+            Kind::Str => format!("\"{}\"", normalized),
+        };
+
+        let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        let mut found_line_idx: Option<usize> = None;
+        let mut section_found = false;
+        let mut insert_idx_after_section: Option<usize> = None;
+
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                let name = trimmed.trim_start_matches('[').trim_end_matches(']').trim();
+                if section_found && found_line_idx.is_none() {
+                    // We hit the start of a new section after the target section without finding the key
+                    insert_idx_after_section = Some(i);
+                    break;
+                }
+                if name == section {
+                    section_found = true;
+                }
+                continue;
+            }
+
+            if section_found {
+                let trimmed_start = line.trim_start();
+                if trimmed_start.starts_with('#') {
+                    continue;
+                }
+                if let Some(eq_pos) = trimmed_start.find('=') {
+                    let lhs = trimmed_start[..eq_pos].trim();
+                    if lhs == key {
+                        found_line_idx = Some(i);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some(i) = found_line_idx {
+            // Replace existing line preserving leading whitespace and trailing comment
+            let original = &lines[i];
+            let trimmed_start = original.trim_start();
+            let leading_len = original.len() - trimmed_start.len();
+            let leading = &original[..leading_len];
+            let comment_part = if let Some(hash_i) = first_unquoted_hash(trimmed_start) {
+                let abs_i = leading_len + hash_i;
+                Some(original[abs_i..].to_string())
+            } else {
+                None
+            };
+            let new_core = format!("{} = {}", key, &value_literal);
+            let new_line = match comment_part {
+                Some(c) => format!("{}{} {}", leading, new_core, c),
+                None => format!("{}{}", leading, new_core),
+            };
+            lines[i] = new_line;
+        } else {
+            // Need to insert the key
+            if !section_found {
+                // Section not present; add at end
+                lines.push(String::new());
+                lines.push(format!("[{}]", section));
+                lines.push(format!("{} = {}", key, value_literal));
+            } else if let Some(insert_at) = insert_idx_after_section {
+                lines.insert(insert_at, format!("{} = {}", key, value_literal));
+            } else {
+                // Section is the last one; append at end
+                lines.push(format!("{} = {}", key, value_literal));
+            }
+        }
+
+        // Write back
+        let mut file = std::fs::File::create(path)?;
+        let out = lines.join("\n");
+        file.write_all(out.as_bytes())?;
         Ok(())
     }
 

@@ -1294,7 +1294,15 @@ impl Editor {
         self.status_message = status.to_string();
 
         if persist {
-            let _ = self.config.save();
+            let _ = self
+                .config
+                .persist_setting_in_place("number", if absolute { "true" } else { "false" })
+                .and_then(|_| {
+                    self.config.persist_setting_in_place(
+                        "relativenumber",
+                        if relative { "true" } else { "false" },
+                    )
+                });
         }
     }
 
@@ -1309,8 +1317,15 @@ impl Editor {
         };
         self.status_message = status.to_string();
 
-        // Save config changes
-        let _ = self.config.save();
+        // Persist in-place to preserve comments/layout
+        let _ = self.config.persist_setting_in_place(
+            "cursorline",
+            if self.config.display.show_cursor_line {
+                "true"
+            } else {
+                "false"
+            },
+        );
     }
 
     /// Set cursor line highlighting
@@ -1335,7 +1350,9 @@ impl Editor {
         self.status_message = status.to_string();
 
         if persist {
-            let _ = self.config.save();
+            let _ = self
+                .config
+                .persist_setting_in_place("cursorline", if enabled { "true" } else { "false" });
         }
     }
 
@@ -1397,7 +1414,8 @@ impl Editor {
         }
 
         if persist {
-            let _ = self.config.save();
+            // Persist only the changed key to keep comments/layout in editor.toml
+            let _ = self.config.persist_setting_in_place(setting, value);
         }
     }
 
