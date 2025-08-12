@@ -25,7 +25,6 @@ pub struct EventDrivenEditor {
 // Centralized timing constants for event loop cadence
 // Single tick used for both main event recv timeout and input polling
 const EVENT_TICK_MS: u64 = 16;
-// Background polling intervals (not on the hot path) are configurable via Editor
 
 #[derive(Debug, Clone, PartialEq)]
 struct RenderState {
@@ -61,9 +60,7 @@ impl EventDrivenEditor {
         let config_thread = Self::spawn_config_watcher_thread(editor.clone(), event_sender.clone());
         thread_handles.push(config_thread);
 
-        // Start syntax highlighting thread
-        let syntax_thread = Self::spawn_syntax_thread(editor.clone(), event_sender.clone());
-        thread_handles.push(syntax_thread);
+        // Syntax refresh is now fully event-driven; no background polling thread.
 
         // Start rendering thread
         let render_thread = Self::spawn_render_thread(editor.clone(), event_sender.clone());
@@ -591,45 +588,7 @@ impl EventDrivenEditor {
         })
     }
 
-    /// Spawn syntax highlighting thread
-    fn spawn_syntax_thread(
-        editor: Arc<Mutex<Editor>>,
-        sender: mpsc::Sender<EditorEvent>,
-    ) -> thread::JoinHandle<()> {
-        thread::spawn(move || {
-            info!("Syntax highlighting thread started");
-
-            loop {
-                let sleep_ms = if let Ok(ed) = editor.lock() {
-                    ed.syntax_poll_ms()
-                } else {
-                    100
-                };
-                thread::sleep(Duration::from_millis(sleep_ms));
-
-                if let Ok(editor) = editor.try_lock() {
-                    if editor.should_quit() {
-                        break;
-                    }
-
-                    // Check if syntax refresh is needed
-                    if editor
-                        .needs_syntax_refresh
-                        .load(std::sync::atomic::Ordering::Relaxed)
-                    {
-                        drop(editor); // Release lock before sending event
-
-                        if let Err(e) = sender.send(EditorEvent::UI(UIEvent::RedrawRequest)) {
-                            error!("Failed to send syntax refresh event: {}", e);
-                            break;
-                        }
-                    }
-                }
-            }
-
-            info!("Syntax highlighting thread finished");
-        })
-    }
+    // (syntax thread removed)
 
     /// Spawn rendering thread
     fn spawn_render_thread(

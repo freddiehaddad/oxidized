@@ -41,7 +41,6 @@ window_resize_amount = 1   # Amount for :resize commands
 completion_menu_width = 36 # Popup completion width (chars)
 completion_menu_height = 8 # Popup completion height (rows)
 percent_path_root = true   # % prefix roots paths at current buffer dir
-syntax_poll_ms = 100       # Poll interval for async syntax tasks (ms)
 
 [statusline]
 show_indent = true   # Show current indent width (tabs/spaces)

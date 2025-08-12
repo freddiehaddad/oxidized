@@ -228,10 +228,7 @@ impl Editor {
         self.config.interface.command_timeout
     }
 
-    /// Get syntax refresh poll interval in ms
-    pub fn syntax_poll_ms(&self) -> u64 {
-        self.config.interface.syntax_poll_ms
-    }
+    // Syntax refresh is event-driven; no polling interval accessor.
 
     fn reserved_rows_from_config(&self) -> u16 {
         let mut rows = 0u16;
