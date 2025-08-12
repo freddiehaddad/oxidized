@@ -4,6 +4,8 @@ use std::env;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+const PKG_NAME: &str = env!("CARGO_PKG_NAME");
+
 fn init_logging() {
     use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -16,19 +18,19 @@ fn init_logging() {
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
 
-    // Always log to oxidized.log (simple, tail-friendly)
-    let path = "oxidized.log";
+    // Always log to <package-name>.log (e.g., oxidized.log)
+    let file_path = format!("{}.log", PKG_NAME);
     let file = match std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(path)
+        .open(file_path.clone())
     {
         Ok(f) => f,
         Err(e) => {
             // If file cannot be opened, fall back to stderr so we still get logs
             eprintln!(
                 "Failed to open log file '{}': {} — logging to stderr",
-                path, e
+                file_path, e
             );
             tracing_subscriber::registry()
                 .with(env_filter)
@@ -55,7 +57,7 @@ fn init_logging() {
 fn main() -> Result<()> {
     init_logging();
 
-    tracing::info!("=== Oxidized Text Editor Starting ===");
+    tracing::info!("=== {} Text Editor Starting ===", PKG_NAME);
     tracing::debug!(
         "Build type: {}",
         if cfg!(debug_assertions) {
