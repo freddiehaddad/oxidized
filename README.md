@@ -4,6 +4,11 @@
 
 > Note: This project is under active development. Features, behavior, and APIs may change.
 
+Quick docs:
+
+- Architecture: see docs/ARCHITECTURE.md and docs/ARCHITECTURE_QUICKSTART.md
+- Contributing: see CONTRIBUTING.md and docs/CONTRIBUTING_ARCH.md
+
 ## 📋 Table of Contents
 <!-- markdownlint-disable MD007 -->
 
@@ -106,6 +111,22 @@ cargo run filename.txt
 # Install system-wide (optional)
 cargo install --path .
 # Binary will be available as 'oxidized' in your PATH
+```
+
+### Try it now
+
+Run the editor against this repo's README to get a feel quickly:
+
+- Windows (PowerShell):
+
+```powershell
+cargo run README.md
+```
+
+- Linux/macOS (Bash):
+
+```bash
+cargo run README.md
 ```
 
 ## 📖 Quick Start Guide
@@ -987,11 +1008,11 @@ cargo build
 
 # Run (debug builds default to debug-level logging)
 cargo run filename.txt
-
-Troubleshooting (Windows): if `cargo test` fails to remove `target\\debug\\oxidized.exe`
-with "Access is denied (os error 5)", ensure no running editor instance is
-holding a file lock (close the editor or kill the process) and retry.
 ```
+
+Note (Windows): if `cargo test` fails to remove `target\\debug\\oxidized.exe` with
+"Access is denied (os error 5)", ensure no running editor instance is holding a
+file lock (close the editor or kill the process) and retry.
 
 **Release Build:**
 
@@ -1150,6 +1171,15 @@ cargo test macro_tests
 cargo test -- --nocapture --test-threads=1
 ```
 
+**High‑signal test files:**
+
+- [tests/editor_tests.rs](./tests/editor_tests.rs) — editor core behaviors and redraw expectations
+- [tests/keymap_tests.rs](./tests/keymap_tests.rs) — key sequence → action wiring
+- [tests/ex_command_tests.rs](./tests/ex_command_tests.rs) — ex commands and :set/:setp
+- [tests/search_integration.rs](./tests/search_integration.rs) — search engine and navigation
+- [tests/grapheme_cursor_tests.rs](./tests/grapheme_cursor_tests.rs) — grapheme/emoji edge cases
+- [tests/ui_tests.rs](./tests/ui_tests.rs) — renderer and statusline
+
 ### Benchmarking
 
 Run micro-benchmarks for the search engine using Criterion (HTML reports enabled):
@@ -1169,20 +1199,6 @@ cargo bench --bench search_bench               # full run with reports
 Benchmark reports are generated under `target/criterion/` (open the `report/index.html` inside each benchmark folder).
 
 CI also runs quick benches on push and weekly (Mon 06:00 UTC) across Ubuntu, macOS, and Windows. HTML reports are uploaded as artifacts named `criterion-<os>` on each run.
-
-```bash
-# Linux/macOS - Run all tests (200+ comprehensive tests)
-cargo test
-
-# Run specific test modules (substring match)
-cargo test ui_wrap_tests
-cargo test visual_block_mode_tests
-cargo test search_integration
-cargo test macro_tests
-
-# Run with detailed output
-cargo test -- --nocapture --test-threads=1
-```
 
 **Test Categories:**
 

@@ -1,12 +1,49 @@
 # Contributing Guide (Developer Focus)
 
-This guide complements CONTRIBUTING.md with deeper technical context to help you navigate the codebase and add features safely.
+This guide complements [CONTRIBUTING.md](../CONTRIBUTING.md) with deeper technical context to help you navigate the codebase and add features safely.
 
-## Build and Run
+See also:
 
-- cargo build, cargo run filename.txt
-- For Windows file-lock issues during tests, ensure no running oxidized.exe is locking target files.
-- Recommended: `RUST_LOG=debug` in debug builds; logs go to file by default when TTY.
+- [ARCHITECTURE.md](./ARCHITECTURE.md) (full guide)
+- [ARCHITECTURE_QUICKSTART.md](./ARCHITECTURE_QUICKSTART.md) (one-page overview)
+
+## Build, Test, and Lint
+
+- Build/run: `cargo build`, `cargo run <filename>`
+- Lints: `cargo clippy --all-features --workspace -- -D warnings`
+- Format: `cargo fmt`
+- Tests: `cargo test --all-features --workspace`
+
+Tips:
+
+- Run a single integration test file: `cargo test --test ex_command_tests`
+- Run a single test by name substring: `cargo test name_substring`
+- On Windows, if tests fail due to file locks, ensure no running oxidized.exe holds files in target/.
+- For debugging, set `RUST_LOG=debug` (logs typically go to file when attached to a TTY).
+
+Benches:
+
+- Run Criterion benchmarks: `cargo bench` (see `benches/` for available suites).
+
+## Quick triage flow
+
+When iterating locally, prefer this tight loop:
+
+1. Build: `cargo build`
+2. Lint: `cargo clippy --all-features --workspace -- -D warnings`
+3. Test fast path: filter by name, e.g., `cargo test editor_basic` or a single file: `cargo test --test ex_command_tests`
+4. Run a smoke: `cargo run <file>` and exercise the change
+
+If you touched public behavior, add/update tests, then repeat steps 1–3 until green.
+
+## High‑signal tests to consult
+
+- [tests/editor_tests.rs](../tests/editor_tests.rs): editor core behaviors and redraw expectations
+- [tests/keymap_tests.rs](../tests/keymap_tests.rs): key sequence → action wiring
+- [tests/ex_command_tests.rs](../tests/ex_command_tests.rs): ex commands and :set/:setp
+- [tests/search_integration.rs](../tests/search_integration.rs): search engine and navigation
+- [tests/grapheme_cursor_tests.rs](../tests/grapheme_cursor_tests.rs): grapheme/emoji edge cases
+- [tests/ui_tests.rs](../tests/ui_tests.rs): renderer and statusline
 
 ## Code Conventions
 
@@ -35,8 +72,15 @@ This guide complements CONTRIBUTING.md with deeper technical context to help you
 ## Architecture Notes
 
 - The main event loop blocks on events (no periodic tick). The input thread
- polls at 16ms to remain responsive, and config watcher blocks on file
- events. The syntax results dispatcher thread blocks on a channel.
+ polls every 16ms (EVENT_TICK_MS) via `crossterm::event::poll` to stay
+ responsive and allow graceful shutdown without being stuck in a blocking
+ `event::read`. The config watcher blocks on file events, and the syntax
+ results dispatcher thread blocks on its channel. If you want fewer idle
+ wakeups, you can:
+  - switch the input to blocking `event::read` (simpler, but shutdown waits
+  for the next input unless you add an interrupt mechanism), or
+  - implement an adaptive backoff: increase poll timeout when idle, reset on
+  activity.
 - Async syntax uses a bounded work queue, coalescing by (buffer,line) with
  priority, and a monotonic version token. Results older than the current
  version are dropped before applying.
@@ -45,6 +89,6 @@ This guide complements CONTRIBUTING.md with deeper technical context to help you
 
 ## Architecture Diagrams
 
-The repository now uses simple inline ASCII diagrams embedded in Markdown
-documents (see ARCHITECTURE.md). There are no external diagram sources or
-rendered SVGs to maintain.
+The repository uses simple inline ASCII diagrams embedded in Markdown
+documents (see ARCHITECTURE.md and ARCHITECTURE_QUICKSTART.md). There are no
+external diagram sources or rendered SVGs to maintain.
