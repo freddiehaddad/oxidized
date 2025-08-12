@@ -21,8 +21,6 @@ This document gives contributors a high-level and practical overview of how Oxid
 ### Timing and Cadence
 
 - The main loop and input polling share a unified tick (EVENT_TICK_MS, default 16ms) to keep cadence simple and responsive.
-  
-- These values can be tuned at runtime via hot reload; the event threads read them before each sleep.
 
 1. Input thread reads terminal events and sends Input events.
 2. EventDrivenEditor processes events, mutates Editor as needed, and sends UI RedrawRequest when state changes.
@@ -51,14 +49,14 @@ Component overview (simplified):
 
   +---------+    owns     +---------+     manages     +-----------+
   | Editor  | ----------> | Buffers | <-------------  |  Windows  |
-  +---------+              +---------+                 +-----------+
+  +---------+             +---------+                 +-----------+
        |                         |                           |
        | uses                    | contains                  | displays
        v                         v                           v
-  +---------+             +------------+               +-----------+
-  |  Modes  |             |   Marks    |               |   UI/   |
+  +---------+             +------------+               +----------+
+  |  Modes  |             |   Marks    |               |   UI/    |
   +---------+             +------------+               | Renderer |
-                                                      +-----------+
+                                                       +----------+
 
 Core classes and relationships (high-level):
 
