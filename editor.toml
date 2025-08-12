@@ -45,23 +45,21 @@ config_poll_ms = 500       # Poll interval for config reload (ms)
 syntax_poll_ms = 100       # Poll interval for async syntax tasks (ms)
 
 [statusline]
-show_indent = true
-show_eol = true
-show_encoding = true
-show_type = true
-show_macro = true
-show_search = true
-show_progress = true
+show_indent = true   # Show current indent width (tabs/spaces)
+show_eol = true      # Show end-of-line style (LF/CRLF)
+show_encoding = true # Show file encoding (e.g., UTF-8)
+show_type = true     # Show detected language/filetype
+show_macro = true    # Show active macro recording register
+show_search = true   # Show current search pattern/status
+show_progress = true # Show buffer progress (line/percent)
 separator = "  "     # Spacing between right-aligned segments
 
 [languages]
 # Default language used when detection fails
-default_language = "text"
+default_language = "text" # Fallback language when no extension matches
 
 [languages.extensions]
-md = "markdown"
-toml = "toml"
-txt = "text"
-rs = "rust"
-
-# content_patterns removed (feature disabled)
+md = "markdown" # Files ending in .md use Markdown
+toml = "toml"   # Files ending in .toml use TOML
+txt = "text"    # Plain text files
+rs = "rust"     # Rust source files

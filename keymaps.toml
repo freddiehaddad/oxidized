@@ -1,106 +1,118 @@
-# Default Keymaps Configuration
-# This file defines all keybindings for the editor
-# Format: key = "action" or key = { action = "command", args = ["arg1", "arg2"] }
+# ###############################################################################
+# Oxidized Keymaps Configuration
+#
+# This file enumerates all supported default keybindings. Each mapping has an
+# inline comment describing its purpose. You can customize or remove any map;
+# unspecified actions fall back to built-in defaults.
+#
+# Format:
+#   key = "action"
+#   key = { action = "command", args = ["arg1", "arg2"] }
+#
+# Notes:
+# - Some terminals intercept certain chords (e.g., Ctrl+V); alternatives are
+#   provided where practical (see Alt+v for Visual Block).
+# - After editing, save the file; the editor will live-reload keymaps.
+# ###############################################################################
 
 [normal_mode]
 # Movement
-"h" = "cursor_left"
-"j" = "cursor_down"
-"k" = "cursor_up"
-"l" = "cursor_right"
-"Left" = "cursor_left"
-"Down" = "cursor_down"
-"Up" = "cursor_up"
-"Right" = "cursor_right"
-
-"w" = "word_forward"
-"b" = "word_backward"
-"e" = "word_end"
-"0" = "line_start"
-"^" = "line_first_char"
-"$" = "line_end"
-"gg" = "buffer_start"
-"G" = "buffer_end"
+"h" = "cursor_left"         # Move cursor left
+"j" = "cursor_down"         # Move cursor down
+"k" = "cursor_up"           # Move cursor up
+"l" = "cursor_right"        # Move cursor right
+"Left" = "cursor_left"      # Arrow: move cursor left
+"Down" = "cursor_down"      # Arrow: move cursor down
+"Up" = "cursor_up"          # Arrow: move cursor up
+"Right" = "cursor_right"    # Arrow: move cursor right
+"w" = "word_forward"        # Move to start of next word
+"b" = "word_backward"       # Move to start of previous word
+"e" = "word_end"            # Move to end of next word
+"0" = "line_start"          # Go to column 0
+"^" = "line_first_char"     # Go to first non-blank character
+"$" = "line_end"            # Go to end of line
+"gg" = "buffer_start"       # Go to first line of buffer
+"G" = "buffer_end"          # Go to last line of buffer
 
 # Mode transitions
-"i" = "insert_mode"
-"I" = "insert_line_start"
-"a" = "insert_after"
-"A" = "insert_line_end"
-"o" = "insert_line_below"
-"O" = "insert_line_above"
-"v" = "visual_mode"
-"V" = "visual_line_mode"
-"Ctrl+v" = "visual_block_mode"
-"Alt+v" = "visual_block_mode" # Alternative for terminals that intercept Ctrl+V (e.g., VS Code)
-"R" = "replace_mode"
+"i" = "insert_mode"            # Insert before cursor
+"I" = "insert_line_start"      # Insert at start of line
+"a" = "insert_after"           # Insert after cursor
+"A" = "insert_line_end"        # Insert at end of line
+"o" = "insert_line_below"      # Open a new line below and insert
+"O" = "insert_line_above"      # Open a new line above and insert
+"v" = "visual_mode"            # Enter Visual (character) mode
+"V" = "visual_line_mode"       # Enter Visual Line mode
+"Ctrl+v" = "visual_block_mode" # Enter Visual Block mode
+"Alt+v" = "visual_block_mode"  # Alternative for terminals that intercept Ctrl+V (e.g., VS Code)
+"R" = "replace_mode"           # Enter Replace mode
 
 # Search
-"/" = "search_forward"
-"?" = "search_backward"
-"n" = "search_next"
-"N" = "search_previous"
+"/" = "search_forward"      # Start forward search
+"?" = "search_backward"     # Start backward search
+"n" = "search_next"         # Jump to next match
+"N" = "search_previous"     # Jump to previous match
 
 # Character navigation (find/till)
-"f" = "start_find_char_forward"
-"F" = "start_find_char_backward"
-"t" = "start_till_char_forward"
-"T" = "start_till_char_backward"
-";" = "repeat_char_search"
-"," = "repeat_char_search_reverse"
+"f" = "start_find_char_forward"    # Find next occurrence of a char to the right
+"F" = "start_find_char_backward"   # Find previous occurrence of a char to the left
+"t" = "start_till_char_forward"    # Move right before next occurrence of a char
+"T" = "start_till_char_backward"   # Move left after previous occurrence of a char
+";" = "repeat_char_search"         # Repeat last f/F/t/T in same direction
+"," = "repeat_char_search_reverse" # Repeat last f/F/t/T in opposite direction
 
 # Commands
-":" = "command_mode"
+":" = "command_mode"        # Enter command-line (ex) mode
 
 # Delete operations
-"x" = "delete_char_at_cursor"
-"X" = "delete_char_before_cursor"
-"dd" = "delete_line"
-"D" = "delete_to_end_of_line"
+"x" = "delete_char_at_cursor"     # Delete character under cursor
+"X" = "delete_char_before_cursor" # Delete character before cursor
+"dd" = "delete_line"              # Delete current line
+"D" = "delete_to_end_of_line"     # Delete from cursor to end of line
 
 # Line operations
-"J" = "join_lines"
-"C" = "change_to_end_of_line"
-"S" = "change_entire_line"
-"s" = "substitute_char"
+"J" = "join_lines"                # Join next line to current
+"C" = "change_to_end_of_line"     # Change from cursor to end of line
+"S" = "change_entire_line"        # Change entire line
+"s" = "substitute_char"           # Replace character under cursor
 
 # Bracket matching
-"%" = "bracket_match"
+"%" = "bracket_match"             # Jump to matching bracket/brace
 
 # Paragraph movement
-"{" = "paragraph_backward"
-"}" = "paragraph_forward"
+"{" = "paragraph_backward"        # Move to previous paragraph
+"}" = "paragraph_forward"         # Move to next paragraph
 
 # Sentence movement
-"(" = "sentence_backward"
-")" = "sentence_forward"
+"(" = "sentence_backward"         # Move to previous sentence
+")" = "sentence_forward"          # Move to next sentence
 
 # Section movement
-"[[" = "section_backward"
-"]]" = "section_forward"
+"[[" = "section_backward"         # Move to previous section
+"]]" = "section_forward"          # Move to next section
 
 # Repeat operations
-"." = "repeat_last_change"
+"." = "repeat_last_change"        # Repeat last change
 
 # Operators (enter operator-pending mode)
-"d" = "operator_delete"
-"c" = "operator_change"
-"y" = "operator_yank"
-">" = "operator_indent"
-"<" = "operator_unindent"
-"~" = "operator_toggle_case"
+"d" = "operator_delete"            # Delete operator (awaits motion/text object)
+"c" = "operator_change"            # Change operator (delete then insert)
+"y" = "operator_yank"              # Yank (copy) operator
+">" = "operator_indent"            # Indent operator
+"<" = "operator_unindent"          # Unindent operator
+"~" = "operator_toggle_case"       # Toggle case operator
 
 # Yank (copy) operations
-"yy" = "yank_line"
-"yw" = "yank_word"
-"y$" = "yank_to_end_of_line"
+"yy" = "yank_line"                 # Yank (copy) current line
+"yw" = "yank_word"                 # Yank word
+"y$" = "yank_to_end_of_line"       # Yank to end of line
 
 # Put (paste) operations
-"p" = "put_after"
-"P" = "put_before"
+"p" = "put_after"                  # Paste after cursor/line
+"P" = "put_before"                 # Paste before cursor/line
 
 # File operations
-"Ctrl+s" = "save_file"
+"Ctrl+s" = "save_file"             # Save file
 
 # Macro operations
 "q" = "start_macro_recording"  # q{register} - start/stop recording
@@ -112,12 +124,12 @@
 "`" = "mark_jump_exact"        # `{register} - jump to exact position of mark
 
 # Undo/Redo
-"u" = "undo"
-"Ctrl+r" = "redo"
+"u" = "undo"                       # Undo last change
+"Ctrl+r" = "redo"                  # Redo
 
 # Buffer management
-"Ctrl+n" = "buffer_next"
-"Ctrl+p" = "buffer_previous"
+"Ctrl+n" = "buffer_next"           # Next buffer
+"Ctrl+p" = "buffer_previous"       # Previous buffer
 
 # Scrolling operations (Vim-style)
 "Ctrl+e" = "scroll_down_line"      # Scroll down one line
@@ -133,8 +145,8 @@
 "zb" = "cursor_to_bottom" # Move current line to bottom of viewport
 
 # Alternative center commands
-"z." = "center_cursor"     # Center current line (alternative)
-"z-" = "cursor_to_bottom"  # Move current line to bottom (alternative)
+"z." = "center_cursor"      # Center current line (alternative)
+"z-" = "cursor_to_bottom"   # Move current line to bottom (alternative)
 "z Enter" = "cursor_to_top" # Move current line to top (alternative)
 
 # Window/Split navigation
@@ -166,10 +178,10 @@
 "Ctrl+w -" = "resize_window_shorter"  # Make window shorter
 
 # Additional navigation keys
-"Home" = "line_start"
-"End" = "line_end"
-"PageUp" = "scroll_up_page"     # Map PageUp to scroll up page
-"PageDown" = "scroll_down_page" # Map PageDown to scroll down page
+"Home" = "line_start"              # Go to start of line
+"End" = "line_end"                 # Go to end of line
+"PageUp" = "scroll_up_page"        # Map PageUp to scroll up page
+"PageDown" = "scroll_down_page"    # Map PageDown to scroll down page
 
 # Function keys for common operations
 "F1" = "command_mode"   # Help/command mode
@@ -179,127 +191,127 @@
 
 [insert_mode]
 # Basic editing
-"Char" = "insert_char"
-"Enter" = "new_line"
-"Backspace" = "delete_char"
-"Delete" = "delete_char_forward"
-"Tab" = "insert_tab"
+"Char" = "insert_char"           # Insert typed character
+"Enter" = "new_line"             # Insert newline
+"Backspace" = "delete_char"      # Delete character before cursor
+"Delete" = "delete_char_forward" # Delete character under cursor
+"Tab" = "insert_tab"             # Insert a tab character or spaces
 
 # Movement in insert mode
-"Left" = "cursor_left"
-"Right" = "cursor_right"
-"Up" = "cursor_up"
-"Down" = "cursor_down"
+"Left" = "cursor_left"          # Move cursor left
+"Right" = "cursor_right"        # Move cursor right
+"Up" = "cursor_up"              # Move cursor up
+"Down" = "cursor_down"          # Move cursor down
 
 # Mode transitions
-"Escape" = "normal_mode"
-"Ctrl+c" = "normal_mode"
+"Escape" = "normal_mode"         # Return to Normal mode
+"Ctrl+c" = "normal_mode"         # Return to Normal mode
 
 # Additional navigation in insert mode
-"Home" = "line_start"
-"End" = "line_end"
-"Ctrl+a" = "line_start"
-"Ctrl+e" = "line_end"
-"Ctrl+w" = "delete_word_backward"
+"Home" = "line_start"            # Move to start of line
+"End" = "line_end"               # Move to end of line
+"Ctrl+a" = "line_start"          # Move to start of line
+"Ctrl+e" = "line_end"            # Move to end of line
+"Ctrl+w" = "delete_word_backward" # Delete previous word
 
 [command_mode]
 # Command execution
-"Enter" = "execute_command"
-"Escape" = "normal_mode"
-"Ctrl+c" = "normal_mode"
+"Enter" = "execute_command"   # Run the typed command
+"Escape" = "normal_mode"      # Cancel and return to Normal mode
+"Ctrl+c" = "normal_mode"      # Cancel and return to Normal mode
 
 # Editing command line
-"Char" = "append_command"
-"Backspace" = "delete_command_char"
+"Char" = "append_command"           # Add character to command line
+"Backspace" = "delete_command_char" # Delete last command character
 
 # Command completion
-"Tab" = "command_complete"
-"Ctrl+n" = "completion_next"
-"Ctrl+p" = "completion_previous"
-"Ctrl+y" = "completion_accept"
+"Tab" = "command_complete"       # Trigger command completion
+"Ctrl+n" = "completion_next"     # Next completion item
+"Ctrl+p" = "completion_previous" # Previous completion item
+"Ctrl+y" = "completion_accept"   # Accept completion
 
 [visual_mode]
 # Movement (inherits from normal mode)
-"h" = "cursor_left"
-"j" = "cursor_down"
-"k" = "cursor_up"
-"l" = "cursor_right"
-"w" = "word_forward"
-"b" = "word_backward"
-"0" = "line_start"
-"$" = "line_end"
+"h" = "cursor_left"     # Extend left
+"j" = "cursor_down"     # Extend down
+"k" = "cursor_up"       # Extend up
+"l" = "cursor_right"    # Extend right
+"w" = "word_forward"    # Extend to next word start
+"b" = "word_backward"   # Extend to previous word start
+"0" = "line_start"      # Extend to start of line
+"$" = "line_end"        # Extend to end of line
 
 # Actions
-"d" = "delete_selection"
-"y" = "yank_selection"
-"c" = "change_selection"
+"d" = "delete_selection" # Delete selection
+"y" = "yank_selection"   # Copy selection
+"c" = "change_selection" # Change selection
 
 # Mode transitions
-"Escape" = "normal_mode"
-"v" = "normal_mode"
+"Escape" = "normal_mode"  # Return to Normal mode
+"v" = "normal_mode"       # Toggle Visual off
 
 [visual_line_mode]
 # Movement (inherits from normal mode)
-"h" = "cursor_left"
-"j" = "cursor_down"
-"k" = "cursor_up"
-"l" = "cursor_right"
-"w" = "word_forward"
-"b" = "word_backward"
-"0" = "line_start"
-"$" = "line_end"
+"h" = "cursor_left"   # Extend left by lines
+"j" = "cursor_down"   # Extend down by lines
+"k" = "cursor_up"     # Extend up by lines
+"l" = "cursor_right"  # Extend right by lines
+"w" = "word_forward"  # Extend to next word start
+"b" = "word_backward" # Extend to previous word start
+"0" = "line_start"    # Extend to start of line
+"$" = "line_end"      # Extend to end of line
 
 # Actions
-"d" = "delete_selection"
-"y" = "yank_selection"
-"c" = "change_selection"
+"d" = "delete_selection" # Delete selected lines
+"y" = "yank_selection"   # Copy selected lines
+"c" = "change_selection" # Change selected lines
 
 # Mode transitions
-"Escape" = "normal_mode"
-"V" = "normal_mode"
-"v" = "visual_mode"
+"Escape" = "normal_mode" # Return to Normal mode
+"V" = "normal_mode"      # Toggle Visual Line off
+"v" = "visual_mode"      # Switch to Visual (character)
 
 [visual_block_mode]
 # Movement (inherits from normal mode)
-"h" = "cursor_left"
-"j" = "cursor_down"
-"k" = "cursor_up"
-"l" = "cursor_right"
-"w" = "word_forward"
-"b" = "word_backward"
-"0" = "line_start"
-"$" = "line_end"
+"h" = "cursor_left"   # Extend block left
+"j" = "cursor_down"   # Extend block down
+"k" = "cursor_up"     # Extend block up
+"l" = "cursor_right"  # Extend block right
+"w" = "word_forward"  # Extend to next word start
+"b" = "word_backward" # Extend to previous word start
+"0" = "line_start"    # Extend to start of line
+"$" = "line_end"      # Extend to end of line
 
 # Actions
-"d" = "delete_selection"
-"y" = "yank_selection"
-"c" = "change_selection"
+"d" = "delete_selection" # Delete block
+"y" = "yank_selection"   # Copy block
+"c" = "change_selection" # Change block
 
 # Mode transitions
-"Escape" = "normal_mode"
-"Ctrl+v" = "normal_mode"
-"Alt+v" = "normal_mode" # Alternative exit for Visual Block
-"v" = "visual_mode"
+"Escape" = "normal_mode" # Return to Normal mode
+"Ctrl+v" = "normal_mode" # Toggle Visual Block off
+"Alt+v" = "normal_mode"  # Toggle Visual Block off (alternative)
+"v" = "visual_mode"      # Switch to Visual (character)
 
 [replace_mode]
 # Character replacement
-"Char" = "replace_char"
-"Escape" = "normal_mode"
-"Ctrl+c" = "normal_mode"
+"Char" = "replace_char"   # Replace character under cursor, then advance
+"Escape" = "normal_mode"  # Return to Normal mode
+"Ctrl+c" = "normal_mode"  # Return to Normal mode
 
 [search_mode]
 # Search input
-"Char" = "append_search"
-"Enter" = "execute_search"
-"Escape" = "normal_mode"
-"Ctrl+c" = "normal_mode"
-"Backspace" = "delete_search_char"
+"Char" = "append_search"   # Add character to search pattern
+"Enter" = "execute_search" # Execute current search
+"Escape" = "normal_mode"   # Cancel search
+"Ctrl+c" = "normal_mode"   # Cancel search
+"Backspace" = "delete_search_char" # Delete last search character
 
 [operator_pending_mode]
 # Compound operator sequences (when already in operator-pending mode)
-"d" = "delete_line"     # dd - delete current line (second d when already in OP mode)
-"c" = "change_entire_line" # cc - change current line  
-"y" = "yank_line"       # yy - yank current line
+"d" = "delete_line"         # dd - delete current line (second d when already in OP mode)
+"c" = "change_entire_line"  # cc - change current line  
+"y" = "yank_line"           # yy - yank current line
 
 # Text objects for operators
 # Word text objects
@@ -352,5 +364,5 @@
 "at" = "text_object_at" # a tag
 
 # Escape to cancel operator
-"Escape" = "normal_mode"
-"Ctrl+c" = "normal_mode"
+"Escape" = "normal_mode" # Cancel operator
+"Ctrl+c" = "normal_mode" # Cancel operator
