@@ -622,6 +622,13 @@ impl EventDrivenEditor {
                 // Forward as a buffer event; cache will be updated on handle
                 // Update cache immediately and request UI redraw via event
                 if let Ok(mut ed) = editor.lock() {
+                    // Drop stale results (older version than editor's current)
+                    let current_version = ed
+                        .highlight_version
+                        .load(std::sync::atomic::Ordering::Relaxed);
+                    if result.version < current_version {
+                        continue;
+                    }
                     ed.apply_syntax_highlight_result(
                         result.buffer_id,
                         result.line_index,

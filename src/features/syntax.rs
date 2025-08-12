@@ -616,8 +616,8 @@ pub struct AsyncSyntaxHighlighter {
     // Worker thread and channels
     work_tx: xchan::Sender<WorkItem>,
     result_rx: xchan::Receiver<HighlightResult>,
-    // Cache of last results per (buffer_id, line)
-    cache: std::sync::Mutex<HashMap<(usize, usize), Vec<HighlightRange>>>,
+    // Cache of last results per (buffer_id, line) with a small LRU
+    cache: std::sync::Mutex<LruCache<(usize, usize), Vec<HighlightRange>>>,
 }
 
 impl AsyncSyntaxHighlighter {
@@ -635,7 +635,7 @@ impl AsyncSyntaxHighlighter {
         Ok(AsyncSyntaxHighlighter {
             work_tx,
             result_rx,
-            cache: std::sync::Mutex::new(HashMap::new()),
+            cache: std::sync::Mutex::new(LruCache::new(2048)),
         })
     }
 
@@ -647,7 +647,7 @@ impl AsyncSyntaxHighlighter {
         _language: &str,
     ) -> Option<Vec<HighlightRange>> {
         let cache = self.cache.lock().ok()?;
-        cache.get(&(buffer_id, line_index)).cloned()
+        cache.get(&(buffer_id, line_index))
     }
 
     pub fn force_immediate_highlights_with_context(
@@ -665,7 +665,7 @@ impl AsyncSyntaxHighlighter {
             language: language.to_string(),
             full_content: full_content.to_string(),
             priority: Priority::Critical,
-            version: 0, // version set by editor via request_visible... API if needed
+            version: 0, // overridden by explicit request_highlighting calls
         });
         None
     }
@@ -677,6 +677,7 @@ impl AsyncSyntaxHighlighter {
         full_content: String,
         language: String,
         priority: Priority,
+        version: u64,
     ) {
         let _ = self.work_tx.send(WorkItem {
             buffer_id,
@@ -684,13 +685,13 @@ impl AsyncSyntaxHighlighter {
             language,
             full_content,
             priority,
-            version: 0,
+            version,
         });
     }
 
     pub fn cache_stats(&self) -> (usize, usize) {
         let cache = self.cache.lock().unwrap();
-        (cache.len(), 0)
+        (cache.len(), cache.capacity())
     }
 
     pub fn update_theme(&self, _theme_name: &str) -> Result<()> {
@@ -824,7 +825,7 @@ impl AsyncSyntaxHighlighter {
         let mut updated: Vec<(usize, usize)> = Vec::new();
         while let Ok(result) = self.result_rx.try_recv() {
             if let Ok(mut cache) = self.cache.lock() {
-                cache.insert((result.buffer_id, result.line_index), result.highlights);
+                cache.put((result.buffer_id, result.line_index), result.highlights);
                 updated.push((result.buffer_id, result.line_index));
             }
         }
@@ -839,12 +840,85 @@ impl AsyncSyntaxHighlighter {
         highlights: Vec<HighlightRange>,
     ) {
         if let Ok(mut cache) = self.cache.lock() {
-            cache.insert((buffer_id, line_index), highlights);
+            cache.put((buffer_id, line_index), highlights);
         }
     }
 
     /// Clone the result receiver so a background thread can block on it
     pub fn clone_result_receiver(&self) -> xchan::Receiver<HighlightResult> {
         self.result_rx.clone()
+    }
+}
+
+// -------- Minimal LRU cache implementation --------
+
+#[derive(Debug)]
+struct LruCache<K, V> {
+    map: HashMap<K, V>,
+    order: VecDeque<K>,
+    cap: usize,
+}
+
+impl<K: std::hash::Hash + Eq + Clone, V: Clone> LruCache<K, V> {
+    fn new(capacity: usize) -> Self {
+        Self {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+            cap: capacity.max(1),
+        }
+    }
+
+    fn capacity(&self) -> usize {
+        self.cap
+    }
+
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    fn get(&self, key: &K) -> Option<V> {
+        self.map.get(key).cloned()
+    }
+
+    fn touch(&mut self, key: &K) {
+        if let Some(pos) = self.order.iter().position(|k| k == key) {
+            self.order.remove(pos);
+        }
+        self.order.push_back(key.clone());
+    }
+
+    fn put(&mut self, key: K, value: V) {
+        if self.map.contains_key(&key) {
+            self.map.insert(key.clone(), value);
+            self.touch(&key);
+            return;
+        }
+        if self.map.len() >= self.cap
+            && let Some(old_key) = self.order.pop_front()
+        {
+            self.map.remove(&old_key);
+        }
+        self.map.insert(key.clone(), value);
+        self.order.push_back(key);
+    }
+
+    fn clear(&mut self) {
+        self.map.clear();
+        self.order.clear();
+    }
+
+    fn retain<F: FnMut(&K, &mut V) -> bool>(&mut self, mut f: F) {
+        self.order.retain(|k| {
+            if let Some(v) = self.map.get_mut(k) {
+                if f(k, v) {
+                    true
+                } else {
+                    self.map.remove(k);
+                    false
+                }
+            } else {
+                false
+            }
+        });
     }
 }

@@ -16,7 +16,7 @@ use log::{debug, error, info, trace, warn};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Represents an operator waiting for a text object or motion
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,6 +118,8 @@ pub struct Editor {
     pub needs_syntax_refresh: Arc<AtomicBool>,
     /// Flag to request a UI redraw for non-syntax changes (e.g., undo/delete with no cursor move)
     pub needs_redraw: Arc<AtomicBool>,
+    /// Monotonic version for async syntax tasks (drop stale results)
+    pub highlight_version: Arc<AtomicU64>,
     /// Command completion system
     command_completion: CommandCompletion,
     /// Current pending operator (for operator + text object combinations)
@@ -211,6 +213,7 @@ impl Editor {
             async_syntax_highlighter,
             needs_syntax_refresh: Arc::new(AtomicBool::new(false)),
             needs_redraw: Arc::new(AtomicBool::new(false)),
+            highlight_version: Arc::new(AtomicU64::new(1)),
             command_completion: CommandCompletion::new(),
             pending_operator: None,
             text_object_finder: crate::features::text_objects::TextObjectFinder::new(),
@@ -1529,12 +1532,15 @@ impl Editor {
                 // Enqueue async highlighting for this line using full-file context
                 if let Some(buf) = self.buffers.get(&buffer_id) {
                     let full_content = buf.lines.join("\n");
+                    // Use current version for ad-hoc single-line requests
+                    let version = self.highlight_version.load(Ordering::Relaxed);
                     highlighter.request_highlighting(
                         buffer_id,
                         line_index,
                         full_content,
                         lang,
                         Priority::High,
+                        version,
                     );
                     // Mark that a syntax refresh should trigger a redraw when results arrive
                     self.needs_syntax_refresh
@@ -1588,14 +1594,24 @@ impl Editor {
                 // Get full buffer content for proper context-aware parsing
                 let full_content = buffer.lines.join("\n");
 
+                // Bump version once per visible request (e.g., on scroll)
+                let version = self.highlight_version.fetch_add(1, Ordering::Relaxed);
+                let cursor_line = buffer.cursor.row;
+
                 // Enqueue full-context highlighting for all visible lines
                 for line_index in visible_start..visible_end {
+                    let prio = if line_index == cursor_line {
+                        Priority::Critical
+                    } else {
+                        Priority::High
+                    };
                     highlighter.request_highlighting(
                         buffer_id,
                         line_index,
                         full_content.clone(),
                         language.clone(),
-                        Priority::High,
+                        prio,
+                        version,
                     );
                 }
 
@@ -1609,6 +1625,7 @@ impl Editor {
                             full_content.clone(),
                             language.clone(),
                             Priority::Medium,
+                            version,
                         );
                     }
                 }
@@ -1766,17 +1783,23 @@ impl Editor {
                 visible_end
             );
 
-            // Force high-priority re-highlighting of all visible lines
+            // Bump version to invalidate in-flight results and requeue visible lines
+            let version = self.highlight_version.fetch_add(1, Ordering::Relaxed);
+            let full_content = buffer.lines.join("\n");
             for line_index in visible_start..visible_end {
-                if let Some(line) = buffer.get_line(line_index) {
-                    highlighter.request_highlighting(
-                        buffer_id,
-                        line_index,
-                        line.to_string(),
-                        language.to_string(),
-                        Priority::Critical,
-                    );
-                }
+                let prio = if line_index == buffer.cursor.row {
+                    Priority::Critical
+                } else {
+                    Priority::High
+                };
+                highlighter.request_highlighting(
+                    buffer_id,
+                    line_index,
+                    full_content.clone(),
+                    language.to_string(),
+                    prio,
+                    version,
+                );
             }
         }
     }
