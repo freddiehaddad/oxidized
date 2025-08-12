@@ -79,11 +79,11 @@ cargo build --release
 cargo run filename.txt
 
 # Or use the built binary
-.\target\release\oxy.exe filename.txt
+.\target\release\oxidized.exe filename.txt
 
 # Install system-wide (optional)
 cargo install --path .
-# Binary will be available as 'oxy' in your PATH
+# Binary will be available as 'oxidized' in your PATH
 ```
 
 ### Linux/macOS Installation
@@ -101,18 +101,18 @@ cargo build --release
 cargo run filename.txt
 
 # Or use the built binary
-./target/release/oxy filename.txt
+./target/release/oxidized filename.txt
 
 # Install system-wide (optional)
 cargo install --path .
-# Binary will be available as 'oxy' in your PATH
+# Binary will be available as 'oxidized' in your PATH
 ```
 
 ## 📖 Quick Start Guide
 
 ### First Steps
 
-1. **Launch**: `oxy filename.txt` or `oxy` for a new buffer
+1. **Launch**: `oxidized filename.txt` or `oxidized` for a new buffer
 2. **Insert Text**: Press `i` to enter Insert mode, type your content
 3. **Navigate**: Use `hjkl` or arrow keys in Normal mode
 4. **Save**: Type `:w` to write the file
@@ -932,7 +932,7 @@ cargo build
 # Run (debug builds default to debug-level logging)
 cargo run filename.txt
 
-Troubleshooting (Windows): if `cargo test` fails to remove `target\\debug\\oxy.exe`
+Troubleshooting (Windows): if `cargo test` fails to remove `target\\debug\\oxidized.exe`
 with "Access is denied (os error 5)", ensure no running editor instance is
 holding a file lock (close the editor or kill the process) and retry.
 ```
@@ -944,7 +944,7 @@ holding a file lock (close the editor or kill the process) and retry.
 cargo build --release
 
 # Run with custom log level
-$env:RUST_LOG="debug"; .\target\release\oxy.exe filename.txt
+$env:RUST_LOG="debug"; .\target\release\oxidized.exe filename.txt
 ```
 
 ```bash
@@ -952,7 +952,7 @@ $env:RUST_LOG="debug"; .\target\release\oxy.exe filename.txt
 cargo build --release
 
 # Run with custom log level
-RUST_LOG=debug ./target/release/oxy filename.txt
+RUST_LOG=debug ./target/release/oxidized filename.txt
 ```
 
 ### 📊 Logging
@@ -1143,7 +1143,7 @@ cargo install --path .
 
 # Create distributable binary
 cargo build --release
-# Binary located at: .\target\release\oxy.exe
+# Binary located at: .\target\release\oxidized.exe
 ```
 
 ```bash
@@ -1152,7 +1152,7 @@ cargo install --path .
 
 # Create distributable binary
 cargo build --release  
-# Binary located at: ./target/release/oxy
+# Binary located at: ./target/release/oxidized
 ```
 
 ## 🔧 Troubleshooting
@@ -1161,28 +1161,28 @@ cargo build --release
 
 #### **Application Won't Start**
 
-**Issue**: `oxy` command not found or permission denied
+**Issue**: `oxidized` command not found or permission denied
 
 **Solutions:**
 
 ```powershell
 # Windows - Check PATH and permissions
-where oxy                                    # Verify installation location
+where oxidized                               # Verify installation location
 $env:PATH += ";C:\path\to\oxidized\target\release"  # Add to PATH if needed
 
 # If building from source
 cargo build --release
-.\target\release\oxy.exe filename.txt       # Run directly
+.\target\release\oxidized.exe filename.txt  # Run directly
 ```
 
 ```bash
 # Linux/macOS - Check PATH and permissions
-which oxy                                    # Verify installation location
+which oxidized                               # Verify installation location
 export PATH="$PATH:/path/to/oxidized/target/release"  # Add to PATH if needed
 
 # Fix permissions if needed
-chmod +x ./target/release/oxy
-./target/release/oxy filename.txt           # Run directly
+chmod +x ./target/release/oxidized
+./target/release/oxidized filename.txt      # Run directly
 ```
 
 #### **Configuration Not Loading**
@@ -1255,7 +1255,7 @@ RUST_LOG=oxidized::syntax=trace cargo run source_code.rs
 
    ```powershell
    # Windows - Monitor while running
-   Get-Process -Name "oxy" | Format-Table CPU,PM,VM -AutoSize
+   Get-Process -Name "oxidized" | Format-Table CPU,PM,VM -AutoSize
    ```
 
 #### **Terminal Display Issues**

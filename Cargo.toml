@@ -3,10 +3,6 @@ name = "oxidized"
 version = "0.0.1"
 edition = "2024"
 
-[[bin]]
-name = "oxy"
-path = "src/main.rs"
-
 [dependencies]
 # Terminal handling
 crossterm = "0.29.0"

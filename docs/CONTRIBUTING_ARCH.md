@@ -5,7 +5,7 @@ This guide complements CONTRIBUTING.md with deeper technical context to help you
 ## Build and Run
 
 - cargo build, cargo run filename.txt
-- For Windows file-lock issues during tests, ensure no running oxy.exe is locking target files.
+- For Windows file-lock issues during tests, ensure no running oxidized.exe is locking target files.
 - Recommended: `RUST_LOG=debug` in debug builds; logs go to file by default when TTY.
 
 ## Code Conventions
