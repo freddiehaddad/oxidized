@@ -16,15 +16,26 @@ This document gives contributors a high-level and practical overview of how Oxid
 ## Key Runtime Flow
 
 1. main.rs initializes logging and creates an Editor.
-2. EventDrivenEditor wraps Editor and spawns threads (input, config watch, render stub) and an event bus. Syntax is refreshed event-driven (no background syntax thread).
+2. EventDrivenEditor wraps Editor and spawns threads (input, config watch,
+   syntax results dispatcher, render stub) and an event bus. Syntax
+   highlighting runs in a dedicated worker thread; results are applied via a
+   dispatcher that requests UI redraws.
 
 ### Timing and Cadence
 
-- The input thread uses crossterm polling with EVENT_TICK_MS (default 16ms) to stay responsive; the main loop blocks on events and wakes only when events arrive.
+- The input thread uses crossterm polling with EVENT_TICK_MS (default 16ms) to
+  stay responsive. The main event loop uses a fully blocking recv and wakes
+  only when events arrive. The config watcher blocks on filesystem events, and
+  the syntax results dispatcher blocks on a dedicated channel from the async
+  highlighter.
 
 1. Input thread reads terminal events and sends Input events.
-2. EventDrivenEditor processes events, mutates Editor as needed, and sends UI RedrawRequest when state changes.
-3. Editor::render() snapshots EditorRenderState and asks UI to draw via Terminal.
+2. EventDrivenEditor processes events, mutates Editor as needed, and sends UI
+  RedrawRequest when state changes.
+3. A syntax results dispatcher thread listens for background highlight results,
+  updates caches, drops stale versions, and triggers redraws.
+4. Editor::render() snapshots EditorRenderState and asks UI to draw via
+  Terminal.
 
 Sequence (input → state → render):
 
@@ -85,11 +96,39 @@ Core classes and relationships (high-level):
 - ConfigWatcher blocks on filesystem events (notify) and sends typed change events; no periodic polling. EventDrivenEditor translates them to Config events and forces a full redraw when applied.
 - ThemeConfig load_with_default_theme applies color scheme; UI reads it on init and reload.
 
-## Syntax Highlighting (event-driven)
+## Syntax Highlighting (async pipeline)
 
-- No background syntax thread. Highlighting occurs on-demand (synchronously for small units like single lines), and the editor sets a needs_syntax_refresh flag to prompt redraws as needed.
+Oxidized uses a truly async syntax pipeline powered by Tree-sitter:
 
-Design note: we prioritize responsiveness and simplicity over long-running parsing. Expensive full-file highlighting is intentionally avoided in the synchronous path.
+- A dedicated worker thread owns its own parser/theme and receives work items
+  over a bounded channel. Work items contain (buffer_id, line_index,
+  full_content, language, priority, version).
+- The worker coalesces requests by (buffer,line), preferring the latest
+  version and highest priority, then highlights line text using the provided
+  full-file context for correctness.
+- Results are sent over an unbounded results channel to a dispatcher thread.
+- The dispatcher validates results against a monotonic version token held by
+  the Editor and drops stale results. Valid results are applied to a small
+  in-memory LRU cache keyed by (buffer_id, line_index), and a UI redraw is
+  requested.
+
+Priorities
+
+- Critical: current cursor line
+- High: visible viewport lines
+- Medium/Low: nearby lines off-screen or opportunistic background work
+
+Versioning and staleness
+
+- Editor maintains highlight_version (AtomicU64). Actions that reshuffle
+  context (scroll, resize, theme change) bump the version. Any result with a
+  version lower than the current is discarded by the dispatcher.
+
+Caching
+
+- A small LRU cache bounds memory usage for per-line highlight results. The UI
+  renders using cached results immediately when available, and async results
+  update the cache in-place.
 
 ## Windows and Viewports
 
@@ -103,9 +142,16 @@ Design note: we prioritize responsiveness and simplicity over long-running parsi
 
 ## Alternatives and trade-offs
 
-- Fully blocking main loop without a tick: Replace the short recv_timeout with a blocking recv and rely entirely on incoming events to drive progress. This can reduce wakeups, but you’ll need a separate waker event for timed UI updates if ever introduced.
-- Channel select instead of periodic polling: Using a select over channels (e.g., crossbeam-channel) would allow clean blocking on multiple sources (config events, system signals) without a tick. The current std::mpsc + short timeout keeps dependencies minimal and is already efficient.
-- Input thread using blocking read: Switching from crossterm::event::poll to blocking event::read can further reduce wakeups, but graceful shutdown then requires an interrupt mechanism; the current 16ms poll balances responsiveness and simple shutdown.
+- Blocking main loop (current): We now use a fully blocking recv for the main
+  event loop to reduce wakeups and idle CPU. Previously we used a short
+  recv_timeout; the switch simplifies control flow and shutdown.
+- Channel select: Using a select over multiple channels (e.g., crossbeam) can
+  provide more flexible waiting. Today we use std::mpsc plus dedicated
+  threads per source, which keeps dependencies minimal and behavior simple.
+- Input thread using blocking read: Switching from crossterm::event::poll to
+  blocking event::read can further reduce wakeups, but graceful shutdown then
+  requires an interrupt; the current 16ms poll balances responsiveness and
+  simple shutdown.
 
 ## Next Steps for Contributors
 

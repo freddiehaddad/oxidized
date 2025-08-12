@@ -59,3 +59,5 @@ You can set these globally with `--global` if you prefer.
 - Test: `cargo test` (close any running oxy.exe on Windows if test teardown
  fails to remove the binary)
 - Docs: Update README and/or docs/ when changing user-visible behavior
+ (architecture notes live in docs/ARCHITECTURE.md). For async syntax or
+ event-loop changes, ensure both README and ARCHITECTURE are updated.

@@ -206,54 +206,69 @@ Oxidized uses a revolutionary TOML-based configuration system that's both human-
 ### Editor Settings (`editor.toml`)
 
 ```toml
+# ###############################################################################
+# Oxidized Editor Configuration
+#
+# This file enumerates all supported settings with their default values.
+# Use :set for session-only changes (not persisted) and :setp for persistence.
+# ###############################################################################
+
 [display]
-show_line_numbers = false
-show_relative_numbers = true
-show_cursor_line = true
-color_scheme = "default"
-syntax_highlighting = true
-show_marks = true  # Show a mark's letter in the gutter/number column
+show_line_numbers = true     # Absolute line numbers
+show_relative_numbers = true # Relative line numbers
+show_cursor_line = true      # Highlight current line
+color_scheme = "default"     # Theme name from themes.toml
+syntax_highlighting = true   # Enable syntax highlighting
+show_marks = true            # Show marks in gutter
 
 [behavior]
-tab_width = 4
-expand_tabs = false
-auto_indent = true
-ignore_case = false
-smart_case = false
-highlight_search = true
-incremental_search = true
-wrap_lines = false
-line_break = false
+tab_width = 4             # Display width of a tab
+expand_tabs = false       # Insert spaces instead of tab chars
+auto_indent = true        # Maintain indentation on new lines
+ignore_case = false       # Case-insensitive search by default
+smart_case = false        # Override ignore_case when pattern has capitals
+highlight_search = true   # Highlight matches after a search
+incremental_search = true # Show matches while typing pattern
+wrap_lines = false        # Soft wrap long lines
+line_break = false        # Break lines at word boundaries when wrapping
 
 [editing]
-undo_levels = 1000
-persistent_undo = false
-backup = false
-swap_file = false
-auto_save = false
-text_object_timeout = 1000
-operator_pending_timeout = 1000
+undo_levels = 1000      # Max undo history entries
+persistent_undo = false # Persist undo history to disk
+backup = false          # Create backup files on write
+swap_file = false       # Create swap/backup for crash recovery
+auto_save = false       # Auto-save modified named buffers
 
 [interface]
-show_status_line = true
-status_line_format = "default"
-command_timeout = 1000
-show_command = true
-scroll_off = 3
-side_scroll_off = 0
-window_resize_amount = 1
-completion_menu_width = 36
-completion_menu_height = 8
-percent_path_root = true
+show_status_line = true    # Show status line
+command_timeout = 1000     # Mapping timeout (ms)
+show_command = true        # Show pending keys in statusline
+scroll_off = 0             # Context lines above/below cursor
+side_scroll_off = 0        # Horizontal context columns
+window_resize_amount = 1   # Amount for :resize commands
+completion_menu_width = 36 # Popup completion width (chars)
+completion_menu_height = 8 # Popup completion height (rows)
+percent_path_root = true   # % prefix roots paths at current buffer dir
+
+[statusline]
+show_indent = true   # Show current indent width (tabs/spaces)
+show_eol = true      # Show end-of-line style (LF/CRLF)
+show_encoding = true # Show file encoding (e.g., UTF-8)
+show_type = true     # Show detected language/filetype
+show_macro = true    # Show active macro recording register
+show_search = true   # Show current search pattern/status
+show_progress = true # Show buffer progress (line/percent)
+separator = "  "     # Spacing between right-aligned segments
 
 [languages]
-default_language = "text"
+# Default language used when detection fails
+default_language = "text" # Fallback language when no extension matches
 
 [languages.extensions]
-"rs" = "rust"
-"toml" = "toml"
-"md" = "markdown"
-"txt" = "text"
+md = "markdown" # Files ending in .md use Markdown
+toml = "toml"   # Files ending in .toml use TOML
+txt = "text"    # Plain text files
+rs = "rust"     # Rust source files
 ```
 
 Note: The left number column acts as a gutter. When `show_line_numbers` is false but
@@ -320,111 +335,123 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 ### Keymap Customization (`keymaps.toml`)
 
 ```toml
-# Default Keymaps Configuration
-# This file defines all keybindings for the editor
-# Format: key = "action" or key = { action = "command", args = ["arg1", "arg2"] }
+# ###############################################################################
+# Oxidized Keymaps Configuration
+#
+# This file enumerates all supported default keybindings. Each mapping has an
+# inline comment describing its purpose. You can customize or remove any map;
+# unspecified actions fall back to built-in defaults.
+#
+# Format:
+#   key = "action"
+#   key = { action = "command", args = ["arg1", "arg2"] }
+#
+# Notes:
+# - Some terminals intercept certain chords (e.g., Ctrl+V); alternatives are
+#   provided where practical (see Alt+v for Visual Block).
+# - After editing, save the file; the editor will live-reload keymaps.
+# ###############################################################################
 
 [normal_mode]
 # Movement
-"h" = "cursor_left"
-"j" = "cursor_down"
-"k" = "cursor_up"
-"l" = "cursor_right"
-"Left" = "cursor_left"
-"Down" = "cursor_down"
-"Up" = "cursor_up"
-"Right" = "cursor_right"
-
-"w" = "word_forward"
-"b" = "word_backward"
-"e" = "word_end"
-"0" = "line_start"
-"^" = "line_first_char"
-"$" = "line_end"
-"gg" = "buffer_start"
-"G" = "buffer_end"
+"h" = "cursor_left"         # Move cursor left
+"j" = "cursor_down"         # Move cursor down
+"k" = "cursor_up"           # Move cursor up
+"l" = "cursor_right"        # Move cursor right
+"Left" = "cursor_left"      # Arrow: move cursor left
+"Down" = "cursor_down"      # Arrow: move cursor down
+"Up" = "cursor_up"          # Arrow: move cursor up
+"Right" = "cursor_right"    # Arrow: move cursor right
+"w" = "word_forward"        # Move to start of next word
+"b" = "word_backward"       # Move to start of previous word
+"e" = "word_end"            # Move to end of next word
+"0" = "line_start"          # Go to column 0
+"^" = "line_first_char"     # Go to first non-blank character
+"$" = "line_end"            # Go to end of line
+"gg" = "buffer_start"       # Go to first line of buffer
+"G" = "buffer_end"          # Go to last line of buffer
 
 # Mode transitions
-"i" = "insert_mode"
-"I" = "insert_line_start"
-"a" = "insert_after"
-"A" = "insert_line_end"
-"o" = "insert_line_below"
-"O" = "insert_line_above"
-"v" = "visual_mode"
-"V" = "visual_line_mode"
-"Ctrl+v" = "visual_block_mode"
-"Alt+v" = "visual_block_mode" # Alternative for terminals that intercept Ctrl+V (e.g., VS Code)
-"R" = "replace_mode"
+"i" = "insert_mode"            # Insert before cursor
+"I" = "insert_line_start"      # Insert at start of line
+"a" = "insert_after"           # Insert after cursor
+"A" = "insert_line_end"        # Insert at end of line
+"o" = "insert_line_below"      # Open a new line below and insert
+"O" = "insert_line_above"      # Open a new line above and insert
+"v" = "visual_mode"            # Enter Visual (character) mode
+"V" = "visual_line_mode"       # Enter Visual Line mode
+"Ctrl+v" = "visual_block_mode" # Enter Visual Block mode
+"Alt+v" = "visual_block_mode"  # Alternative for terminals that intercept Ctrl+V (e.g., VS Code)
+"R" = "replace_mode"           # Enter Replace mode
 
 # Search
-"/" = "search_forward"
-"?" = "search_backward"
-"n" = "search_next"
-"N" = "search_previous"
+"/" = "search_forward"      # Start forward search
+"?" = "search_backward"     # Start backward search
+"n" = "search_next"         # Jump to next match
+"N" = "search_previous"     # Jump to previous match
 
 # Character navigation (find/till)
-"f" = "start_find_char_forward"
-"F" = "start_find_char_backward"
-"t" = "start_till_char_forward"
-"T" = "start_till_char_backward"
-";" = "repeat_char_search"
-"," = "repeat_char_search_reverse"
+"f" = "start_find_char_forward"    # Find next occurrence of a char to the right
+"F" = "start_find_char_backward"   # Find previous occurrence of a char to the left
+"t" = "start_till_char_forward"    # Move right before next occurrence of a char
+"T" = "start_till_char_backward"   # Move left after previous occurrence of a char
+";" = "repeat_char_search"         # Repeat last f/F/t/T in same direction
+"," = "repeat_char_search_reverse" # Repeat last f/F/t/T in opposite direction
 
 # Commands
-":" = "command_mode"
+":" = "command_mode"        # Enter command-line (ex) mode
 
 # Delete operations
-"x" = "delete_char_at_cursor"
-"X" = "delete_char_before_cursor"
-"dd" = "delete_line"
-"D" = "delete_to_end_of_line"
+"x" = "delete_char_at_cursor"     # Delete character under cursor
+"X" = "delete_char_before_cursor" # Delete character before cursor
+"dd" = "delete_line"              # Delete current line
+"D" = "delete_to_end_of_line"     # Delete from cursor to end of line
 
 # Line operations
-"J" = "join_lines"
-"C" = "change_to_end_of_line"
-"S" = "change_entire_line"
-"s" = "substitute_char"
+"J" = "join_lines"                # Join next line to current
+"C" = "change_to_end_of_line"     # Change from cursor to end of line
+"S" = "change_entire_line"        # Change entire line
+"s" = "substitute_char"           # Replace character under cursor
 
 # Bracket matching
-"%" = "bracket_match"
+"%" = "bracket_match"             # Jump to matching bracket/brace
 
 # Paragraph movement
-"{" = "paragraph_backward"
-"}" = "paragraph_forward"
+"{" = "paragraph_backward"        # Move to previous paragraph
+"}" = "paragraph_forward"         # Move to next paragraph
 
 # Sentence movement
-"(" = "sentence_backward"
+"(" = "sentence_backward"         # Move to previous sentence
 
-")" = "sentence_forward"
+")" = "sentence_forward"          # Move to next sentence
 
 # Section movement
-"[[" = "section_backward"
+"[[" = "section_backward"         # Move to previous section
 
-"]]" = "section_forward"
+"]]" = "section_forward"          # Move to next section
 
 # Repeat operations
-"." = "repeat_last_change"
+"." = "repeat_last_change"        # Repeat last change
 
 # Operators (enter operator-pending mode)
-"d" = "operator_delete"
-"c" = "operator_change"
-"y" = "operator_yank"
-">" = "operator_indent"
-"<" = "operator_unindent"
-"~" = "operator_toggle_case"
+"d" = "operator_delete"            # Delete operator (awaits motion/text object)
+"c" = "operator_change"            # Change operator (delete then insert)
+"y" = "operator_yank"              # Yank (copy) operator
+">" = "operator_indent"            # Indent operator
+"<" = "operator_unindent"          # Unindent operator
+"~" = "operator_toggle_case"       # Toggle case operator
 
 # Yank (copy) operations
-"yy" = "yank_line"
-"yw" = "yank_word"
-"y$" = "yank_to_end_of_line"
+"yy" = "yank_line"                 # Yank (copy) current line
+"yw" = "yank_word"                 # Yank word
+"y$" = "yank_to_end_of_line"       # Yank to end of line
 
 # Put (paste) operations
-"p" = "put_after"
-"P" = "put_before"
+"p" = "put_after"                  # Paste after cursor/line
+"P" = "put_before"                 # Paste before cursor/line
 
 # File operations
-"Ctrl+s" = "save_file"
+"Ctrl+s" = "save_file"             # Save file
 
 # Macro operations
 "q" = "start_macro_recording"  # q{register} - start/stop recording
@@ -436,12 +463,12 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 "`" = "mark_jump_exact"        # `{register} - jump to exact position of mark
 
 # Undo/Redo
-"u" = "undo"
-"Ctrl+r" = "redo"
+"u" = "undo"                       # Undo last change
+"Ctrl+r" = "redo"                  # Redo
 
 # Buffer management
-"Ctrl+n" = "buffer_next"
-"Ctrl+p" = "buffer_previous"
+"Ctrl+n" = "buffer_next"           # Next buffer
+"Ctrl+p" = "buffer_previous"       # Previous buffer
 
 # Scrolling operations (Vim-style)
 "Ctrl+e" = "scroll_down_line"      # Scroll down one line
@@ -457,8 +484,8 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 "zb" = "cursor_to_bottom" # Move current line to bottom of viewport
 
 # Alternative center commands
-"z." = "center_cursor"     # Center current line (alternative)
-"z-" = "cursor_to_bottom"  # Move current line to bottom (alternative)
+"z." = "center_cursor"      # Center current line (alternative)
+"z-" = "cursor_to_bottom"   # Move current line to bottom (alternative)
 "z Enter" = "cursor_to_top" # Move current line to top (alternative)
 
 # Window/Split navigation
@@ -490,10 +517,10 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 "Ctrl+w -" = "resize_window_shorter"  # Make window shorter
 
 # Additional navigation keys
-"Home" = "line_start"
-"End" = "line_end"
-"PageUp" = "scroll_up_page"     # Map PageUp to scroll up page
-"PageDown" = "scroll_down_page" # Map PageDown to scroll down page
+"Home" = "line_start"              # Go to start of line
+"End" = "line_end"                 # Go to end of line
+"PageUp" = "scroll_up_page"        # Map PageUp to scroll up page
+"PageDown" = "scroll_down_page"    # Map PageDown to scroll down page
 
 # Function keys for common operations
 "F1" = "command_mode"   # Help/command mode
@@ -503,127 +530,127 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 
 [insert_mode]
 # Basic editing
-"Char" = "insert_char"
-"Enter" = "new_line"
-"Backspace" = "delete_char"
-"Delete" = "delete_char_forward"
-"Tab" = "insert_tab"
+"Char" = "insert_char"           # Insert typed character
+"Enter" = "new_line"             # Insert newline
+"Backspace" = "delete_char"      # Delete character before cursor
+"Delete" = "delete_char_forward" # Delete character under cursor
+"Tab" = "insert_tab"             # Insert a tab character or spaces
 
 # Movement in insert mode
-"Left" = "cursor_left"
-"Right" = "cursor_right"
-"Up" = "cursor_up"
-"Down" = "cursor_down"
+"Left" = "cursor_left"          # Move cursor left
+"Right" = "cursor_right"        # Move cursor right
+"Up" = "cursor_up"              # Move cursor up
+"Down" = "cursor_down"          # Move cursor down
 
 # Mode transitions
-"Escape" = "normal_mode"
-"Ctrl+c" = "normal_mode"
+"Escape" = "normal_mode"         # Return to Normal mode
+"Ctrl+c" = "normal_mode"         # Return to Normal mode
 
 # Additional navigation in insert mode
-"Home" = "line_start"
-"End" = "line_end"
-"Ctrl+a" = "line_start"
-"Ctrl+e" = "line_end"
-"Ctrl+w" = "delete_word_backward"
+"Home" = "line_start"            # Move to start of line
+"End" = "line_end"               # Move to end of line
+"Ctrl+a" = "line_start"          # Move to start of line
+"Ctrl+e" = "line_end"            # Move to end of line
+"Ctrl+w" = "delete_word_backward" # Delete previous word
 
 [command_mode]
 # Command execution
-"Enter" = "execute_command"
-"Escape" = "normal_mode"
-"Ctrl+c" = "normal_mode"
+"Enter" = "execute_command"   # Run the typed command
+"Escape" = "normal_mode"      # Cancel and return to Normal mode
+"Ctrl+c" = "normal_mode"      # Cancel and return to Normal mode
 
 # Editing command line
-"Char" = "append_command"
-"Backspace" = "delete_command_char"
+"Char" = "append_command"           # Add character to command line
+"Backspace" = "delete_command_char" # Delete last command character
 
 # Command completion
-"Tab" = "command_complete"
-"Ctrl+n" = "completion_next"
-"Ctrl+p" = "completion_previous"
-"Ctrl+y" = "completion_accept"
+"Tab" = "command_complete"       # Trigger command completion
+"Ctrl+n" = "completion_next"     # Next completion item
+"Ctrl+p" = "completion_previous" # Previous completion item
+"Ctrl+y" = "completion_accept"   # Accept completion
 
 [visual_mode]
 # Movement (inherits from normal mode)
-"h" = "cursor_left"
-"j" = "cursor_down"
-"k" = "cursor_up"
-"l" = "cursor_right"
-"w" = "word_forward"
-"b" = "word_backward"
-"0" = "line_start"
-"$" = "line_end"
+"h" = "cursor_left"     # Extend left
+"j" = "cursor_down"     # Extend down
+"k" = "cursor_up"       # Extend up
+"l" = "cursor_right"    # Extend right
+"w" = "word_forward"    # Extend to next word start
+"b" = "word_backward"   # Extend to previous word start
+"0" = "line_start"      # Extend to start of line
+"$" = "line_end"        # Extend to end of line
 
 # Actions
-"d" = "delete_selection"
-"y" = "yank_selection"
-"c" = "change_selection"
+"d" = "delete_selection" # Delete selection
+"y" = "yank_selection"   # Copy selection
+"c" = "change_selection" # Change selection
 
 # Mode transitions
-"Escape" = "normal_mode"
-"v" = "normal_mode"
+"Escape" = "normal_mode"  # Return to Normal mode
+"v" = "normal_mode"       # Toggle Visual off
 
 [visual_line_mode]
 # Movement (inherits from normal mode)
-"h" = "cursor_left"
-"j" = "cursor_down"
-"k" = "cursor_up"
-"l" = "cursor_right"
-"w" = "word_forward"
-"b" = "word_backward"
-"0" = "line_start"
-"$" = "line_end"
+"h" = "cursor_left"   # Extend left by lines
+"j" = "cursor_down"   # Extend down by lines
+"k" = "cursor_up"     # Extend up by lines
+"l" = "cursor_right"  # Extend right by lines
+"w" = "word_forward"  # Extend to next word start
+"b" = "word_backward" # Extend to previous word start
+"0" = "line_start"    # Extend to start of line
+"$" = "line_end"      # Extend to end of line
 
 # Actions
-"d" = "delete_selection"
-"y" = "yank_selection"
-"c" = "change_selection"
+"d" = "delete_selection" # Delete selected lines
+"y" = "yank_selection"   # Copy selected lines
+"c" = "change_selection" # Change selected lines
 
 # Mode transitions
-"Escape" = "normal_mode"
-"V" = "normal_mode"
-"v" = "visual_mode"
+"Escape" = "normal_mode" # Return to Normal mode
+"V" = "normal_mode"      # Toggle Visual Line off
+"v" = "visual_mode"      # Switch to Visual (character)
 
 [visual_block_mode]
 # Movement (inherits from normal mode)
-"h" = "cursor_left"
-"j" = "cursor_down"
-"k" = "cursor_up"
-"l" = "cursor_right"
-"w" = "word_forward"
-"b" = "word_backward"
-"0" = "line_start"
-"$" = "line_end"
+"h" = "cursor_left"   # Extend block left
+"j" = "cursor_down"   # Extend block down
+"k" = "cursor_up"     # Extend block up
+"l" = "cursor_right"  # Extend block right
+"w" = "word_forward"  # Extend to next word start
+"b" = "word_backward" # Extend to previous word start
+"0" = "line_start"    # Extend to start of line
+"$" = "line_end"      # Extend to end of line
 
 # Actions
-"d" = "delete_selection"
-"y" = "yank_selection"
-"c" = "change_selection"
+"d" = "delete_selection" # Delete block
+"y" = "yank_selection"   # Copy block
+"c" = "change_selection" # Change block
 
 # Mode transitions
-"Escape" = "normal_mode"
-"Ctrl+v" = "normal_mode"
-"Alt+v" = "normal_mode" # Alternative exit for Visual Block
-"v" = "visual_mode"
+"Escape" = "normal_mode" # Return to Normal mode
+"Ctrl+v" = "normal_mode" # Toggle Visual Block off
+"Alt+v" = "normal_mode"  # Toggle Visual Block off (alternative)
+"v" = "visual_mode"      # Switch to Visual (character)
 
 [replace_mode]
 # Character replacement
-"Char" = "replace_char"
-"Escape" = "normal_mode"
-"Ctrl+c" = "normal_mode"
+"Char" = "replace_char"   # Replace character under cursor, then advance
+"Escape" = "normal_mode"  # Return to Normal mode
+"Ctrl+c" = "normal_mode"  # Return to Normal mode
 
 [search_mode]
 # Search input
-"Char" = "append_search"
-"Enter" = "execute_search"
-"Escape" = "normal_mode"
-"Ctrl+c" = "normal_mode"
-"Backspace" = "delete_search_char"
+"Char" = "append_search"   # Add character to search pattern
+"Enter" = "execute_search" # Execute current search
+"Escape" = "normal_mode"   # Cancel search
+"Ctrl+c" = "normal_mode"   # Cancel search
+"Backspace" = "delete_search_char" # Delete last search character
 
 [operator_pending_mode]
 # Compound operator sequences (when already in operator-pending mode)
-"d" = "delete_line"     # dd - delete current line (second d when already in OP mode)
-"c" = "change_entire_line" # cc - change current line  
-"y" = "yank_line"       # yy - yank current line
+"d" = "delete_line"         # dd - delete current line (second d when already in OP mode)
+"c" = "change_entire_line"  # cc - change current line  
+"y" = "yank_line"           # yy - yank current line
 
 # Text objects for operators
 # Word text objects
@@ -676,8 +703,8 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 "at" = "text_object_at" # a tag
 
 # Escape to cancel operator
-"Escape" = "normal_mode"
-"Ctrl+c" = "normal_mode"
+"Escape" = "normal_mode" # Cancel operator
+"Ctrl+c" = "normal_mode" # Cancel operator
 ```
 
 ### Theme Configuration (`themes.toml`)
@@ -685,7 +712,22 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 The `plain_text` key controls the default color for text that has no specific syntax highlight.
 
 ```toml
-# Theme configuration for oxidized editor
+# ###############################################################################
+# Oxidized Theme Configuration
+#
+# This file enumerates all supported UI and syntax theme colors, with inline
+# comments describing each key’s purpose. Define one or more themes under
+# the [themes.<name>] tables and select the active theme via [theme].current
+# (or by setting display.color_scheme in editor.toml / using :setp).
+#
+# Notes:
+# - All keys are optional for a theme; unspecified colors fall back to
+#   built-in defaults.
+# - UI colors live under [themes.<name>.ui] (and nested tables like
+#   [.ui.statusline], [.ui.mode]); syntax colors live under
+#   [themes.<name>.tree_sitter].
+# ###############################################################################
+
 [theme]
 current = "default"
 
@@ -694,72 +736,73 @@ name = "Rust Theme"
 description = "Rust-inspired color palette with warm oranges and earth tones"
 
 [themes.default.ui]
-background = "#1f1611"
-status_bg = "#ce422b"
-status_fg = "#cccccc"
-status_modified = "#f74c00"
-line_number = "#8c6239"
-line_number_current = "#deb887"
-mark_indicator = "#e6b422"   # Color of the mark letter shown in gutter/number column
-cursor_line_bg = "#2d2318"
-empty_line = "#4a3728"
-command_line_bg = "#1f1611"
-command_line_fg = "#deb887"
-selection_bg = "#8c4a2b"
+background = "#1f1611"          # Editor background
+status_bg = "#ce422b"           # Statusline background
+status_fg = "#cccccc"           # Statusline foreground text
+status_modified = "#f74c00"     # Statusline accent when buffer is modified
+line_number = "#8c6239"         # Gutter line numbers
+line_number_current = "#deb887" # Current line number highlight
+mark_indicator = "#e6b422"      # Golden mark label in number column
+cursor_line_bg = "#2d2318"      # Current cursor line background
+empty_line = "#4a3728"          # Filler for lines past end-of-file
+command_line_bg = "#1f1611"     # ':' command-line background
+command_line_fg = "#deb887"     # ':' command-line text color
+completion_key_fg = "#deb887"   # Completion popup: canonical key column (defaults to command_line_fg if omitted)
+completion_alias_fg = "#cccccc" # Completion popup: alias column (defaults to command_line_fg if omitted)
+completion_value_fg = "#ffe6c7" # Completion popup: value column (defaults to command_line_fg if omitted)
+selection_bg = "#8c4a2b"        # Generic selection background (fallback)
 visual_line_bg = "#8c4a2b"      # Line-wise visual selection background
-visual_char_bg = "#7a3f28"      # Character-wise visual selection background
-visual_block_bg = "#9a5235"     # Block-wise visual selection background
-warning = "#ff8c00"
-error = "#dc322f"
+visual_char_bg = "#7a3f28"      # Character-wise visual selection background  
+visual_block_bg = "#9a5235"     # Block-wise visual selection background (future)
+warning = "#ff8c00"             # Warning text/accent color
+error = "#dc322f"               # Error text/accent color
 
-# Optional: granular status line colors per segment (fallbacks to status_bg/status_fg)
 [themes.default.ui.statusline]
-left_bg = "#ce422b"
-left_fg = "#cccccc"
-mid_bg = "#ce422b"
-mid_fg = "#cccccc"
-right_bg = "#ce422b"
-right_fg = "#cccccc"
+left_bg = "#ce422b"   # Left segment background
+left_fg = "#cccccc"   # Left segment text
+mid_bg = "#ce422b"    # Middle segment background
+mid_fg = "#cccccc"    # Middle segment text
+right_bg = "#ce422b"  # Right segment background
+right_fg = "#cccccc"  # Right segment text
 
-# Optional: per-mode colors for the mode token in the status line
 [themes.default.ui.mode]
-normal_bg = "#ce422b"
-normal_fg = "#ffffff"
-insert_bg = "#ce422b"
-insert_fg = "#ffe6c7"
-visual_bg = "#ce422b"
-visual_fg = "#fff3da"
-visual_line_bg = "#ce422b"
-visual_line_fg = "#ffedd5"
-visual_block_bg = "#ce422b"
-visual_block_fg = "#fffbeb"
-replace_bg = "#ce422b"
-replace_fg = "#ffd1c1"
-command_bg = "#ce422b"
-command_fg = "#ffffff"
+normal_bg = "#ce422b"       # Statusline mode badge background (Normal)
+normal_fg = "#ffffff"       # Statusline mode badge text (Normal)
+insert_bg = "#ce422b"       # Statusline mode badge background (Insert)
+insert_fg = "#ffe6c7"       # Statusline mode badge text (Insert)
+visual_bg = "#ce422b"       # Statusline mode badge background (Visual)
+visual_fg = "#fff3da"       # Statusline mode badge text (Visual)
+visual_line_bg = "#ce422b"  # Statusline mode badge background (Visual Line)
+visual_line_fg = "#ffedd5"  # Statusline mode badge text (Visual Line)
+visual_block_bg = "#ce422b" # Statusline mode badge background (Visual Block)
+visual_block_fg = "#fffbeb" # Statusline mode badge text (Visual Block)
+replace_bg = "#ce422b"      # Statusline mode badge background (Replace)
+replace_fg = "#ffd1c1"      # Statusline mode badge text (Replace)
+command_bg = "#ce422b"      # Statusline mode badge background (Command)
+command_fg = "#ffffff"      # Statusline mode badge text (Command)
 
 [themes.default.tree_sitter]
 # Rust-inspired color scheme with warm earth tones
-plain_text = "#deb887"   # Default text color when no syntax mapping applies
-keyword = "#ce422b"  # Rust orange for keywords (fn, let, pub, etc.)
-function = "#b58900" # Golden brown for function names
-type = "#268bd2"     # Steel blue for types (keeps contrast)
-string = "#859900"   # Olive green for strings
-number = "#d33682"   # Magenta for numbers (good contrast)
-comment = "#93a1a1"  # Light gray for comments
+plain_text = "#deb887"     # Default text color (no specific syntax)
+keyword = "#ce422b"        # Keywords (fn, let, pub, if, else, return)
+function = "#b58900"       # Function and method names
+type = "#268bd2"           # Types, structs, enums, traits
+string = "#859900"         # String literals
+number = "#d33682"         # Numeric literals
+comment = "#93a1a1"        # Comments
 # Everything else uses warm foreground color
-identifier = "#deb887"    # Burlywood for identifiers
-variable = "#deb887"      # Burlywood for variables
-operator = "#cb4b16"      # Orange-red for operators
-punctuation = "#839496"   # Gray for punctuation
-delimiter = "#839496"     # Gray for delimiters
-character = "#859900"     # Same as strings
-documentation = "#586e75" # Darker gray for docs
-preprocessor = "#6c71c4"  # Purple for preprocessor
-macro = "#dc322f"         # Red for macros
-attribute = "#2aa198"     # Cyan for attributes
-label = "#cb4b16"         # Orange for labels
-constant = "#d33682"      # Same as numbers
+identifier = "#deb887"     # Identifiers (generic)
+variable = "#deb887"       # Variables and bindings
+operator = "#cb4b16"       # Operators (+, -, *, /, =, ==, etc.)
+punctuation = "#839496"    # Punctuation (commas, periods)
+delimiter = "#839496"      # Delimiters (brackets, braces, parentheses)
+character = "#859900"      # Character literals
+documentation = "#586e75"  # Documentation comments
+preprocessor = "#6c71c4"   # Preprocessor/attributes directives
+macro = "#dc322f"          # Macro invocations/definitions
+attribute = "#2aa198"      # Attributes/annotations
+label = "#cb4b16"          # Labels and lifetimes
+constant = "#d33682"       # Constants
 ```
 
 ## 🏗️ Architecture Overview
@@ -779,9 +822,12 @@ Developer docs and diagrams:
 
 **Rendering Pipeline:**
 
-- **Async Syntax Highlighter**: Background Tree-sitter processing with priority queues
+- **Async Syntax Highlighter**: Dedicated worker thread with request
+   coalescing, priority levels, and a versioned results pipeline. A dispatcher
+   thread applies results to an LRU cache and triggers redraws.
 - **Viewport Manager**: Efficient screen updates with scroll optimization
-- **Terminal Interface**: Cross-platform terminal handling with alternate screen support
+- **Terminal Interface**: Cross-platform terminal handling with alternate
+   screen support
 - **Unicode Engine**: UTF-8 safe, grapheme-cluster aware width calculation
 
 **Configuration Framework:**
@@ -794,10 +840,19 @@ Developer docs and diagrams:
 ### Performance Features
 
 - **Efficient Rendering**: Minimized redraws and buffered terminal updates
-- **Background Processing**: Syntax highlighting and file operations run asynchronously
-- **Memory Management**: Rust's ownership system ensures memory safety without garbage collection
-- **Pragmatic Data Structures**: Efficient line-based model today; advanced gap/rope structures are planned
-- **Fast Search Path (ASCII)**: Case-insensitive search uses an ASCII fast path to avoid per-line lowercase allocations when possible; Unicode-insensitive search preserves exact matching semantics
+- **Background Processing**: Syntax highlighting runs asynchronously via a
+   worker thread and event-driven dispatcher
+- **Versioned Results**: A monotonic token prevents stale highlight results
+   from being applied after scroll/resize/theme changes
+- **Bounded Cache**: A small in-memory LRU stores per-line highlights for fast
+   reuse without unbounded growth
+- **Memory Management**: Rust's ownership system ensures memory safety without
+   garbage collection
+- **Pragmatic Data Structures**: Efficient line-based model today; advanced
+   gap/rope structures are planned
+- **Fast Search Path (ASCII)**: Case-insensitive search uses an ASCII fast
+   path to avoid per-line lowercase allocations when possible; Unicode-
+   insensitive search preserves exact matching semantics
 
 ## 📋 Feature Status
 
@@ -854,8 +909,8 @@ Developer docs and diagrams:
 
 **Syntax Highlighting:**
 
-- Async Tree-sitter integration with background processing
-- Priority-based syntax highlighting for visible regions
+- Async Tree-sitter worker with versioned results and a dispatcher thread
+- Priority-based requests (Critical: cursor line, High: viewport, Medium: nearby)
 - Rust language support with semantic color schemes
 - Configurable themes with semantic color meaning
 
@@ -995,6 +1050,12 @@ Notes:
 
 - If `RUST_LOG` is unset, Oxidized uses `debug` in debug builds and `info` in release builds.
 - Logs are appended to `oxidized.log`. If the file cannot be created, logging falls back to stderr.
+
+### Event-driven runtime and quit behavior
+
+Oxidized’s main event loop now blocks on events. Exiting with `:q` or `:q!`
+sets a quit flag; the loop checks this immediately after handling any event,
+ensuring prompt exit without waiting for further input.
 
 #### **Module-Specific Logging**
 

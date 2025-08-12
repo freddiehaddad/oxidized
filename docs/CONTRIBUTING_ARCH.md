@@ -20,7 +20,10 @@ This guide complements CONTRIBUTING.md with deeper technical context to help you
 - Rendering tweaks: src/ui/renderer.rs (avoid unnecessary full redraws; keep width/grapheme correctness).
 - Buffer mutations: src/core/buffer.rs (ensure undo/redo deltas and grapheme safety).
 - Configurable behavior: src/config/** (update schema, defaults, hot-reload, :set wiring).
-- Async/background: consider event-driven flows via src/input/event_driven.rs and events.rs.
+- Async/background: prefer event-driven flows via src/input/event_driven.rs and
+ events.rs. The async syntax worker lives in src/features/syntax.rs and sends
+ results over a channel consumed by the dispatcher thread in
+ src/input/event_driven.rs.
 
 ## Adding a Feature: Mini-Checklist
 
@@ -28,6 +31,17 @@ This guide complements CONTRIBUTING.md with deeper technical context to help you
 - Add or update tests in tests/ or src/**/tests.rs.
 - Implement minimal change; keep public APIs stable.
 - Verify: build, clippy -D warnings, tests, manual smoke (optional).
+
+## Architecture Notes
+
+- The main event loop blocks on events (no periodic tick). The input thread
+ polls at 16ms to remain responsive, and config watcher blocks on file
+ events. The syntax results dispatcher thread blocks on a channel.
+- Async syntax uses a bounded work queue, coalescing by (buffer,line) with
+ priority, and a monotonic version token. Results older than the current
+ version are dropped before applying.
+- A small LRU cache limits per-line highlight storage; cache stats are exposed
+ via the editor for debugging.
 
 ## Architecture Diagrams
 
