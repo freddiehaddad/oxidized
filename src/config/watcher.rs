@@ -155,4 +155,16 @@ impl ConfigWatcher {
             Err(_) => None,
         }
     }
+
+    /// Wait indefinitely for the next configuration change.
+    /// Returns None if the watcher channel is disconnected (e.g., on shutdown).
+    pub fn wait_for_change_blocking(&self) -> Option<ConfigChangeEvent> {
+        match self.receiver.recv() {
+            Ok(event) => {
+                log::debug!("Config change detected: {:?}", event);
+                Some(event)
+            }
+            Err(_) => None,
+        }
+    }
 }

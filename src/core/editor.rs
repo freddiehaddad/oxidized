@@ -228,11 +228,6 @@ impl Editor {
         self.config.interface.command_timeout
     }
 
-    /// Get config hot-reload poll interval in ms
-    pub fn config_poll_ms(&self) -> u64 {
-        self.config.interface.config_poll_ms
-    }
-
     /// Get syntax refresh poll interval in ms
     pub fn syntax_poll_ms(&self) -> u64 {
         self.config.interface.syntax_poll_ms

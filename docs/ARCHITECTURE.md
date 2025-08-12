@@ -22,7 +22,6 @@ This document gives contributors a high-level and practical overview of how Oxid
 
 - The main loop and input polling share a unified tick (EVENT_TICK_MS, default 16ms) to keep cadence simple and responsive.
 - Background polling is configurable via editor.toml:
-  - interface.config_poll_ms (default 500)
   - interface.syntax_poll_ms (default 100)
 - These values can be tuned at runtime via hot reload; the event threads read them before each sleep.
 

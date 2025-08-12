@@ -537,49 +537,52 @@ impl EventDrivenEditor {
             info!("Config watcher thread started");
 
             loop {
-                // Block waiting for watcher events with a timeout, avoiding fixed sleeps
-                let timeout_ms = if let Ok(ed) = editor.lock() {
-                    ed.config_poll_ms()
-                } else {
-                    500
+                // Block waiting for watcher events; no polling/timeout
+                // We take the lock only to get the watcher reference, then drop it
+                let maybe_event = {
+                    if let Ok(ed) = editor.lock() {
+                        if let Some(ref watcher) = ed.config_watcher {
+                            // Blocking receive; returns None if channel disconnects
+                            watcher.wait_for_change_blocking()
+                        } else {
+                            // No watcher available; exit thread
+                            None
+                        }
+                    } else {
+                        None
+                    }
                 };
 
-                // Check quit flag before blocking
-                if let Ok(ed) = editor.try_lock()
-                    && ed.should_quit()
-                {
+                // If the watcher channel closed or watcher missing, exit
+                let Some(first_event) = maybe_event else {
                     break;
-                }
+                };
 
-                // Wait for a single change, then drain any queued ones
+                // Build list with first event and any queued ones
+                let mut changes = vec![first_event];
                 if let Ok(ed) = editor.lock()
                     && let Some(ref watcher) = ed.config_watcher
                 {
-                    let first = watcher.wait_for_change(Duration::from_millis(timeout_ms));
-                    let mut changes = Vec::new();
-                    if let Some(ev) = first {
-                        changes.push(ev);
-                        // Drain any additional pending events without waiting
-                        changes.extend(watcher.check_for_changes());
-                    }
+                    // Drain any additional pending events without waiting
+                    changes.extend(watcher.check_for_changes());
+                }
 
-                    for change in changes {
-                        let event = match change {
-                            crate::config::watcher::ConfigChangeEvent::EditorConfigChanged => {
-                                EditorEvent::Config(ConfigEvent::EditorConfigChanged)
-                            }
-                            crate::config::watcher::ConfigChangeEvent::KeymapConfigChanged => {
-                                EditorEvent::Config(ConfigEvent::KeymapConfigChanged)
-                            }
-                            crate::config::watcher::ConfigChangeEvent::ThemeConfigChanged => {
-                                EditorEvent::Config(ConfigEvent::ThemeConfigChanged)
-                            }
-                        };
-
-                        if let Err(e) = sender.send(event) {
-                            error!("Failed to send config event: {}", e);
-                            return;
+                for change in changes {
+                    let event = match change {
+                        crate::config::watcher::ConfigChangeEvent::EditorConfigChanged => {
+                            EditorEvent::Config(ConfigEvent::EditorConfigChanged)
                         }
+                        crate::config::watcher::ConfigChangeEvent::KeymapConfigChanged => {
+                            EditorEvent::Config(ConfigEvent::KeymapConfigChanged)
+                        }
+                        crate::config::watcher::ConfigChangeEvent::ThemeConfigChanged => {
+                            EditorEvent::Config(ConfigEvent::ThemeConfigChanged)
+                        }
+                    };
+
+                    if let Err(e) = sender.send(event) {
+                        error!("Failed to send config event: {}", e);
+                        return;
                     }
                 }
             }
@@ -649,6 +652,11 @@ impl EventDrivenEditor {
     /// Shutdown all background threads
     fn shutdown(&mut self) -> Result<()> {
         info!("Shutting down event-driven editor");
+
+        // Drop config watcher to unblock the blocking watcher thread recv
+        if let Ok(mut editor) = self.editor.lock() {
+            editor.config_watcher = None;
+        }
 
         // Signal all threads to shutdown
         let _ = self.shutdown_sender.send(());
