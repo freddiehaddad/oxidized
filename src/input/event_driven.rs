@@ -537,39 +537,48 @@ impl EventDrivenEditor {
             info!("Config watcher thread started");
 
             loop {
-                // Poll at a steady interval (configurable)
-                let sleep_ms = if let Ok(ed) = editor.lock() {
+                // Block waiting for watcher events with a timeout, avoiding fixed sleeps
+                let timeout_ms = if let Ok(ed) = editor.lock() {
                     ed.config_poll_ms()
                 } else {
                     500
                 };
-                thread::sleep(Duration::from_millis(sleep_ms));
 
-                if let Ok(editor) = editor.try_lock() {
-                    if editor.should_quit() {
-                        break;
+                // Check quit flag before blocking
+                if let Ok(ed) = editor.try_lock()
+                    && ed.should_quit()
+                {
+                    break;
+                }
+
+                // Wait for a single change, then drain any queued ones
+                if let Ok(ed) = editor.lock()
+                    && let Some(ref watcher) = ed.config_watcher
+                {
+                    let first = watcher.wait_for_change(Duration::from_millis(timeout_ms));
+                    let mut changes = Vec::new();
+                    if let Some(ev) = first {
+                        changes.push(ev);
+                        // Drain any additional pending events without waiting
+                        changes.extend(watcher.check_for_changes());
                     }
 
-                    // Check for config changes
-                    if let Some(ref watcher) = editor.config_watcher {
-                        let changes = watcher.check_for_changes();
-                        for change in changes {
-                            let event = match change {
-                                crate::config::watcher::ConfigChangeEvent::EditorConfigChanged => {
-                                    EditorEvent::Config(ConfigEvent::EditorConfigChanged)
-                                }
-                                crate::config::watcher::ConfigChangeEvent::KeymapConfigChanged => {
-                                    EditorEvent::Config(ConfigEvent::KeymapConfigChanged)
-                                }
-                                crate::config::watcher::ConfigChangeEvent::ThemeConfigChanged => {
-                                    EditorEvent::Config(ConfigEvent::ThemeConfigChanged)
-                                }
-                            };
-
-                            if let Err(e) = sender.send(event) {
-                                error!("Failed to send config event: {}", e);
-                                return;
+                    for change in changes {
+                        let event = match change {
+                            crate::config::watcher::ConfigChangeEvent::EditorConfigChanged => {
+                                EditorEvent::Config(ConfigEvent::EditorConfigChanged)
                             }
+                            crate::config::watcher::ConfigChangeEvent::KeymapConfigChanged => {
+                                EditorEvent::Config(ConfigEvent::KeymapConfigChanged)
+                            }
+                            crate::config::watcher::ConfigChangeEvent::ThemeConfigChanged => {
+                                EditorEvent::Config(ConfigEvent::ThemeConfigChanged)
+                            }
+                        };
+
+                        if let Err(e) = sender.send(event) {
+                            error!("Failed to send config event: {}", e);
+                            return;
                         }
                     }
                 }

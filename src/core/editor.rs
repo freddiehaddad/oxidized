@@ -1390,15 +1390,12 @@ impl Editor {
                 }
             }
             "colorscheme" | "colo" => {
-                // Update theme configuration to match the new colorscheme
+                // Update in-memory theme selection to reflect UI immediately
                 self.theme_config.set_current_theme(value);
-                if let Err(e) = self.theme_config.save() {
-                    warn!("Failed to save theme configuration: {}", e);
-                }
                 self.ui.set_theme(value);
 
-                // TODO: Update async syntax highlighter with new color scheme
-                // This will require a new method on AsyncSyntaxHighlighter
+                // Do not write themes.toml here; user manages that file. The
+                // config watcher will trigger reloads if the user edits it.
             }
             "ignorecase" | "ic" | "smartcase" | "scs" => {
                 self.apply_search_settings();
@@ -1709,10 +1706,12 @@ impl Editor {
 
     /// Reload UI theme from themes.toml
     pub fn reload_ui_theme(&mut self) {
-        // Brief delay to ensure file write is complete
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        // Reload theme configuration to pick up any external changes
+        if let Err(e) = self.theme_config.reload() {
+            log::warn!("Failed to reload theme configuration: {}", e);
+        }
 
-        // Get the current theme name from the theme configuration
+        // Get the current theme name from the (re)loaded theme configuration
         let current_theme = self.theme_config.current_theme_name();
 
         log::info!("Reloading UI theme to: {}", current_theme);

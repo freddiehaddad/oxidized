@@ -285,12 +285,7 @@ impl ThemeConfig {
         }
     }
 
-    /// Save theme configuration to themes.toml
-    pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let toml_string = toml::to_string_pretty(self)?;
-        fs::write("themes.toml", toml_string)?;
-        Ok(())
-    }
+    // Intentionally no save() for ThemeConfig: themes.toml is user-managed only.
 
     /// Get the current active theme as a CompleteTheme
     pub fn get_current_theme(&self) -> CompleteTheme {
