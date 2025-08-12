@@ -16,11 +16,11 @@ This document gives contributors a high-level and practical overview of how Oxid
 ## Key Runtime Flow
 
 1. main.rs initializes logging and creates an Editor.
-2. EventDrivenEditor wraps Editor and spawns threads (input, config watch, syntax, render stub) and an event bus.
+2. EventDrivenEditor wraps Editor and spawns threads (input, config watch, render stub) and an event bus. Syntax is refreshed event-driven (no background syntax thread).
 
 ### Timing and Cadence
 
-- The main loop and input polling share a unified tick (EVENT_TICK_MS, default 16ms) to keep cadence simple and responsive.
+- The input thread uses crossterm polling with EVENT_TICK_MS (default 16ms) to stay responsive; the main loop blocks on events and wakes only when events arrive.
 
 1. Input thread reads terminal events and sends Input events.
 2. EventDrivenEditor processes events, mutates Editor as needed, and sends UI RedrawRequest when state changes.
@@ -28,6 +28,7 @@ This document gives contributors a high-level and practical overview of how Oxid
 
 Sequence (input → state → render):
 
+```text
   +-------------+     +--------------------+     +-----------+
   |  Terminal   | --> | Input/Event Thread | --> |  Editor   |
   +-------------+     +--------------------+     +-----------+
@@ -37,6 +38,7 @@ Sequence (input → state → render):
                                            +--------+   +-----------+
                                            |  UI    |<- | Renderer  |
                                            +--------+   +-----------+
+```
 
 ## Data Model
 
@@ -47,6 +49,7 @@ Sequence (input → state → render):
 
 Component overview (simplified):
 
+```text
   +---------+    owns     +---------+     manages     +-----------+
   | Editor  | ----------> | Buffers | <-------------  |  Windows  |
   +---------+             +---------+                 +-----------+
@@ -57,6 +60,7 @@ Component overview (simplified):
   |  Modes  |             |   Marks    |               |   UI/    |
   +---------+             +------------+               | Renderer |
                                                        +----------+
+```
 
 Core classes and relationships (high-level):
 
@@ -78,12 +82,14 @@ Core classes and relationships (high-level):
 
 ## Config & Hot Reload
 
-- ConfigWatcher polls for changes; EventDrivenEditor translates to Config events and forces a full redraw.
+- ConfigWatcher blocks on filesystem events (notify) and sends typed change events; no periodic polling. EventDrivenEditor translates them to Config events and forces a full redraw when applied.
 - ThemeConfig load_with_default_theme applies color scheme; UI reads it on init and reload.
 
-## Async Syntax Highlighting
+## Syntax Highlighting (event-driven)
 
-- AsyncSyntaxHighlighter runs in a background thread and sets needs_syntax_refresh; the event loop triggers redraws when this flag is observed.
+- No background syntax thread. Highlighting occurs on-demand (synchronously for small units like single lines), and the editor sets a needs_syntax_refresh flag to prompt redraws as needed.
+
+Design note: we prioritize responsiveness and simplicity over long-running parsing. Expensive full-file highlighting is intentionally avoided in the synchronous path.
 
 ## Windows and Viewports
 
@@ -94,6 +100,12 @@ Core classes and relationships (high-level):
 
 - Unit tests under tests/ and src/**/tests.rs
 - Grapheme/emoji regression tests live in tests/grapheme_cursor_tests.rs
+
+## Alternatives and trade-offs
+
+- Fully blocking main loop without a tick: Replace the short recv_timeout with a blocking recv and rely entirely on incoming events to drive progress. This can reduce wakeups, but you’ll need a separate waker event for timed UI updates if ever introduced.
+- Channel select instead of periodic polling: Using a select over channels (e.g., crossbeam-channel) would allow clean blocking on multiple sources (config events, system signals) without a tick. The current std::mpsc + short timeout keeps dependencies minimal and is already efficient.
+- Input thread using blocking read: Switching from crossterm::event::poll to blocking event::read can further reduce wakeups, but graceful shutdown then requires an interrupt mechanism; the current 16ms poll balances responsiveness and simple shutdown.
 
 ## Next Steps for Contributors
 

@@ -96,25 +96,14 @@ impl EventDrivenEditor {
 
         // Main event processing loop
         loop {
-            match self
-                .event_receiver
-                .recv_timeout(Duration::from_millis(EVENT_TICK_MS))
-            {
+            match self.event_receiver.recv() {
                 Ok(event) => {
                     let should_quit = self.process_event(event)?;
                     if should_quit {
                         break;
                     }
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    // Check if editor wants to quit
-                    if let Ok(editor) = self.editor.try_lock()
-                        && editor.should_quit()
-                    {
-                        break;
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(_disconnected) => {
                     warn!("Event channel disconnected");
                     break;
                 }
