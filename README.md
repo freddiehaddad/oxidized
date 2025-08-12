@@ -5,6 +5,7 @@
 > Note: This project is under active development. Features, behavior, and APIs may change.
 
 ## 📋 Table of Contents
+<!-- markdownlint-disable MD007 -->
 
 - [🚀 Key Features](#-key-features)
 - [🔧 Installation & Setup](#-installation--setup)  
@@ -13,15 +14,16 @@
 - [🏗️ Architecture Overview](#️-architecture-overview)
 - [📋 Feature Status](#-feature-status)
 - [🛠️ Development & Debugging](#️-development--debugging)
-  - [Testing](#testing)
-  - [Benchmarking](#benchmarking)
-  - [Logging quick reference](#quick-reference)
+   - [Testing](#testing)
+   - [Benchmarking](#benchmarking)
+   - [Logging](#-logging)
 - [🔧 Troubleshooting](#-troubleshooting)
 - [🧰 Dependencies](#-dependencies)
 - [🤝 Contributing](#-contributing)
 - [🎯 Roadmap](#-vimneovim-feature-parity-roadmap)
 - [💡 Inspiration](#-inspiration)
 - [📜 License](#-license)
+<!-- markdownlint-enable MD007 -->
 
 ## 🚀 Key Features
 
@@ -901,7 +903,7 @@ Developer docs and diagrams:
 
 ## 🛠️ Development & Debugging
 
-Quick link: [Logging quick reference](#quick-reference)
+Quick link: [Logging](#-logging)
 
 ### Building from Source
 
@@ -941,128 +943,57 @@ holding a file lock (close the editor or kill the process) and retry.
 # Windows - Optimized release build
 cargo build --release
 
-# Run with custom log level (TTY: logs go to file by default)
+# Run with custom log level
 $env:RUST_LOG="debug"; .\target\release\oxy.exe filename.txt
-# To force stderr instead of file:
-# $env:OXY_LOG_DEST="stderr"; $env:RUST_LOG="debug"; .\target\release\oxy.exe filename.txt
 ```
 
 ```bash
 # Linux/macOS - Optimized release build
 cargo build --release
 
-# Run with custom log level (TTY: logs go to file by default)
+# Run with custom log level
 RUST_LOG=debug ./target/release/oxy filename.txt
-# To force stderr instead of file:
-# OXY_LOG_DEST=stderr RUST_LOG=debug ./target/release/oxy filename.txt
 ```
 
-### 📊 Comprehensive Logging System
+### 📊 Logging
 
-Oxidized provides extensive logging for development, debugging, and performance.
-To avoid corrupting the terminal UI, when running in an interactive terminal
-(TTY) logs are written to a file by default. In non-TTY contexts (e.g., CI),
-logs go to stderr. Warnings and errors are mirrored to stderr even when file
-logging is active.
+Oxidized always writes logs to a local file named `oxidized.log` in the working directory. Use your shell to tail this file while you run the editor.
+
+Defaults:
+
+- Debug builds default to level `debug`.
+- Release builds default to level `info`.
+- Set `RUST_LOG` to override the level or select modules.
 
 #### Quick reference
 
 ```powershell
 # Windows (PowerShell)
-# 1) Default: logs go to oxidized.log when running in a terminal
+# 1) Run and follow the log file
 cargo run filename.txt
-Get-Content oxidized.log -Wait -Tail 50
+Get-Content .\oxidized.log -Wait -Tail 50
 
 # 2) Module-focused logging
 $env:RUST_LOG="oxidized=info,oxidized::editor=debug"; cargo run
-
-# 3) Force stderr logging instead of file
-$env:OXY_LOG_DEST="stderr"; $env:RUST_LOG="debug"; cargo run
 ```
 
 ```bash
 # Linux/macOS (Bash)
-# 1) Default: logs go to oxidized.log when running in a terminal
+# 1) Run and follow the log file
 cargo run filename.txt & tail -f oxidized.log
 
 # 2) Module-focused logging
 RUST_LOG="oxidized=info,oxidized::editor=debug" cargo run
-
-# 3) Force stderr logging instead of file
-OXY_LOG_DEST=stderr RUST_LOG=debug cargo run
 ```
 
-#### **Log Levels and Usage**
+#### Log levels
 
-**Available Log Levels** (in order of verbosity):
+- `error`, `warn`, `info`, `debug` (default in debug builds), `trace`
 
-- `error` - Critical errors only
-- `warn` - Warnings and errors
-- `info` - General information, warnings, and errors
-- `debug` - Detailed debugging information (**default for debug builds**)
-- `trace` - Ultra-verbose tracing (development only)
+Notes:
 
-> Note: Debug builds default to `debug` logging. Release builds respect `RUST_LOG` and are minimal by default.
-
-#### **Environment Variables**
-
-```powershell
-# Windows PowerShell - Set logging level
-$env:RUST_LOG="debug"                    # Debug level for all modules
-$env:RUST_LOG="oxidized=trace"           # Trace level for oxidized only
-$env:RUST_LOG="oxidized::editor=debug"   # Debug level for editor module only
-$env:OXY_LOG_DEST="file|stderr|off"      # Destination override
-$env:OXY_LOG_FILE="custom.log"           # File path (default: oxidized.log)
-
-# Multiple modules with different levels
-$env:RUST_LOG="oxidized::buffer=trace,oxidized::syntax=debug,warn"
-
-# Run with custom logging
-cargo run filename.txt
-```
-
-```bash
-# Linux/macOS - Set logging level
-export RUST_LOG=debug                    # Debug level for all modules
-export RUST_LOG=oxidized=trace           # Trace level for oxidized only
-export RUST_LOG=oxidized::editor=debug   # Debug level for editor module only
-export OXY_LOG_DEST=file|stderr|off      # Destination override
-export OXY_LOG_FILE=custom.log           # File path (default: oxidized.log)
-
-# Multiple modules with different levels
-export RUST_LOG="oxidized::buffer=trace,oxidized::syntax=debug,warn"
-
-# Run with custom logging
-cargo run filename.txt
-```
-
-#### **Viewing Logs**
-
-Default behavior:
-
-- Interactive TTY: logs are appended to `oxidized.log` in the working
-   directory.
-- Non-TTY (CI/headless): logs are written to stderr.
-- Warnings and errors are mirrored to stderr when file logging is active.
-
-```powershell
-# Windows PowerShell
-# Follow the default log file
-cargo run filename.txt
-Get-Content oxidized.log -Wait -Tail 50
-
-# Force stderr output instead of file
-$env:OXY_LOG_DEST="stderr"; $env:RUST_LOG="debug"; cargo run filename.txt
-```
-
-```bash
-# Linux/macOS (Bash)
-# Follow the default log file
-cargo run filename.txt & tail -f oxidized.log
-
-# Force stderr output instead of file
-OXY_LOG_DEST=stderr RUST_LOG=debug cargo run filename.txt
-```
+- If `RUST_LOG` is unset, Oxidized uses `debug` in debug builds and `info` in release builds.
+- Logs are appended to `oxidized.log`. If the file cannot be created, logging falls back to stderr.
 
 #### **Module-Specific Logging**
 

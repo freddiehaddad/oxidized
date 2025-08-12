@@ -1,14 +1,10 @@
 use anyhow::Result;
-use crossterm::tty::IsTty;
 use oxidized::{Editor, EventDrivenEditor};
 use std::env;
-use std::io;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
 fn init_logging() {
-    use tracing_subscriber::filter::LevelFilter;
-    use tracing_subscriber::prelude::*;
     use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
     // Determine default level: debug in debug builds, info otherwise
@@ -20,81 +16,47 @@ fn init_logging() {
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
 
-    // Destination selection
-    let dest = env::var("OXY_LOG_DEST").unwrap_or_else(|_| {
-        // If stdout is a TTY (interactive editor), prefer file to avoid corrupting UI.
-        if io::stdout().is_tty() {
-            "file".to_string()
-        } else {
-            "stderr".to_string()
-        }
-    });
-
-    match dest.as_str() {
-        "off" => {
-            // No logging subscriber; logs will be dropped.
-        }
-        "stderr" => {
-            // Log to stderr with env-controlled filtering.
+    // Always log to oxidized.log (simple, tail-friendly)
+    let path = "oxidized.log";
+    let file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        Ok(f) => f,
+        Err(e) => {
+            // If file cannot be opened, fall back to stderr so we still get logs
+            eprintln!(
+                "Failed to open log file '{}': {} — logging to stderr",
+                path, e
+            );
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(fmt::layer().with_target(true).with_ansi(true))
                 .init();
+            return;
         }
-        // Default and "file": write to a log file, mirror warnings+ to stderr.
-        _ => {
-            let path = env::var("OXY_LOG_FILE").unwrap_or_else(|_| "oxidized.log".to_string());
-            let file = match std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)
-            {
-                Ok(f) => f,
-                Err(e) => {
-                    // Fallback to stderr if file cannot be opened
-                    eprintln!(
-                        "Failed to open log file '{}': {} — falling back to stderr",
-                        path, e
-                    );
-                    tracing_subscriber::registry()
-                        .with(env_filter)
-                        .with(fmt::layer().with_target(true).with_ansi(true))
-                        .init();
-                    return;
-                }
-            };
-            static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> =
-                OnceLock::new();
-            let (non_blocking, guard) = tracing_appender::non_blocking(file);
-            let _ = LOG_GUARD.set(guard);
+    };
+    static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
+    let (non_blocking, guard) = tracing_appender::non_blocking(file);
+    let _ = LOG_GUARD.set(guard);
 
-            // Primary layer to file
-            let file_layer = fmt::layer()
-                .with_writer(non_blocking)
-                .with_ansi(false)
-                .with_target(true);
+    let file_layer = fmt::layer()
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .with_target(true);
 
-            // Secondary layer to stderr for warnings and above
-            let stderr_layer = fmt::layer()
-                .with_writer(io::stderr)
-                .with_ansi(true)
-                .with_target(true)
-                .with_filter(LevelFilter::WARN);
-
-            tracing_subscriber::registry()
-                .with(env_filter)
-                .with(file_layer)
-                .with(stderr_layer)
-                .init();
-        }
-    }
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(file_layer)
+        .init();
 }
 
 fn main() -> Result<()> {
     init_logging();
 
-    log::info!("=== Oxidized Text Editor Starting ===");
-    log::debug!(
+    tracing::info!("=== Oxidized Text Editor Starting ===");
+    tracing::debug!(
         "Build type: {}",
         if cfg!(debug_assertions) {
             "DEBUG"
@@ -102,8 +64,8 @@ fn main() -> Result<()> {
             "RELEASE"
         }
     );
-    log::info!("Version: {}", env!("CARGO_PKG_VERSION"));
-    log::debug!(
+    tracing::info!("Version: {}", env!("CARGO_PKG_VERSION"));
+    tracing::debug!(
         "Working directory: {:?}",
         std::env::current_dir().unwrap_or_default()
     );
