@@ -29,15 +29,18 @@ tracing-subscriber = { version = "0.3", features = [
 ] }
 tracing-appender = "0.2"
 # Error handling
-thiserror = "2.0"
-anyhow = "1.0"
+thiserror = "2.0.14"
+anyhow = "1.0.99"
 unicode-segmentation = "1.11"
 unicode-width = "0.2"
 crossbeam-channel = "0.5"
 
 [dev-dependencies]
 # Async runtime for tests only
-tokio = { version = "1.47.1", features = ["full"] }
+tokio = { version = "1.47.1", default-features = false, features = [
+    "macros",
+    "rt-multi-thread",
+] }
 # Temporary directory creation for tests
 tempfile = "3.0"
 # Benchmarking
