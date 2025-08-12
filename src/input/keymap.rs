@@ -3,12 +3,12 @@ use crate::core::mode::{Mode, Position};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use log::{debug, info, trace, warn};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::time::Instant;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct KeymapConfig {
     pub normal_mode: HashMap<String, String>,
     pub insert_mode: HashMap<String, String>,
