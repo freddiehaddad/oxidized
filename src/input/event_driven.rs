@@ -533,22 +533,26 @@ impl EventDrivenEditor {
         thread::spawn(move || {
             info!("Config watcher thread started");
 
+            // Obtain a clone of the receiver once, then block on it without
+            // holding the editor lock.
+            let rx = {
+                if let Ok(ed) = editor.lock() {
+                    ed.config_watcher.as_ref().map(|w| w.clone_receiver())
+                } else {
+                    None
+                }
+            };
+
+            if rx.is_none() {
+                info!("Config watcher thread finished (no watcher)");
+                return;
+            }
+
+            let rx = rx.unwrap();
+
             loop {
                 // Block waiting for watcher events; no polling/timeout
-                // We take the lock only to get the watcher reference, then drop it
-                let maybe_event = {
-                    if let Ok(ed) = editor.lock() {
-                        if let Some(ref watcher) = ed.config_watcher {
-                            // Blocking receive; returns None if channel disconnects
-                            watcher.wait_for_change_blocking()
-                        } else {
-                            // No watcher available; exit thread
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                };
+                let maybe_event = rx.lock().ok().and_then(|guard| guard.recv().ok());
 
                 // If the watcher channel closed or watcher missing, exit
                 let Some(first_event) = maybe_event else {

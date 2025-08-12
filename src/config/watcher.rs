@@ -1,7 +1,7 @@
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfigChangeEvent {
@@ -23,7 +23,7 @@ impl ConfigChangeEvent {
 
 pub struct ConfigWatcher {
     _watcher: RecommendedWatcher,
-    receiver: Receiver<ConfigChangeEvent>,
+    receiver: Arc<Mutex<Receiver<ConfigChangeEvent>>>,
 }
 
 impl ConfigWatcher {
@@ -34,7 +34,7 @@ impl ConfigWatcher {
 
         Ok(ConfigWatcher {
             _watcher: watcher,
-            receiver: rx,
+            receiver: Arc::new(Mutex::new(rx)),
         })
     }
 
@@ -116,8 +116,10 @@ impl ConfigWatcher {
         let mut changes = Vec::new();
 
         // Collect all pending events
-        while let Ok(event) = self.receiver.try_recv() {
-            changes.push(event);
+        if let Ok(rx) = self.receiver.lock() {
+            while let Ok(event) = rx.try_recv() {
+                changes.push(event);
+            }
         }
 
         if !changes.is_empty() {
@@ -145,9 +147,14 @@ impl ConfigWatcher {
         changes.contains(&ConfigChangeEvent::KeymapConfigChanged)
     }
 
-    /// Wait for a configuration change with timeout
-    pub fn wait_for_change(&self, timeout: Duration) -> Option<ConfigChangeEvent> {
-        match self.receiver.recv_timeout(timeout) {
+    /// Wait indefinitely for the next configuration change.
+    /// Returns None if the watcher channel is disconnected (e.g., on shutdown).
+    pub fn wait_for_change_blocking(&self) -> Option<ConfigChangeEvent> {
+        let rx_guard = match self.receiver.lock() {
+            Ok(g) => g,
+            Err(_) => return None,
+        };
+        match rx_guard.recv() {
             Ok(event) => {
                 log::debug!("Config change detected: {:?}", event);
                 Some(event)
@@ -156,15 +163,10 @@ impl ConfigWatcher {
         }
     }
 
-    /// Wait indefinitely for the next configuration change.
-    /// Returns None if the watcher channel is disconnected (e.g., on shutdown).
-    pub fn wait_for_change_blocking(&self) -> Option<ConfigChangeEvent> {
-        match self.receiver.recv() {
-            Ok(event) => {
-                log::debug!("Config change detected: {:?}", event);
-                Some(event)
-            }
-            Err(_) => None,
-        }
+    /// Clone the underlying receiver so other threads can block without
+    /// holding external locks. Single consumer only; do not consume from
+    /// multiple places concurrently.
+    pub fn clone_receiver(&self) -> Arc<Mutex<Receiver<ConfigChangeEvent>>> {
+        self.receiver.clone()
     }
 }
