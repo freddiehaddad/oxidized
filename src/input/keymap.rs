@@ -1112,6 +1112,11 @@ impl KeyHandler {
     fn action_execute_command(&self, editor: &mut Editor) -> Result<()> {
         let command = editor.command_line().trim_start_matches(':').to_string();
         crate::utils::command::execute_ex_command(editor, &command);
+        // Nudge main loop in case it is blocking on recv: send a quit event when requested
+        if editor.should_quit() {
+            // We cannot access the global event bus here; rely on main loop to observe should_quit
+            // The render/request path will trigger another event soon. No-op here.
+        }
         Ok(())
     }
 

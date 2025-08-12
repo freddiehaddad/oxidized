@@ -60,7 +60,9 @@ impl EventDrivenEditor {
         let config_thread = Self::spawn_config_watcher_thread(editor.clone(), event_sender.clone());
         thread_handles.push(config_thread);
 
-        // Syntax refresh is now fully event-driven; no background polling thread.
+        // Start syntax results dispatcher thread (async highlighter results -> events)
+        let syntax_thread = Self::spawn_syntax_results_thread(editor.clone(), event_sender.clone());
+        thread_handles.push(syntax_thread);
 
         // Start rendering thread
         let render_thread = Self::spawn_render_thread(editor.clone(), event_sender.clone());
@@ -151,18 +153,30 @@ impl EventDrivenEditor {
 
     /// Process a single event and return whether to quit
     fn process_event(&self, event: EditorEvent) -> Result<bool> {
-        match event {
-            EditorEvent::Input(input_event) => self.handle_input_event(input_event),
-            EditorEvent::UI(ui_event) => self.handle_ui_event(ui_event),
-            EditorEvent::Buffer(buffer_event) => self.handle_buffer_event(buffer_event),
-            EditorEvent::Window(window_event) => self.handle_window_event(window_event),
-            EditorEvent::Config(config_event) => self.handle_config_event(config_event),
-            EditorEvent::Search(search_event) => self.handle_search_event(search_event),
-            EditorEvent::System(system_event) => self.handle_system_event(system_event),
-            EditorEvent::Plugin(_) => Ok(false), // Future implementation
-            EditorEvent::LSP(_) => Ok(false),    // Future implementation
-            EditorEvent::Macro(macro_event) => self.handle_macro_event(macro_event),
+        // First, delegate to specific handler
+        let handled_quit = match event {
+            EditorEvent::Input(input_event) => self.handle_input_event(input_event)?,
+            EditorEvent::UI(ui_event) => self.handle_ui_event(ui_event)?,
+            EditorEvent::Buffer(buffer_event) => self.handle_buffer_event(buffer_event)?,
+            EditorEvent::Window(window_event) => self.handle_window_event(window_event)?,
+            EditorEvent::Config(config_event) => self.handle_config_event(config_event)?,
+            EditorEvent::Search(search_event) => self.handle_search_event(search_event)?,
+            EditorEvent::System(system_event) => self.handle_system_event(system_event)?,
+            EditorEvent::Plugin(_) => false, // Future implementation
+            EditorEvent::LSP(_) => false,    // Future implementation
+            EditorEvent::Macro(macro_event) => self.handle_macro_event(macro_event)?,
+        };
+
+        // Then, as a belt-and-suspenders, check the editor's should_quit flag
+        if handled_quit {
+            return Ok(true);
         }
+        if let Ok(editor) = self.editor.lock()
+            && editor.should_quit()
+        {
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     /// Handle input events
@@ -582,6 +596,44 @@ impl EventDrivenEditor {
     }
 
     // (syntax thread removed)
+    /// Spawn syntax result dispatcher thread
+    fn spawn_syntax_results_thread(
+        editor: Arc<Mutex<Editor>>,
+        sender: mpsc::Sender<EditorEvent>,
+    ) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            info!("Syntax results dispatcher thread started");
+
+            // Obtain a clone of the result receiver once
+            let rx_opt = {
+                if let Ok(ed) = editor.lock() {
+                    ed.clone_syntax_result_receiver()
+                } else {
+                    None
+                }
+            };
+
+            let Some(result_rx) = rx_opt else {
+                info!("No async syntax highlighter; exiting syntax dispatcher");
+                return;
+            };
+
+            while let Ok(result) = result_rx.recv() {
+                // Forward as a buffer event; cache will be updated on handle
+                // Update cache immediately and request UI redraw via event
+                if let Ok(mut ed) = editor.lock() {
+                    ed.apply_syntax_highlight_result(
+                        result.buffer_id,
+                        result.line_index,
+                        result.highlights,
+                    );
+                }
+                let _ = sender.send(EditorEvent::UI(UIEvent::RedrawRequest));
+            }
+
+            info!("Syntax results dispatcher thread finished");
+        })
+    }
 
     /// Spawn rendering thread
     fn spawn_render_thread(
@@ -607,6 +659,9 @@ impl EventDrivenEditor {
 
         // Drop config watcher to unblock the blocking watcher thread recv
         if let Ok(mut editor) = self.editor.lock() {
+            // Stop async syntax worker so result channel closes and dispatcher exits
+            editor.shutdown_async_syntax();
+            // Stop config watcher
             editor.config_watcher = None;
         }
 

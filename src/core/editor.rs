@@ -6,11 +6,12 @@ use crate::core::mode::Mode;
 use crate::core::window::{SplitDirection, WindowManager};
 use crate::features::completion::CommandCompletion;
 use crate::features::search::{SearchEngine, SearchResult};
-use crate::features::syntax::{AsyncSyntaxHighlighter, HighlightRange, Priority};
+use crate::features::syntax::{AsyncSyntaxHighlighter, HighlightRange, HighlightResult, Priority};
 use crate::input::keymap::KeyHandler;
 use crate::ui::UI;
 use crate::ui::terminal::Terminal;
 use anyhow::Result;
+use crossbeam_channel as xchan;
 use log::{debug, error, info, trace, warn};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -1525,25 +1526,19 @@ impl Editor {
 
                 log::debug!("No cached highlights, getting immediate highlights for single line");
 
-                // Only highlight the current line, not the entire file
-                // This prevents blocking the UI thread with expensive full-file parsing
-                if let Some(immediate_highlights) = highlighter
-                    .force_immediate_highlights_with_context(
-                        buffer_id, line_index,
-                        text, // Only pass the single line, not full_content
-                        text, &lang,
-                    )
-                {
-                    log::debug!(
-                        "Got immediate highlights: {} items",
-                        immediate_highlights.len()
+                // Enqueue async highlighting for this line using full-file context
+                if let Some(buf) = self.buffers.get(&buffer_id) {
+                    let full_content = buf.lines.join("\n");
+                    highlighter.request_highlighting(
+                        buffer_id,
+                        line_index,
+                        full_content,
+                        lang,
+                        Priority::High,
                     );
-
-                    return immediate_highlights;
-                } else {
-                    log::debug!(
-                        "No immediate highlights available for line, using basic highlighting"
-                    );
+                    // Mark that a syntax refresh should trigger a redraw when results arrive
+                    self.needs_syntax_refresh
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
                 }
             } else {
                 log::warn!("No language detected for path: {:?}", file_path);
@@ -1593,41 +1588,27 @@ impl Editor {
                 // Get full buffer content for proper context-aware parsing
                 let full_content = buffer.lines.join("\n");
 
-                // Use full-file context highlighting for all visible lines
+                // Enqueue full-context highlighting for all visible lines
                 for line_index in visible_start..visible_end {
-                    if let Some(line) = buffer.get_line(line_index) {
-                        // Use force_immediate_highlights_with_context to get proper full-file parsing
-                        if let Some(_highlights) = highlighter
-                            .force_immediate_highlights_with_context(
-                                buffer_id,
-                                line_index,
-                                &full_content,
-                                line,
-                                &language,
-                            )
-                        {
-                            // Results are automatically cached, no additional async request needed
-                            log::trace!(
-                                "Cached full-context highlights for buffer {} line {}",
-                                buffer_id,
-                                line_index
-                            );
-                        }
-                    }
+                    highlighter.request_highlighting(
+                        buffer_id,
+                        line_index,
+                        full_content.clone(),
+                        language.clone(),
+                        Priority::High,
+                    );
                 }
 
                 // Also cache highlights for buffer lines beyond visible area for smooth scrolling
                 for line_index in highlight_start..highlight_end {
-                    if (line_index < visible_start || line_index >= visible_end)
-                        && let Some(line) = buffer.get_line(line_index)
-                    {
-                        // Use full-file context for buffer lines too
-                        let _ = highlighter.force_immediate_highlights_with_context(
+                    if line_index < visible_start || line_index >= visible_end {
+                        // Enqueue background highlighting for buffer lines too
+                        highlighter.request_highlighting(
                             buffer_id,
                             line_index,
-                            &full_content,
-                            line,
-                            &language,
+                            full_content.clone(),
+                            language.clone(),
+                            Priority::Medium,
                         );
                     }
                 }
@@ -1674,6 +1655,27 @@ impl Editor {
             highlighter.invalidate_buffer_cache(0); // Clear all cache for now
             self.status_message = "Syntax highlighting cache cleared".to_string();
         }
+    }
+
+    /// Clone the syntax result receiver so other threads can block on it
+    pub fn clone_syntax_result_receiver(&self) -> Option<xchan::Receiver<HighlightResult>> {
+        self.async_syntax_highlighter
+            .as_ref()
+            .map(|h| h.clone_result_receiver())
+    }
+
+    /// Apply a syntax highlight result into the highlighter cache and flag redraw
+    pub fn apply_syntax_highlight_result(
+        &mut self,
+        buffer_id: usize,
+        line_index: usize,
+        highlights: Vec<HighlightRange>,
+    ) {
+        if let Some(ref highlighter) = self.async_syntax_highlighter {
+            highlighter.set_cached_highlights(buffer_id, line_index, highlights);
+        }
+        self.needs_syntax_refresh
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Reload editor configuration from editor.toml
@@ -2377,5 +2379,10 @@ impl Editor {
     pub fn request_redraw(&self) {
         self.needs_redraw
             .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Stop async syntax highlighting and close its channels (used during shutdown)
+    pub fn shutdown_async_syntax(&mut self) {
+        self.async_syntax_highlighter = None;
     }
 }

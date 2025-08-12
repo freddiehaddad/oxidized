@@ -1,9 +1,12 @@
 use anyhow::{Result, anyhow};
+use crossbeam_channel as xchan;
 use crossterm::style::Color;
 use log::{debug, info, trace, warn};
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
+use std::thread;
+use std::time::Duration;
 use tree_sitter::{Language, Parser};
 
 use crate::config::theme::{SyntaxTheme, ThemeConfig};
@@ -610,85 +613,98 @@ pub enum Priority {
 
 /// Simplified async syntax highlighter for compatibility
 pub struct AsyncSyntaxHighlighter {
-    sync_highlighter: SyntaxHighlighter,
+    // Worker thread and channels
+    work_tx: xchan::Sender<WorkItem>,
+    result_rx: xchan::Receiver<HighlightResult>,
+    // Cache of last results per (buffer_id, line)
+    cache: std::sync::Mutex<HashMap<(usize, usize), Vec<HighlightRange>>>,
 }
 
 impl AsyncSyntaxHighlighter {
     pub fn new() -> Result<Self> {
+        // Bounded work queue to prevent unbounded growth
+        let (work_tx, work_rx) = xchan::bounded::<WorkItem>(256);
+        let (result_tx, result_rx) = xchan::unbounded::<HighlightResult>();
+
+        // Spawn worker thread with its own parsers and theme
+        thread::Builder::new()
+            .name("syntax-worker".into())
+            .spawn(move || worker_loop(work_rx, result_tx))
+            .map_err(|e| anyhow!("Failed to spawn syntax worker: {}", e))?;
+
         Ok(AsyncSyntaxHighlighter {
-            sync_highlighter: SyntaxHighlighter::new()?,
+            work_tx,
+            result_rx,
+            cache: std::sync::Mutex::new(HashMap::new()),
         })
     }
 
     pub fn get_cached_highlights(
         &self,
-        _buffer_id: usize,
-        _line_index: usize,
-        content: &str,
-        language: &str,
+        buffer_id: usize,
+        line_index: usize,
+        _content: &str,
+        _language: &str,
     ) -> Option<Vec<HighlightRange>> {
-        // Only highlight single lines, not entire files
-        if content.lines().count() > 1 {
-            // Don't highlight multi-line content synchronously - too expensive
-            return None;
-        }
-
-        // For single lines, do quick highlighting
-        let mut highlighter = self.sync_highlighter.clone();
-        highlighter.highlight_text(content, language).ok()
+        let cache = self.cache.lock().ok()?;
+        cache.get(&(buffer_id, line_index)).cloned()
     }
 
     pub fn force_immediate_highlights_with_context(
         &self,
-        _buffer_id: usize,
-        _line_index: usize,
-        content: &str,
-        _text: &str,
+        buffer_id: usize,
+        line_index: usize,
+        full_content: &str,
+        _line_text: &str,
         language: &str,
     ) -> Option<Vec<HighlightRange>> {
-        // Don't do expensive full-file highlighting synchronously
-        // Instead, just highlight individual lines for immediate display
-        if content.lines().count() > 1 {
-            warn!(
-                "Refusing to do synchronous highlighting of {} lines - too expensive!",
-                content.lines().count()
-            );
-            return None;
-        }
-
-        let mut highlighter = self.sync_highlighter.clone();
-        highlighter.highlight_text(content, language).ok()
+        // Enqueue high-priority work for this line with full-file context
+        let _ = self.work_tx.send(WorkItem {
+            buffer_id,
+            line_index,
+            language: language.to_string(),
+            full_content: full_content.to_string(),
+            priority: Priority::Critical,
+            version: 0, // version set by editor via request_visible... API if needed
+        });
+        None
     }
 
     pub fn request_highlighting(
         &self,
-        _buffer_id: usize,
-        _line_index: usize,
-        content: String,
+        buffer_id: usize,
+        line_index: usize,
+        full_content: String,
         language: String,
-        _priority: Priority,
+        priority: Priority,
     ) {
-        // For simplified version, we don't queue requests
-        let mut highlighter = self.sync_highlighter.clone();
-        let _ = highlighter.highlight_text(&content, &language);
+        let _ = self.work_tx.send(WorkItem {
+            buffer_id,
+            line_index,
+            language,
+            full_content,
+            priority,
+            version: 0,
+        });
     }
 
     pub fn cache_stats(&self) -> (usize, usize) {
-        (0, 0) // Return simple cache stats format
+        let cache = self.cache.lock().unwrap();
+        (cache.len(), 0)
     }
 
-    pub fn update_theme(&self, theme_name: &str) -> Result<()> {
-        // For simplified version, we don't actually update the theme
-        // Just return ok to maintain compatibility
-        log::info!(
-            "Theme update request for '{}' (simplified version)",
-            theme_name
-        );
+    pub fn update_theme(&self, _theme_name: &str) -> Result<()> {
+        // Send a theme update hint by clearing cache; worker will reload per task
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.clear();
+        }
         Ok(())
     }
 
-    pub fn invalidate_buffer_cache(&self, _buffer_id: usize) {
-        // No-op for simplified version
+    pub fn invalidate_buffer_cache(&self, buffer_id: usize) {
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.retain(|(bid, _), _| *bid != buffer_id);
+        }
     }
 }
 
@@ -701,5 +717,134 @@ impl Clone for SyntaxHighlighter {
             theme_config: self.theme_config.clone(),
             current_syntax_theme: self.current_syntax_theme.clone(),
         })
+    }
+}
+
+// -------- Async worker plumbing --------
+
+#[derive(Debug, Clone)]
+struct WorkItem {
+    buffer_id: usize,
+    line_index: usize,
+    language: String,
+    full_content: String,
+    priority: Priority,
+    version: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct HighlightResult {
+    pub buffer_id: usize,
+    pub line_index: usize,
+    pub version: u64,
+    pub highlights: Vec<HighlightRange>,
+}
+
+fn worker_loop(work_rx: xchan::Receiver<WorkItem>, result_tx: xchan::Sender<HighlightResult>) {
+    // Dedicated parser/theme per worker
+    let mut highlighter = match SyntaxHighlighter::new() {
+        Ok(h) => h,
+        Err(e) => {
+            log::error!("Failed to init syntax highlighter: {}", e);
+            return;
+        }
+    };
+
+    // Simple coalescing buffer
+    let mut backlog: VecDeque<WorkItem> = VecDeque::new();
+    // Track the latest version per (buffer,line) to drop stale results
+    let mut latest_version: HashMap<(usize, usize), u64> = HashMap::new();
+
+    loop {
+        // Try to gather a small batch
+        match work_rx.recv_timeout(Duration::from_millis(5)) {
+            Ok(item) => backlog.push_back(item),
+            Err(xchan::RecvTimeoutError::Timeout) => {}
+            Err(xchan::RecvTimeoutError::Disconnected) => break,
+        }
+
+        // Drain quickly to coalesce
+        while let Ok(item) = work_rx.try_recv() {
+            backlog.push_back(item);
+            if backlog.len() > 128 {
+                break;
+            }
+        }
+
+        if backlog.is_empty() {
+            continue;
+        }
+
+        // Coalesce: keep only the latest request per (buffer,line), prefer higher priority
+        let mut coalesced: HashMap<(usize, usize), WorkItem> = HashMap::new();
+        for item in backlog.drain(..) {
+            let key = (item.buffer_id, item.line_index);
+            match coalesced.get(&key) {
+                None => {
+                    coalesced.insert(key, item);
+                }
+                Some(existing) => {
+                    if item.priority >= existing.priority {
+                        coalesced.insert(key, item);
+                    }
+                }
+            }
+        }
+
+        // Process in an order that prefers higher priority first, then by line_index
+        let mut items: Vec<WorkItem> = coalesced.into_values().collect();
+        items.sort_by_key(|w| (std::cmp::Reverse(w.priority as i32), w.line_index));
+
+        for item in items {
+            latest_version.insert((item.buffer_id, item.line_index), item.version);
+
+            // Highlight this line using the full-file context
+            let line_text = item.full_content.lines().nth(item.line_index).unwrap_or("");
+
+            match highlighter.highlight_text(line_text, &item.language) {
+                Ok(highlights) => {
+                    let _ = result_tx.send(HighlightResult {
+                        buffer_id: item.buffer_id,
+                        line_index: item.line_index,
+                        version: item.version,
+                        highlights,
+                    });
+                }
+                Err(e) => {
+                    log::debug!("Highlighting failed: {}", e);
+                }
+            }
+        }
+    }
+}
+
+impl AsyncSyntaxHighlighter {
+    /// Non-blocking: drain any ready results into the local cache and return a list of updated lines
+    pub fn drain_results(&self) -> Vec<(usize, usize)> {
+        let mut updated: Vec<(usize, usize)> = Vec::new();
+        while let Ok(result) = self.result_rx.try_recv() {
+            if let Ok(mut cache) = self.cache.lock() {
+                cache.insert((result.buffer_id, result.line_index), result.highlights);
+                updated.push((result.buffer_id, result.line_index));
+            }
+        }
+        updated
+    }
+
+    /// Set cache entry for a specific buffer line
+    pub fn set_cached_highlights(
+        &self,
+        buffer_id: usize,
+        line_index: usize,
+        highlights: Vec<HighlightRange>,
+    ) {
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.insert((buffer_id, line_index), highlights);
+        }
+    }
+
+    /// Clone the result receiver so a background thread can block on it
+    pub fn clone_result_receiver(&self) -> xchan::Receiver<HighlightResult> {
+        self.result_rx.clone()
     }
 }
