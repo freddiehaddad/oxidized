@@ -22,7 +22,7 @@ impl Default for PluginManager {
 
 impl PluginManager {
     pub fn new() -> Self {
-        info!("Initializing plugin manager");
+        debug!("Initializing plugin manager");
         Self {
             loaded_plugins: Vec::new(),
         }

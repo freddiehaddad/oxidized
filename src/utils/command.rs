@@ -1,7 +1,7 @@
 // Command parsing and execution
 // This handles Ex-style commands (:w, :q, etc.) in a central place.
 
-use log::{debug, error, warn};
+use log::{debug, error, info, trace, warn};
 
 use crate::core::editor::Editor;
 use crate::core::mode::Mode;
@@ -13,16 +13,18 @@ pub struct Command {
 
 impl Command {
     pub fn parse(input: &str) -> Option<Self> {
-        debug!("Parsing command: '{}'", input);
+        // Parsing logs are very chatty; keep at trace level
+        trace!("Parsing command: '{}'", input);
         let parts: Vec<&str> = input.split_whitespace().collect();
         if parts.is_empty() {
-            warn!("Empty command input received");
+            // An empty parse is user-initiated and expected sometimes; keep at trace
+            trace!("Empty command input received");
             return None;
         }
 
         let name = parts[0].to_string();
         let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
-        debug!(
+        trace!(
             "Parsed command '{}' with {} args: {:?}",
             name,
             args.len(),
@@ -56,6 +58,8 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
             if let Err(e) = editor.save_current_buffer() {
                 error!("Save failed: {}", e);
                 editor.set_status_message(format!("Error saving: {}", e));
+            } else {
+                info!("Buffer saved successfully");
             }
         }
 
@@ -65,6 +69,7 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
                 error!("Save before quit failed: {}", e);
                 editor.set_status_message(format!("Error saving: {}", e));
             } else {
+                info!("Saved buffer; quitting editor");
                 editor.quit();
             }
         }
@@ -74,13 +79,17 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
                 error!("Force save before quit failed: {}", e);
                 editor.set_status_message(format!("Error saving: {}", e));
             } else {
+                info!("Force-saved buffer; quitting editor");
                 editor.quit();
             }
         }
 
         // Create a new empty buffer and switch to it
         "enew" => match editor.create_buffer(None) {
-            Ok(id) => editor.set_status_message(format!("New empty buffer {}", id)),
+            Ok(id) => {
+                info!("Created new empty buffer {}", id);
+                editor.set_status_message(format!("New empty buffer {}", id))
+            }
             Err(e) => editor.set_status_message(format!("Error creating buffer: {}", e)),
         },
 
@@ -104,11 +113,17 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
             }
         }
         "bd" | "bdelete" => match editor.close_current_buffer() {
-            Ok(msg) => editor.set_status_message(msg),
+            Ok(msg) => {
+                info!("Closed current buffer");
+                editor.set_status_message(msg)
+            }
             Err(e) => editor.set_status_message(format!("Error: {}", e)),
         },
         "bd!" | "bdelete!" => match editor.force_close_current_buffer() {
-            Ok(msg) => editor.set_status_message(msg),
+            Ok(msg) => {
+                warn!("Force-closed current buffer");
+                editor.set_status_message(msg)
+            }
             Err(e) => editor.set_status_message(format!("Error: {}", e)),
         },
         "ls" | "buffers" => {
@@ -119,14 +134,17 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
         // Window/Split commands
         "split" | "sp" => {
             let message = editor.split_horizontal();
+            info!("Created horizontal split");
             editor.set_status_message(message);
         }
         "vsplit" | "vsp" => {
             let message = editor.split_vertical();
+            info!("Created vertical split");
             editor.set_status_message(message);
         }
         "close" => {
             let message = editor.close_window();
+            info!("Closed window");
             editor.set_status_message(message);
         }
 
@@ -136,7 +154,7 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
                 let filename = filename.trim();
                 match editor.open_file(filename) {
                     Ok(msg) => {
-                        debug!("Opened file '{}'", filename);
+                        info!("Opened file '{}'", filename);
                         editor.set_status_message(msg)
                     }
                     Err(e) => {
@@ -147,7 +165,10 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
             } else if let Some(filename) = command.strip_prefix("w ") {
                 let filename = filename.trim();
                 match editor.write_current_buffer_to(filename) {
-                    Ok(msg) => editor.set_status_message(msg),
+                    Ok(msg) => {
+                        info!("Wrote current buffer to '{}'", filename);
+                        editor.set_status_message(msg)
+                    }
                     Err(e) => {
                         error!("Write to '{}' failed: {}", filename, e);
                         editor.set_status_message(format!("Error writing file: {}", e))
@@ -156,7 +177,10 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
             } else if let Some(filename) = command.strip_prefix("w! ") {
                 let filename = filename.trim();
                 match editor.write_current_buffer_to_force(filename) {
-                    Ok(msg) => editor.set_status_message(msg),
+                    Ok(msg) => {
+                        warn!("Force-wrote current buffer to '{}'", filename);
+                        editor.set_status_message(msg)
+                    }
                     Err(e) => {
                         error!("Force write to '{}' failed: {}", filename, e);
                         editor.set_status_message(format!("Error writing file: {}", e))
@@ -165,7 +189,10 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
             } else if let Some(filename) = command.strip_prefix("saveas ") {
                 let filename = filename.trim();
                 match editor.save_as_current_buffer(filename) {
-                    Ok(msg) => editor.set_status_message(msg),
+                    Ok(msg) => {
+                        info!("Saved as '{}'", filename);
+                        editor.set_status_message(msg)
+                    }
                     Err(e) => {
                         error!("Save-as '{}' failed: {}", filename, e);
                         editor.set_status_message(format!("Error saving as: {}", e))
@@ -174,7 +201,10 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
             } else if let Some(filename) = command.strip_prefix("saveas! ") {
                 let filename = filename.trim();
                 match editor.save_as_current_buffer_force(filename) {
-                    Ok(msg) => editor.set_status_message(msg),
+                    Ok(msg) => {
+                        warn!("Force saved-as '{}'", filename);
+                        editor.set_status_message(msg)
+                    }
                     Err(e) => {
                         error!("Force save-as '{}' failed: {}", filename, e);
                         editor.set_status_message(format!("Error saving as: {}", e))

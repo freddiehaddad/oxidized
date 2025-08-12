@@ -825,8 +825,16 @@ impl AsyncSyntaxHighlighter {
         let mut updated: Vec<(usize, usize)> = Vec::new();
         while let Ok(result) = self.result_rx.try_recv() {
             if let Ok(mut cache) = self.cache.lock() {
+                log::trace!(
+                    "Caching highlights for buffer={} line={} version={}",
+                    result.buffer_id,
+                    result.line_index,
+                    result.version
+                );
                 cache.put((result.buffer_id, result.line_index), result.highlights);
                 updated.push((result.buffer_id, result.line_index));
+            } else {
+                log::warn!("Failed to acquire highlight cache lock; dropping result");
             }
         }
         updated
@@ -841,6 +849,11 @@ impl AsyncSyntaxHighlighter {
     ) {
         if let Ok(mut cache) = self.cache.lock() {
             cache.put((buffer_id, line_index), highlights);
+            log::trace!(
+                "Manually set cache for buffer={} line={}",
+                buffer_id,
+                line_index
+            );
         }
     }
 

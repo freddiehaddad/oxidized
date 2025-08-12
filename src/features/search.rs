@@ -1,7 +1,7 @@
 // Search and replace functionality
 // This will handle pattern matching, regex, and text search
 
-use log::{debug, info};
+use log::{debug, warn};
 use regex::Regex;
 
 pub struct SearchEngine {
@@ -34,8 +34,9 @@ impl SearchEngine {
     }
 
     pub fn search(&mut self, pattern: &str, text: &[String]) -> Vec<SearchResult> {
-        info!(
-            "Performing search for pattern: '{}' (case_sensitive: {}, use_regex: {})",
+        // Searches can be frequent; keep at debug to avoid log noise at info
+        debug!(
+            "Searching for pattern: '{}' (case_sensitive: {}, use_regex: {})",
             pattern, self.case_sensitive, self.use_regex
         );
         self.last_search = Some(pattern.to_string());
@@ -59,6 +60,8 @@ impl SearchEngine {
                         });
                     }
                 }
+            } else {
+                warn!("Invalid regex pattern: '{}'", pattern);
             }
         } else {
             // Simple string search with proper UTF-8 handling

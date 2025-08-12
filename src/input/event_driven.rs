@@ -694,7 +694,7 @@ impl EventDrivenEditor {
                     if let Err(e) = editor.start_macro_recording(register) {
                         log::warn!("Failed to start macro recording: {}", e);
                     } else {
-                        log::info!("Started macro recording for register '{}'", register);
+                        log::debug!("Started macro recording for register '{}'", register);
                         // Ensure UI updates immediately to show REC indicator
                         let _ = self
                             .event_sender
@@ -706,7 +706,7 @@ impl EventDrivenEditor {
                         if let Err(e) = editor.stop_macro_recording() {
                             log::warn!("Failed to stop macro recording: {}", e);
                         } else {
-                            log::info!("Stopped macro recording");
+                            log::debug!("Stopped macro recording");
                             // Ensure UI updates immediately to hide REC indicator
                             let _ = self
                                 .event_sender
@@ -718,14 +718,14 @@ impl EventDrivenEditor {
                     if let Err(e) = editor.play_macro(register) {
                         log::warn!("Failed to execute macro '{}': {}", register, e);
                     } else {
-                        log::info!("Executed macro '{}'", register);
+                        log::debug!("Executed macro '{}'", register);
                     }
                 }
                 crate::input::events::MacroEvent::RepeatLast { count: _ } => {
                     if let Err(e) = editor.play_last_macro() {
                         log::warn!("Failed to repeat last macro: {}", e);
                     } else {
-                        log::info!("Repeated last macro");
+                        log::debug!("Repeated last macro");
                     }
                 }
             }

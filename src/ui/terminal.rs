@@ -6,7 +6,7 @@ use crossterm::{
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
     tty::IsTty,
 };
-use log::{debug, warn};
+use log::{debug, trace, warn};
 use std::io::{self, Stdout, Write};
 
 pub struct Terminal {
@@ -16,21 +16,21 @@ pub struct Terminal {
 
 impl Terminal {
     pub fn new() -> io::Result<Self> {
-        debug!("Initializing terminal with alternate screen and raw mode");
+        trace!("Initializing terminal with alternate screen and raw mode");
         let mut stdout = io::stdout();
         let is_tty = stdout.is_tty();
 
         if is_tty {
             // Enter alternate screen before enabling raw mode
             stdout.execute(EnterAlternateScreen)?;
-            debug!("Entered alternate screen mode");
+            trace!("Entered alternate screen mode");
 
             terminal::enable_raw_mode()?;
-            debug!("Enabled raw terminal mode");
+            trace!("Enabled raw terminal mode");
 
             stdout.execute(terminal::Clear(ClearType::All))?;
             stdout.execute(cursor::Hide)?;
-            debug!("Cleared screen and hid cursor");
+            trace!("Cleared screen and hid cursor");
 
             // Flush stdout and give terminal time to settle
             stdout.flush()?;

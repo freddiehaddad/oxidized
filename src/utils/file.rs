@@ -2,7 +2,7 @@
 // This will handle file I/O, directory browsing, etc.
 
 use anyhow::Result;
-use log::debug;
+use log::{debug, info, trace};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -38,6 +38,7 @@ impl FileManager {
     }
 
     pub fn list_directory<P: AsRef<Path>>(&self, path: P) -> Result<Vec<DirEntry>> {
+        trace!("Listing directory: {:?}", path.as_ref());
         let mut entries = Vec::new();
 
         for entry in fs::read_dir(path)? {
@@ -68,7 +69,9 @@ impl FileManager {
 
     pub fn change_directory<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         let new_dir = path.as_ref().canonicalize()?;
+        let old = self.current_dir.clone();
         self.current_dir = new_dir;
+        info!("Changed directory: {:?} -> {:?}", old, self.current_dir);
         Ok(())
     }
 }

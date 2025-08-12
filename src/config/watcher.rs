@@ -104,8 +104,11 @@ impl ConfigWatcher {
         }
 
         log::info!(
-            "Config watcher initialized, watching {} config files",
-            watched_files
+            "Config watcher active ({} files): editor.toml={} keymaps.toml={} themes.toml={}",
+            watched_files,
+            editor_config_path.exists(),
+            keymap_config_path.exists(),
+            themes_config_path.exists()
         );
 
         Ok(watcher)
