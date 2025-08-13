@@ -433,3 +433,150 @@ fn g0_extends_in_visual_mode_without_wrap_no_scroll() -> Result<()> {
     assert_eq!(win.horiz_offset, 1);
     Ok(())
 }
+
+#[test]
+fn gj_with_wrap_moves_within_wrapped_segments() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("A🙂BC")?; // 🙂 width 2
+
+    // Enable wrapping into 3 text columns so segments: "A🙂" | "BC"
+    editor.set_config_setting_ephemeral("wrap", "true");
+    editor.set_config_setting_ephemeral("linebreak", "false");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(1);
+        win.width = (3 + gutter) as u16; // total window width
+    }
+
+    // Start at column 1 (on the emoji start), then gj moves to same visual col in next segment
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.col = "A".len();
+    }
+
+    // Press 'g' then 'j'
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert_eq!(buf.cursor.row, 0); // same logical line
+    // Next segment is "BC"; desired visual col from seg start was 1 (after 'A')
+    // In next segment, that lands on 'C' (byte index of 'C' is "A🙂B".len())
+    let expected_col = "A🙂B".len();
+    assert_eq!(buf.cursor.col, expected_col);
+    Ok(())
+}
+
+#[test]
+fn gj_with_wrap_moves_to_next_line_when_last_segment() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("A🙂BC\nxyz")?; // two lines
+
+    // Wrap into 3 columns
+    editor.set_config_setting_ephemeral("wrap", "true");
+    editor.set_config_setting_ephemeral("linebreak", "false");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(2);
+        win.width = (3 + gutter) as u16;
+    }
+
+    // Put cursor in last segment of first line (on 'C')
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.row = 0;
+        buf.cursor.col = "A🙂B".len(); // on 'C'
+    }
+
+    // gj should move to line 1, first segment, similar visual column
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert_eq!(buf.cursor.row, 1);
+    // With desired visual col = 1, on "xyz" it should be 'y'
+    let expected = "x".len();
+    assert_eq!(buf.cursor.col, expected);
+    Ok(())
+}
+
+#[test]
+fn gj_without_wrap_moves_down_one_buffer_line_preserving_byte_col() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("🙂ab\n🙂xyz")?;
+
+    editor.set_config_setting_ephemeral("wrap", "false");
+    editor.set_config_setting_ephemeral("sidescrolloff", "0");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(2);
+        win.width = (5 + gutter) as u16;
+        win.horiz_offset = 0;
+    }
+
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.row = 0;
+        buf.cursor.col = "🙂a".len(); // on 'b'
+    }
+
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert_eq!(buf.cursor.row, 1);
+    // Should land at same byte col if valid; line starts with emoji then 'x'
+    let expected = "🙂x".len();
+    assert_eq!(buf.cursor.col, expected);
+    Ok(())
+}
+
+#[test]
+fn gj_extends_selection_in_visual_mode() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("A🙂BC\nDEF")?;
+
+    // Wrap into 3 cols so first line segments: "A🙂" | "BC"
+    editor.set_config_setting_ephemeral("wrap", "true");
+    editor.set_config_setting_ephemeral("linebreak", "false");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(2);
+        win.width = (3 + gutter) as u16;
+    }
+
+    // Start on '🙂' (byte after 'A'), enter visual, then gj
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.row = 0;
+        buf.cursor.col = "A".len();
+    }
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert!(buf.selection.is_some());
+    let sel = buf.selection.as_ref().unwrap();
+    assert!(sel.end.row >= sel.start.row);
+    Ok(())
+}

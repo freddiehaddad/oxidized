@@ -37,6 +37,7 @@
 "G" = "buffer_end"          # Go to last line of buffer
 "g0" = "display_line_start"  # Go to first screen column (start of display line)
 "g$" = "display_line_end"    # Go to last screen column (end of display line)
+"gj" = "display_line_down"    # Move down by display line (wrapped segment)
 
 # Mode transitions
 "i" = "insert_mode"            # Insert before cursor
@@ -248,6 +249,7 @@
 "$" = "line_end"        # Extend to end of line
 "g_" = "line_last_nonblank" # Extend to last non-blank character
 "g$" = "display_line_end"    # Extend to end of display line
+"gj" = "display_line_down"   # Extend down by display line
 
 # Actions
 "d" = "delete_selection" # Delete selection
@@ -272,6 +274,7 @@
 "$" = "line_end"      # Extend to end of line
 "g_" = "line_last_nonblank" # Extend to last non-blank character
 "g$" = "display_line_end"    # Extend to end of display line
+"gj" = "display_line_down"   # Extend down by display line
 
 # Actions
 "d" = "delete_selection" # Delete selected lines
@@ -297,6 +300,7 @@
 "$" = "line_end"      # Extend to end of line
 "g_" = "line_last_nonblank" # Extend to last non-blank character
 "g$" = "display_line_end"    # Extend to end of display line
+"gj" = "display_line_down"   # Extend down by display line
 
 # Actions
 "d" = "delete_selection" # Delete block

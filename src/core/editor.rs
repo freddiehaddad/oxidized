@@ -953,6 +953,163 @@ impl Editor {
         }
     }
 
+    /// Move cursor down by one display line (wrapped segment). Similar to Vim's `gj`.
+    /// When wrapping is enabled, this moves within the same logical line if possible,
+    /// otherwise advances to the next line. It attempts to preserve the visual column
+    /// (in screen cells) relative to the start of the display segment.
+    pub fn move_cursor_display_line_down(&mut self) {
+        use unicode_segmentation::UnicodeSegmentation;
+        use unicode_width::UnicodeWidthStr;
+
+        // Capture immutable info to avoid borrow conflicts
+        let (wrap_lines, line_break, win_width, horiz_offset, side_scroll_off) = {
+            let wrap_lines = self.config.behavior.wrap_lines;
+            let line_break = self.config.behavior.line_break;
+            let win = match self.window_manager.current_window() {
+                Some(w) => (w.width as usize, w.horiz_offset),
+                None => return,
+            };
+            (
+                wrap_lines,
+                line_break,
+                win.0,
+                win.1,
+                self.config.interface.side_scroll_off,
+            )
+        };
+
+        // Access buffer immutably for computations
+        let (row, cursor_col, line, lines_len) = if let Some(buf) = self.current_buffer() {
+            let row = buf.cursor.row;
+            let cursor_col = buf.cursor.col;
+            let line = match buf.get_line(row) {
+                Some(s) => s.clone(),
+                None => return,
+            };
+            (row, cursor_col, line, buf.lines.len())
+        } else {
+            return;
+        };
+
+        // Match UI text width (window width minus gutter)
+        let gutter = self.ui.compute_gutter_width(lines_len);
+        let text_width = win_width.saturating_sub(gutter).max(1);
+
+        // Determine current segment [seg_start, seg_end)
+        let (seg_start, seg_end) = if wrap_lines {
+            let mut seg_start = 0usize;
+            let mut seg_end;
+            loop {
+                let (e, _cols) = self
+                    .ui
+                    .wrap_next_end_byte(&line, seg_start, text_width, line_break);
+                seg_end = e;
+                if cursor_col < seg_end {
+                    break;
+                }
+                if seg_end <= seg_start || seg_end >= line.len() {
+                    break;
+                }
+                seg_start = seg_end;
+            }
+            (seg_start, seg_end)
+        } else {
+            let start = UI::floor_char_boundary(&line, horiz_offset);
+            let eff_width = text_width.saturating_sub(side_scroll_off);
+            if eff_width == 0 {
+                (start, start)
+            } else {
+                let (end, _cols) = self
+                    .ui
+                    .wrap_next_end_byte(&line, start, eff_width, /*word_break*/ false);
+                (start, end)
+            }
+        };
+
+        // Compute desired visual columns from segment start to cursor
+        let mut desired_cols = 0usize;
+        if seg_start < cursor_col && cursor_col <= line.len() {
+            for g in line[seg_start..cursor_col].graphemes(true) {
+                desired_cols = desired_cols.saturating_add(UnicodeWidthStr::width(g));
+            }
+        }
+
+        // Compute next segment location
+        let mut target_row = row;
+        let (next_line, next_start, next_end) = if wrap_lines {
+            if seg_end < line.len() {
+                // Next segment within the same line
+                let (e, _cols) = self
+                    .ui
+                    .wrap_next_end_byte(&line, seg_end, text_width, line_break);
+                (line.clone(), seg_end, e)
+            } else {
+                // Move to first segment of next line if exists
+                let next_row = row + 1;
+                if next_row >= lines_len {
+                    return; // Can't move further down
+                }
+                let nline = if let Some(buf) = self.current_buffer() {
+                    buf.get_line(next_row).cloned().unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let (e, _cols) = self
+                    .ui
+                    .wrap_next_end_byte(&nline, 0, text_width, line_break);
+                target_row = next_row;
+                (nline, 0usize, e)
+            }
+        } else {
+            // No wrap: behave like moving to next buffer line; align within visible slice
+            let next_row = row + 1;
+            if next_row >= lines_len {
+                return;
+            }
+            let nline = if let Some(buf) = self.current_buffer() {
+                buf.get_line(next_row).cloned().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let start = UI::floor_char_boundary(&nline, horiz_offset);
+            let eff_width = text_width.saturating_sub(side_scroll_off);
+            let end = if eff_width == 0 {
+                start
+            } else {
+                self.ui
+                    .wrap_next_end_byte(&nline, start, eff_width, /*word_break*/ false)
+                    .0
+            };
+            target_row = next_row;
+            (nline, start, end)
+        };
+
+        // Find target column within next segment that best matches desired_cols using
+        // ceiling behavior: pick the first grapheme whose right edge crosses desired_cols.
+        let mut target_rel = 0usize; // byte offset relative to next_start
+        let mut acc = 0usize; // accumulated display columns consumed so far
+        if next_start < next_end && next_end <= next_line.len() {
+            for (rel, g) in next_line[next_start..next_end].grapheme_indices(true) {
+                let w = UnicodeWidthStr::width(g);
+                if desired_cols < acc.saturating_add(w) {
+                    target_rel = rel;
+                    break;
+                }
+                // Not yet reached desired column; advance
+                target_rel = rel;
+                acc = acc.saturating_add(w);
+            }
+        }
+        let target_raw = next_start + target_rel;
+
+        // Apply move
+        if let Some(buffer) = self.current_buffer_mut() {
+            buffer.cursor.row = target_row;
+            let target_col = buffer.prev_grapheme_boundary_inclusive(target_row, target_raw);
+            buffer.cursor.col = target_col;
+        }
+    }
+
     // Command completion methods
     pub fn start_command_completion(&mut self, input: &str) {
         // Build dynamic context for completion (cwd and buffers)
