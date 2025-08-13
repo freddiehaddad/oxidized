@@ -49,3 +49,15 @@ criterion = { version = "0.7", features = ["html_reports"] }
 [[bench]]
 name = "search_bench"
 harness = false
+
+[[bench]]
+name = "wrap_bench"
+harness = false
+
+[[bench]]
+name = "viewport_hscroll_bench"
+harness = false
+
+[[bench]]
+name = "gutter_status_bench"
+harness = false
