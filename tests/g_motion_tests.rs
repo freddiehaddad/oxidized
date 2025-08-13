@@ -580,3 +580,185 @@ fn gj_extends_selection_in_visual_mode() -> Result<()> {
     assert!(sel.end.row >= sel.start.row);
     Ok(())
 }
+
+#[test]
+fn gk_with_wrap_moves_within_wrapped_segments() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("A🙂BC")?; // 🙂 width 2
+
+    // Wrap into 3 columns -> segments: "A🙂" | "BC"
+    editor.set_config_setting_ephemeral("wrap", "true");
+    editor.set_config_setting_ephemeral("linebreak", "false");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(1);
+        win.width = (3 + gutter) as u16;
+    }
+
+    // Start in second segment on 'C'
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.col = "A🙂B".len();
+    }
+
+    // Press 'g' then 'k'
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert_eq!(buf.cursor.row, 0);
+    // Move up to same visual column in previous segment -> after 'A' (on emoji)
+    let expected = "A".len();
+    assert_eq!(buf.cursor.col, expected);
+    Ok(())
+}
+
+#[test]
+fn gk_with_wrap_moves_to_prev_line_when_first_segment() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("A🙂BC\nxyz")?; // two lines
+
+    // Wrap into 3 columns
+    editor.set_config_setting_ephemeral("wrap", "true");
+    editor.set_config_setting_ephemeral("linebreak", "false");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(2);
+        win.width = (3 + gutter) as u16;
+    }
+
+    // Start on second line, first segment at visual col 1 (on 'y')
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.row = 1;
+        buf.cursor.col = "x".len();
+    }
+
+    // gk should move to last segment of previous line with similar visual column -> 'C'
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert_eq!(buf.cursor.row, 0);
+    let expected = "A🙂B".len(); // 'C'
+    assert_eq!(buf.cursor.col, expected);
+    Ok(())
+}
+
+#[test]
+fn gk_without_wrap_moves_up_one_buffer_line_preserving_byte_col() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("🙂ab\n🙂xyz")?;
+
+    editor.set_config_setting_ephemeral("wrap", "false");
+    editor.set_config_setting_ephemeral("sidescrolloff", "0");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(2);
+        win.width = (5 + gutter) as u16;
+        win.horiz_offset = 0;
+    }
+
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.row = 1;
+        buf.cursor.col = "🙂x".len(); // on 'y'
+    }
+
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert_eq!(buf.cursor.row, 0);
+    let expected = "🙂a".len(); // 'b'
+    assert_eq!(buf.cursor.col, expected);
+    Ok(())
+}
+
+#[test]
+fn gk_extends_selection_in_visual_mode() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("A🙂BC\nDEF")?;
+
+    // Wrap into 3 columns
+    editor.set_config_setting_ephemeral("wrap", "true");
+    editor.set_config_setting_ephemeral("linebreak", "false");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(2);
+        win.width = (3 + gutter) as u16;
+    }
+
+    // Start on second line 'E', enter visual, then gk
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.row = 1;
+        buf.cursor.col = "D".len();
+    }
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert!(buf.selection.is_some());
+    let sel = buf.selection.as_ref().unwrap();
+    assert!(sel.end.row <= sel.start.row);
+    Ok(())
+}
+
+// Regression: ensure a single gk from a lower logical line only moves up exactly one logical line
+// even when the previous line wraps into multiple display segments (#gk double-move bug).
+#[test]
+fn gk_moves_only_one_logical_line() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    // First line long enough to wrap into multiple display segments, then two more lines
+    let mut editor = make_editor_with_text("AAAA BBBB CCCC DDDD\nEEE FFF\nGGG HHH")?;
+    editor.set_config_setting_ephemeral("wrap", "true");
+    editor.set_config_setting_ephemeral("linebreak", "false");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(3);
+        win.width = (8 + gutter) as u16; // narrow enough to wrap first line
+    }
+
+    // Place cursor on third logical line so one gk -> second, NOT first.
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.row = 2; // third line
+        buf.cursor.col = 0;
+    }
+
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert_eq!(
+        buf.cursor.row, 1,
+        "Expected exactly one logical line upward move",
+    );
+
+    Ok(())
+}

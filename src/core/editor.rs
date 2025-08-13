@@ -1110,6 +1110,204 @@ impl Editor {
         }
     }
 
+    /// Move cursor up by one display line (wrapped segment). Similar to Vim's `gk`.
+    /// When wrapping is enabled, this moves within the same logical line if possible,
+    /// otherwise moves to the last segment of the previous line. Preserves visual column.
+    pub fn move_cursor_display_line_up(&mut self) {
+        use unicode_segmentation::UnicodeSegmentation;
+        use unicode_width::UnicodeWidthStr;
+
+        // Capture immutable info to avoid borrow conflicts
+        let (wrap_lines, line_break, win_width, horiz_offset, side_scroll_off) = {
+            let wrap_lines = self.config.behavior.wrap_lines;
+            let line_break = self.config.behavior.line_break;
+            let win = match self.window_manager.current_window() {
+                Some(w) => (w.width as usize, w.horiz_offset),
+                None => return,
+            };
+            (
+                wrap_lines,
+                line_break,
+                win.0,
+                win.1,
+                self.config.interface.side_scroll_off,
+            )
+        };
+
+        // Access buffer immutably for computations
+        let (row, cursor_col, line, lines_len) = if let Some(buf) = self.current_buffer() {
+            let row = buf.cursor.row;
+            let cursor_col = buf.cursor.col;
+            let line = match buf.get_line(row) {
+                Some(s) => s.clone(),
+                None => return,
+            };
+            (row, cursor_col, line, buf.lines.len())
+        } else {
+            return;
+        };
+
+        // Match UI text width (window width minus gutter)
+        let gutter = self.ui.compute_gutter_width(lines_len);
+        let text_width = win_width.saturating_sub(gutter).max(1);
+
+        // Determine current segment start using explicit boundary collection
+        let (seg_start, segments) = if wrap_lines {
+            let mut starts: Vec<usize> = Vec::new();
+            let mut s = 0usize;
+            starts.push(0);
+            loop {
+                let (e, _cols) = self.ui.wrap_next_end_byte(&line, s, text_width, line_break);
+                if e <= s {
+                    // No progress
+                    break;
+                }
+                // e marks the end of segment that started at s; next segment starts at e if not EOL
+                if e < line.len() {
+                    starts.push(e);
+                }
+                if e >= line.len() {
+                    break;
+                }
+                s = e;
+            }
+            // Identify current segment index
+            let mut seg_index = 0usize;
+            if starts.len() > 1 {
+                for i in 0..starts.len() {
+                    let end_i = if i + 1 < starts.len() {
+                        starts[i + 1]
+                    } else {
+                        line.len()
+                    };
+                    if cursor_col < end_i {
+                        seg_index = i;
+                        break;
+                    }
+                }
+            }
+            let seg_start = starts[seg_index];
+            (seg_start, starts)
+        } else {
+            let start = UI::floor_char_boundary(&line, horiz_offset);
+            (start, vec![start])
+        };
+
+        // Compute desired visual columns from segment start to cursor
+        let mut desired_cols = 0usize;
+        if seg_start < cursor_col && cursor_col <= line.len() {
+            for g in line[seg_start..cursor_col].graphemes(true) {
+                desired_cols = desired_cols.saturating_add(UnicodeWidthStr::width(g));
+            }
+        }
+
+        // Compute previous segment location
+        let mut target_row = row;
+        let (prev_line, prev_start, prev_end) = if wrap_lines {
+            // segments vector contains starts for current line
+            if let Some(pos) = segments.iter().position(|&s| s == seg_start) {
+                if pos > 0 {
+                    // Previous segment within same line
+                    let prev_start = segments[pos - 1];
+                    let prev_end = seg_start;
+                    (line.clone(), prev_start, prev_end)
+                } else {
+                    // Need previous logical line's last segment
+                    if row == 0 {
+                        return;
+                    }
+                    let prev_row = row - 1;
+                    if prev_row >= lines_len {
+                        return;
+                    }
+                    let pline = if let Some(buf) = self.current_buffer() {
+                        buf.get_line(prev_row).cloned().unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                    // Build segment starts for previous line
+                    let mut pstarts: Vec<usize> = Vec::new();
+                    let mut s = 0usize;
+                    pstarts.push(0);
+                    loop {
+                        let (e, _c) = self
+                            .ui
+                            .wrap_next_end_byte(&pline, s, text_width, line_break);
+                        if e <= s {
+                            break;
+                        }
+                        if e < pline.len() {
+                            pstarts.push(e);
+                        }
+                        if e >= pline.len() {
+                            break;
+                        }
+                        s = e;
+                    }
+                    let last_start = *pstarts.last().unwrap_or(&0);
+                    target_row = prev_row;
+                    let prev_start = last_start;
+                    let prev_end = pline.len();
+                    (pline, prev_start, prev_end)
+                }
+            } else {
+                // Fallback (should not happen)
+                return;
+            }
+        } else {
+            // No wrap: previous buffer line, align within visible slice
+            if row == 0 {
+                return;
+            }
+            let prev_row = row - 1;
+            let pline = if let Some(buf) = self.current_buffer() {
+                buf.get_line(prev_row).cloned().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let start = UI::floor_char_boundary(&pline, horiz_offset);
+            let eff_width = text_width.saturating_sub(side_scroll_off);
+            let end = if eff_width == 0 {
+                start
+            } else {
+                self.ui
+                    .wrap_next_end_byte(&pline, start, eff_width, /*word_break*/ false)
+                    .0
+            };
+            target_row = prev_row;
+            (pline, start, end)
+        };
+
+        // If we failed to find a previous segment within the same line, and didn't already
+        // switch rows, bail (at top of buffer or first segment of line)
+        if prev_end == 0 && target_row == row {
+            return;
+        }
+
+        // Find target column within previous segment that best matches desired_cols (ceiling)
+        let mut target_rel = 0usize;
+        let mut acc = 0usize;
+        if prev_start < prev_end && prev_end <= prev_line.len() {
+            for (rel, g) in prev_line[prev_start..prev_end].grapheme_indices(true) {
+                let w = UnicodeWidthStr::width(g);
+                if desired_cols < acc.saturating_add(w) {
+                    target_rel = rel;
+                    break;
+                }
+                target_rel = rel;
+                acc = acc.saturating_add(w);
+            }
+        }
+        let target_raw = prev_start + target_rel;
+
+        // Apply move
+        if let Some(buffer) = self.current_buffer_mut() {
+            buffer.cursor.row = target_row;
+            let target_col = buffer.prev_grapheme_boundary_inclusive(target_row, target_raw);
+            buffer.cursor.col = target_col;
+        }
+    }
+
     // Command completion methods
     pub fn start_command_completion(&mut self, input: &str) {
         // Build dynamic context for completion (cwd and buffers)
