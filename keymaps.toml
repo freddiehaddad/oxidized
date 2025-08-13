@@ -35,6 +35,7 @@
 "gg" = "buffer_start"       # Go to first line of buffer
 "G" = "buffer_end"          # Go to last line of buffer
 "g0" = "display_line_start"  # Go to first screen column (start of display line)
+"g$" = "display_line_end"    # Go to last screen column (end of display line)
 
 # Mode transitions
 "i" = "insert_mode"            # Insert before cursor
@@ -241,8 +242,10 @@
 "w" = "word_forward"    # Extend to next word start
 "b" = "word_backward"   # Extend to previous word start
 "0" = "line_start"      # Extend to start of line
+"g0" = "display_line_start"  # Extend to start of display line
 "$" = "line_end"        # Extend to end of line
 "g_" = "line_last_nonblank" # Extend to last non-blank character
+"g$" = "display_line_end"    # Extend to end of display line
 
 # Actions
 "d" = "delete_selection" # Delete selection
@@ -262,8 +265,10 @@
 "w" = "word_forward"  # Extend to next word start
 "b" = "word_backward" # Extend to previous word start
 "0" = "line_start"    # Extend to start of line
+"g0" = "display_line_start"  # Extend to start of display line
 "$" = "line_end"      # Extend to end of line
 "g_" = "line_last_nonblank" # Extend to last non-blank character
+"g$" = "display_line_end"    # Extend to end of display line
 
 # Actions
 "d" = "delete_selection" # Delete selected lines
@@ -284,8 +289,10 @@
 "w" = "word_forward"  # Extend to next word start
 "b" = "word_backward" # Extend to previous word start
 "0" = "line_start"    # Extend to start of line
+"g0" = "display_line_start"  # Extend to start of display line
 "$" = "line_end"      # Extend to end of line
 "g_" = "line_last_nonblank" # Extend to last non-blank character
+"g$" = "display_line_end"    # Extend to end of display line
 
 # Actions
 "d" = "delete_selection" # Delete block

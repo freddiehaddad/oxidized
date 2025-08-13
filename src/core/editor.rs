@@ -651,9 +651,12 @@ impl Editor {
                         offset = offset.saturating_sub(1);
                         continue;
                     }
-                    // Adjust right: keep cursor within right edge minus siso
-                    let right_limit = text_width.saturating_sub(siso.max(1));
-                    if cur_cols >= right_limit {
+                    // Adjust right: keep at least `siso` columns to the right of the cursor when possible.
+                    // cur_cols is 0-based (columns before the cursor). The last visible column index is
+                    // (text_width - 1). We should scroll only when cur_cols > (text_width - 1 - siso).
+                    let last_col_index = text_width.saturating_sub(1);
+                    let right_limit = last_col_index.saturating_sub(siso);
+                    if cur_cols > right_limit {
                         // Scroll right by one grapheme and re-evaluate
                         offset = offset.saturating_add(1);
                         continue;
@@ -792,6 +795,78 @@ impl Editor {
         }
     }
 
+    /// Move the cursor to the end of the current display line
+    /// (end of screen/wrapped segment, last character), similar to Vim's `g$`.
+    pub fn move_cursor_display_line_end(&mut self) {
+        // Capture immutable info first to avoid borrow conflicts
+        let (wrap_lines, line_break, win_width, horiz_offset) = {
+            let wrap_lines = self.config.behavior.wrap_lines;
+            let line_break = self.config.behavior.line_break;
+            let win = match self.window_manager.current_window() {
+                Some(w) => (w.width as usize, w.horiz_offset),
+                None => return,
+            };
+            (wrap_lines, line_break, win.0, win.1)
+        };
+
+        // Access buffer immutably to compute target
+        let (row, cursor_col, line, lines_len) = if let Some(buf) = self.current_buffer() {
+            let row = buf.cursor.row;
+            let cursor_col = buf.cursor.col;
+            let line = match buf.get_line(row) {
+                Some(s) => s.clone(),
+                None => return,
+            };
+            (row, cursor_col, line, buf.lines.len())
+        } else {
+            return;
+        };
+
+        // Match UI text width (window width minus gutter)
+        let gutter = self.ui.compute_gutter_width(lines_len);
+        let text_width = win_width.saturating_sub(gutter).max(1);
+
+        let end_byte_exclusive = if wrap_lines {
+            // Walk segments until the one that contains the cursor strictly before its end
+            let mut start = 0usize;
+            loop {
+                let (end, _cols) = self
+                    .ui
+                    .wrap_next_end_byte(&line, start, text_width, line_break);
+                if cursor_col < end {
+                    // End of display segment is 'end' (exclusive)
+                    break end;
+                }
+                if end <= start || end >= line.len() {
+                    // Cursor is at or beyond last segment; use full line end
+                    break line.len();
+                }
+                start = end;
+            }
+        } else {
+            // No-wrap: end of visible display segment. Respect side_scroll_off so
+            // the target stays within the view and doesn't trigger a scroll.
+            let start = UI::floor_char_boundary(&line, horiz_offset);
+            let siso = self.config.interface.side_scroll_off;
+            let eff_width = text_width.saturating_sub(siso);
+            if eff_width == 0 {
+                start
+            } else {
+                let (end, _cols) = self
+                    .ui
+                    .wrap_next_end_byte(&line, start, eff_width, /*word_break*/ false);
+                end
+            }
+        };
+
+        // Move to the last grapheme that ends at/before the segment end
+        if let Some(buffer) = self.current_buffer_mut() {
+            let target_raw = end_byte_exclusive.saturating_sub(1);
+            let target_col = buffer.prev_grapheme_boundary_inclusive(row, target_raw);
+            buffer.cursor.col = target_col;
+        }
+    }
+
     // Command completion methods
     pub fn start_command_completion(&mut self, input: &str) {
         // Build dynamic context for completion (cwd and buffers)
@@ -900,7 +975,6 @@ impl Editor {
         let Some((mode, object_type)) =
             crate::features::text_objects::parse_text_object(text_object_str)
         else {
-            debug!("Invalid text object: {}", text_object_str);
             return Ok(false);
         };
 

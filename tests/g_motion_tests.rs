@@ -118,6 +118,166 @@ fn g0_moves_to_line_start_even_with_digit() -> Result<()> {
 }
 
 #[test]
+fn g_dollar_with_wrap_moves_to_segment_end() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("A🙂BC")?; // 🙂 width 2
+
+    // Enable wrapping and set a small window width so line wraps into segments of 3 cols
+    editor.set_config_setting_ephemeral("wrap", "true");
+    editor.set_config_setting_ephemeral("linebreak", "false");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(1);
+        win.width = (3 + gutter) as u16; // total window width => 3 text columns
+    }
+
+    // Place cursor at start (in first segment) and press 'g$'
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.col = 0;
+    }
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('$'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    // First segment is "A🙂"; end of display segment is after the emoji.
+    // Cursor should land on the last grapheme in the segment, i.e., the emoji's start.
+    let expected_pos = "A".len();
+    assert_eq!(buf.cursor.row, 0);
+    assert_eq!(buf.cursor.col, expected_pos);
+    Ok(())
+}
+
+#[test]
+fn g_dollar_without_wrap_does_not_scroll() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("🙂Xabc")?; // emoji then ASCII
+
+    // Disable wrapping and set a small content width; start after the emoji
+    editor.set_config_setting_ephemeral("wrap", "false");
+    editor.set_config_setting_ephemeral("sidescrolloff", "0");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(1);
+        win.width = (3 + gutter) as u16; // 3 text columns visible
+        win.horiz_offset = 1; // start after the first grapheme (emoji)
+    }
+
+    // Press 'g$'
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('$'), KeyModifiers::NONE),
+    )?;
+
+    // Expect: cursor at end of visible segment (3 cols from start = Xab -> on 'b')
+    let buf = editor.current_buffer().unwrap();
+    assert_eq!(buf.cursor.row, 0);
+    let expected_b_start = "🙂Xa".len(); // start byte of 'b'
+    assert_eq!(buf.cursor.col, expected_b_start);
+
+    // And no horizontal scroll should have occurred
+    let win = editor.window_manager.current_window().unwrap();
+    assert_eq!(win.horiz_offset, 1);
+    Ok(())
+}
+
+#[test]
+fn g_dollar_extends_in_visual_mode_with_wrap() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("A🙂BC")?; // 🙂 width 2
+
+    // Enable wrapping and set a small window width so line wraps into 3-col segment
+    editor.set_config_setting_ephemeral("wrap", "true");
+    editor.set_config_setting_ephemeral("linebreak", "false");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(1);
+        win.width = (3 + gutter) as u16;
+    }
+
+    // Start at col 0, enter visual mode, then g$
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.col = 0;
+    }
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('$'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert!(buf.selection.is_some());
+    let sel = buf.selection.as_ref().unwrap();
+    // Selection end should be at the last grapheme in first segment (emoji start)
+    let expected_end = "A".len();
+    assert_eq!(sel.end.row, 0);
+    assert_eq!(sel.end.col, expected_end);
+    // Selection start stayed at 0
+    assert_eq!(sel.start.col, 0);
+    Ok(())
+}
+
+#[test]
+fn g_dollar_extends_in_visual_mode_without_wrap_no_scroll() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("🙂Xabc")?;
+
+    // No wrap; narrow content width with horiz_offset=1 so visible starts after emoji
+    editor.set_config_setting_ephemeral("wrap", "false");
+    editor.set_config_setting_ephemeral("sidescrolloff", "0");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(1);
+        win.width = (3 + gutter) as u16; // 3 text columns
+        win.horiz_offset = 1;
+    }
+
+    // Place cursor at visible start (after emoji), enter visual, then g$
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.col = "🙂".len();
+    }
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('$'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert!(buf.selection.is_some());
+    let sel = buf.selection.as_ref().unwrap();
+    // End should be at last visible column: on 'b'
+    let expected_end = "🙂Xa".len();
+    assert_eq!(sel.end.row, 0);
+    assert_eq!(sel.end.col, expected_end);
+    // Start should be at visible start
+    assert_eq!(sel.start.col, "🙂".len());
+
+    // No horizontal scroll occurred
+    let win = editor.window_manager.current_window().unwrap();
+    assert_eq!(win.horiz_offset, 1);
+    Ok(())
+}
+
+#[test]
 fn g_joins_moves_to_last_non_blank_in_normal_mode() -> Result<()> {
     let mut key_handler = KeyHandler::new();
     let mut editor = make_editor_with_text("abc   ")?; // trailing spaces
@@ -181,5 +341,95 @@ fn g_joins_extends_in_visual_mode() -> Result<()> {
     let sel = buf.selection.as_ref().unwrap();
     assert_eq!(sel.end.row, 0);
     assert_eq!(sel.end.col, 2);
+    Ok(())
+}
+
+#[test]
+fn g0_extends_in_visual_mode_with_wrap() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("A🙂BC")?; // 🙂 width 2
+
+    // Enable wrapping with 3 text columns so first segment is "A🙂"
+    editor.set_config_setting_ephemeral("wrap", "true");
+    editor.set_config_setting_ephemeral("linebreak", "false");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(1);
+        win.width = (3 + gutter) as u16;
+    }
+
+    // Place cursor at end of line to ensure movement is visible
+    if let Some(buf) = editor.current_buffer_mut()
+        && let Some(line) = buf.get_line(0)
+    {
+        buf.cursor.col = line.len();
+    }
+
+    // Enter visual then g0
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert!(buf.selection.is_some());
+    let sel = buf.selection.as_ref().unwrap();
+    // Start at original cursor (end), end should be at start of second segment (after "A🙂")
+    let second_seg_start = "A🙂".len();
+    assert_eq!(sel.end.row, 0);
+    assert_eq!(sel.end.col, second_seg_start);
+    Ok(())
+}
+
+#[test]
+fn g0_extends_in_visual_mode_without_wrap_no_scroll() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("🙂Xabc")?; // emoji then ASCII
+
+    // No wrap; 3 text columns visible, offset 1 so visible starts after emoji
+    editor.set_config_setting_ephemeral("wrap", "false");
+    editor.set_config_setting_ephemeral("sidescrolloff", "0");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(1);
+        win.width = (3 + gutter) as u16;
+        win.horiz_offset = 1;
+    }
+
+    // Put cursor near end so selection extends left
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.col = "🙂Xab".len(); // on 'b'
+    }
+
+    // Enter visual then g0
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert!(buf.selection.is_some());
+    let sel = buf.selection.as_ref().unwrap();
+    // End should be at visible start (after emoji)
+    let visible_start = "🙂".len();
+    assert_eq!(sel.end.row, 0);
+    assert_eq!(sel.end.col, visible_start);
+    // No horizontal scroll occurred
+    let win = editor.window_manager.current_window().unwrap();
+    assert_eq!(win.horiz_offset, 1);
     Ok(())
 }

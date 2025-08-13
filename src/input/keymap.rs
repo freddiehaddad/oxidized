@@ -521,8 +521,42 @@ impl KeyHandler {
             return Ok(());
         }
 
-        // For modes other than Normal and OperatorPending, handle simple key mapping
+        // For modes other than Normal and OperatorPending, handle mapping.
+        // Add minimal multi-key support for Visual modes to allow 'g' prefix combos.
         if !matches!(editor.mode(), Mode::Normal | Mode::OperatorPending) {
+            // Minimal 'g' prefix handling in visual modes
+            if matches!(
+                editor.mode(),
+                Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            ) {
+                // If we just received 'g', start a pending sequence and wait for next key
+                if self.pending_sequence.is_empty() && key_string == "g" {
+                    self.pending_sequence = "g".to_string();
+                    debug!("Visual: started 'g' pending sequence");
+                    return Ok(());
+                }
+                // If we have a pending 'g', try to resolve 'g' + key
+                if self.pending_sequence == "g" {
+                    let seq = format!("g{}", key_string);
+                    let map = match editor.mode() {
+                        Mode::Visual => &self.keymap_config.visual_mode,
+                        Mode::VisualLine => &self.keymap_config.visual_line_mode,
+                        Mode::VisualBlock => &self.keymap_config.visual_block_mode,
+                        _ => unreachable!(),
+                    };
+                    if let Some(action_name) = map.get(&seq) {
+                        let action_name = action_name.clone();
+                        debug!("Visual: executing '{}' for sequence '{}'", action_name, seq);
+                        self.execute_action(editor, &action_name, key)?;
+                        self.pending_sequence.clear();
+                        return Ok(());
+                    } else {
+                        // No matching 'g' combo; clear and fall through to single-key mapping
+                        debug!("Visual: no match for sequence '{}', falling back", seq);
+                        self.pending_sequence.clear();
+                    }
+                }
+            }
             let action = match editor.mode() {
                 Mode::Insert => {
                     if let KeyCode::Char(_) = key.code {
@@ -825,6 +859,7 @@ impl KeyHandler {
             // Line movement
             "line_start" => self.action_line_start(editor)?,
             "display_line_start" => self.action_display_line_start(editor)?,
+            "display_line_end" => self.action_display_line_end(editor)?,
             "line_last_nonblank" => self.action_line_last_nonblank(editor)?,
             "line_end" => self.action_line_end(editor)?,
             "line_first_char" => self.action_line_first_char(editor)?,
@@ -1233,6 +1268,18 @@ impl KeyHandler {
             Mode::Visual | Mode::VisualLine | Mode::VisualBlock
         );
         editor.move_cursor_display_line_start();
+        if is_visual_mode && let Some(buffer) = editor.current_buffer_mut() {
+            buffer.update_visual_selection(buffer.cursor);
+        }
+        Ok(())
+    }
+
+    fn action_display_line_end(&self, editor: &mut Editor) -> Result<()> {
+        let is_visual_mode = matches!(
+            editor.mode(),
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+        );
+        editor.move_cursor_display_line_end();
         if is_visual_mode && let Some(buffer) = editor.current_buffer_mut() {
             buffer.update_visual_selection(buffer.cursor);
         }
