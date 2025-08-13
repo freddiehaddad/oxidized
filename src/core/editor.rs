@@ -602,25 +602,65 @@ impl Editor {
 
             // Maintain horizontal offset when wrapping is disabled
             if !self.config.behavior.wrap_lines {
-                // Visible text columns within window (excluding line number column in UI)
-                // We can't access UI's line number width here; use full window width as an approximation
-                let text_width = current_window.width as usize;
-                let col = buffer.cursor.col;
+                use unicode_segmentation::UnicodeSegmentation;
+                use unicode_width::UnicodeWidthStr;
+
+                // Visible text columns for content region: subtract gutter width
+                let gutter = self.ui.compute_gutter_width(buffer.lines.len());
+                let mut text_width = current_window.width as usize;
+                text_width = text_width.saturating_sub(gutter).max(1);
+
                 let siso = self.config.interface.side_scroll_off;
 
-                // Adjust horiz_offset to keep cursor within [offset+siso, offset+text_width-siso-1]
-                if col < current_window.horiz_offset.saturating_add(siso) {
-                    current_window.horiz_offset = col.saturating_sub(siso);
-                } else if col
-                    >= current_window
-                        .horiz_offset
-                        .saturating_add(text_width.saturating_sub(siso.max(1)))
-                {
-                    let target = col
-                        .saturating_sub(text_width.saturating_sub(siso.max(1)))
-                        .saturating_add(1);
-                    current_window.horiz_offset = target;
+                // Compute visual column of cursor relative to current horiz_offset
+                let line = buffer
+                    .get_line(buffer.cursor.row)
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                let cursor_byte = buffer.cursor.col.min(line.len());
+
+                // Helper to compute columns from current offset to cursor
+                let compute_cursor_cols = |offset_chars: usize| -> usize {
+                    let start_byte = crate::ui::UI::floor_char_boundary(line, offset_chars);
+                    if start_byte >= cursor_byte {
+                        return 0;
+                    }
+                    let mut cols = 0usize;
+                    for g in line[start_byte..cursor_byte].graphemes(true) {
+                        cols += UnicodeWidthStr::width(g);
+                    }
+                    cols
+                };
+
+                let mut offset = current_window.horiz_offset;
+
+                // Ensure the cursor is not left of the visible window. If the current
+                // offset points beyond the cursor's character position, pull it back so
+                // the cursor is at least siso columns from the left edge. This also
+                // handles the case siso == 0, ensuring we still scroll fully left.
+                let cursor_chars_from_start = line[..cursor_byte].chars().count();
+                let desired_left_offset = cursor_chars_from_start.saturating_sub(siso);
+                if offset > desired_left_offset {
+                    offset = desired_left_offset;
                 }
+                // Adjust left/right: ensure cursor stays within the visible area
+                loop {
+                    let cur_cols = compute_cursor_cols(offset);
+                    // Left guard: if cursor is too close to the left edge, nudge left
+                    if cur_cols < siso && offset > 0 {
+                        offset = offset.saturating_sub(1);
+                        continue;
+                    }
+                    // Adjust right: keep cursor within right edge minus siso
+                    let right_limit = text_width.saturating_sub(siso.max(1));
+                    if cur_cols >= right_limit {
+                        // Scroll right by one grapheme and re-evaluate
+                        offset = offset.saturating_add(1);
+                        continue;
+                    }
+                    break;
+                }
+                current_window.horiz_offset = offset;
             } else {
                 // Reset horizontal offset when wrap is enabled
                 current_window.horiz_offset = 0;
@@ -704,77 +744,37 @@ impl Editor {
             (wrap_lines, line_break, win.0, win.1)
         };
 
-        // Now mutably access the buffer
-        let Some(buffer) = self.current_buffer_mut() else {
+        // Access buffer immutably to compute target
+        let (row, cursor_col, line, _lines_len) = if let Some(buf) = self.current_buffer() {
+            let row = buf.cursor.row;
+            let cursor_col = buf.cursor.col;
+            let line = match buf.get_line(row) {
+                Some(s) => s.clone(),
+                None => return,
+            };
+            (row, cursor_col, line, buf.lines.len())
+        } else {
             return;
-        };
-        let row = buffer.cursor.row;
-        let line = match buffer.get_line(row) {
-            Some(s) => s.clone(),
-            None => return,
         };
 
         let target_col_raw = if wrap_lines {
-            use unicode_segmentation::UnicodeSegmentation;
-            use unicode_width::UnicodeWidthStr;
-            // Minimal local wrap computation equivalent to UI::wrap_next_end_byte
+            // Match UI wrapping: subtract gutter from window width for text columns
+            let gutter = self
+                .ui
+                .compute_gutter_width(self.current_buffer().map(|b| b.lines.len()).unwrap_or(0));
+            let text_width = win_width.saturating_sub(gutter).max(1);
             let mut start = 0usize;
-            'outer: loop {
-                // Compute next segment end
-                let slice = &line[start..];
-                if slice.is_empty() || win_width == 0 {
-                    break 'outer start;
-                }
-                let mut cols = 0usize;
-                let mut last_break_end_rel: Option<usize> = None;
-                let mut last_good_rel = 0usize;
-                for (rel, g) in slice.grapheme_indices(true) {
-                    let g_end = rel + g.len();
-                    let g_cols = UnicodeWidthStr::width(g);
-                    if g.trim().is_empty() {
-                        last_break_end_rel = Some(g_end);
-                    }
-                    if cols + g_cols > win_width {
-                        let end_rel = if line_break {
-                            last_break_end_rel.unwrap_or(last_good_rel)
-                        } else {
-                            last_good_rel
-                        };
-                        let end = start + end_rel;
-                        if buffer.cursor.col <= end {
-                            break 'outer start;
-                        }
-                        if end <= start || end >= line.len() {
-                            break 'outer start;
-                        }
-                        start = end;
-                        continue 'outer;
-                    }
-                    cols += g_cols;
-                    last_good_rel = g_end;
-                    if cols == win_width {
-                        let end_rel = if line_break {
-                            last_break_end_rel.unwrap_or(last_good_rel)
-                        } else {
-                            last_good_rel
-                        };
-                        let end = start + end_rel;
-                        if buffer.cursor.col <= end {
-                            break 'outer start;
-                        }
-                        if end <= start || end >= line.len() {
-                            break 'outer start;
-                        }
-                        start = end;
-                        continue 'outer;
-                    }
-                }
-                let end = start + slice.len();
-                if buffer.cursor.col <= end {
-                    break 'outer start;
+            loop {
+                let (end, _count) = self
+                    .ui
+                    .wrap_next_end_byte(&line, start, text_width, line_break);
+                // If the cursor is strictly before this segment's end, we're in this segment.
+                // If it's exactly at the end boundary, it belongs to the next segment.
+                if cursor_col < end {
+                    break start;
                 }
                 if end <= start || end >= line.len() {
-                    break 'outer start;
+                    break start;
                 }
                 start = end;
             }
@@ -784,9 +784,12 @@ impl Editor {
             UI::floor_char_boundary(&line, horiz_offset)
         };
 
-        // Snap to a valid grapheme boundary at or before the target column
-        let target_col = buffer.prev_grapheme_boundary_inclusive(row, target_col_raw);
-        buffer.cursor.col = target_col;
+        // Now mutably set the cursor using a fresh mutable borrow
+        if let Some(buffer) = self.current_buffer_mut() {
+            // Snap to a valid grapheme boundary at or before the target column
+            let target_col = buffer.prev_grapheme_boundary_inclusive(row, target_col_raw);
+            buffer.cursor.col = target_col;
+        }
     }
 
     // Command completion methods

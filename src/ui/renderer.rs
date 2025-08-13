@@ -959,23 +959,8 @@ impl UI {
                         }
                         let mut start = 0usize;
                         loop {
-                            let max_end = (start + text_width).min(line.len());
-                            let end = if word_break {
-                                let bytes = line.as_bytes();
-                                let mut cut = max_end;
-                                let mut i = max_end;
-                                while i > start {
-                                    i -= 1;
-                                    let b = bytes[i];
-                                    if b == b' ' || b == b'\t' {
-                                        cut = i + 1;
-                                        break;
-                                    }
-                                }
-                                cut
-                            } else {
-                                max_end
-                            };
+                            let (end, _c) =
+                                self.wrap_next_end_byte(line, start, text_width, word_break);
                             visual_rows += 1;
                             if end >= line.len() {
                                 break;
@@ -985,45 +970,43 @@ impl UI {
                     }
 
                     // Determine which wrapped segment within the cursor line the cursor is in
-                    let segment_start = if buffer.cursor.row < buffer.lines.len() {
+                    let (segment_index, segment_start) = if buffer.cursor.row < buffer.lines.len() {
                         let line = &buffer.lines[buffer.cursor.row];
                         let mut start = 0usize;
+                        let mut seg_idx = 0usize;
                         loop {
-                            let max_end = (start + text_width).min(line.len());
-                            let end = if word_break {
-                                let bytes = line.as_bytes();
-                                let mut cut = max_end;
-                                let mut i = max_end;
-                                while i > start {
-                                    i -= 1;
-                                    let b = bytes[i];
-                                    if b == b' ' || b == b'\t' {
-                                        cut = i + 1;
-                                        break;
-                                    }
-                                }
-                                cut
-                            } else {
-                                max_end
-                            };
-                            if buffer.cursor.col <= end {
-                                break start;
+                            let (end, _c) =
+                                self.wrap_next_end_byte(line, start, text_width, word_break);
+                            // Treat a cursor at a segment boundary as belonging to the NEXT segment,
+                            // except when this is the final segment (end-of-line).
+                            if buffer.cursor.col < end {
+                                break (seg_idx, start);
                             }
                             if end >= line.len() {
-                                break start;
+                                break (seg_idx, start);
                             }
                             start = end;
+                            seg_idx += 1;
                         }
                     } else {
-                        0usize
+                        (0usize, 0usize)
                     };
 
-                    let screen_row = visual_rows;
+                    let screen_row = visual_rows + segment_index;
                     if screen_row < content_height {
-                        let within_segment_col = buffer.cursor.col.saturating_sub(segment_start);
+                        use unicode_width::UnicodeWidthStr;
+                        let line = if buffer.cursor.row < buffer.lines.len() {
+                            &buffer.lines[buffer.cursor.row]
+                        } else {
+                            ""
+                        };
+                        let start = segment_start.min(line.len());
+                        let end = buffer.cursor.col.min(line.len());
+                        let slice = if start < end { &line[start..end] } else { "" };
+                        let within_segment_cols = UnicodeWidthStr::width(slice);
                         let final_row = current_window.y as usize + screen_row;
                         let final_col =
-                            current_window.x as usize + line_number_width + within_segment_col;
+                            current_window.x as usize + line_number_width + within_segment_cols;
                         terminal.queue_move_cursor(Position::new(final_row, final_col))?;
                     }
                 } else {

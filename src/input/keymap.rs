@@ -827,7 +827,7 @@ impl KeyHandler {
             "display_line_start" => self.action_display_line_start(editor)?,
             "line_last_nonblank" => self.action_line_last_nonblank(editor)?,
             "line_end" => self.action_line_end(editor)?,
-            "line_first_char" => self.action_line_start(editor)?, // Temporary fallback
+            "line_first_char" => self.action_line_first_char(editor)?,
 
             // Buffer movement
             "buffer_start" => self.action_buffer_start(editor)?,
@@ -1196,6 +1196,30 @@ impl KeyHandler {
         );
         if let Some(buffer) = editor.current_buffer_mut() {
             buffer.cursor.col = 0;
+            if is_visual_mode {
+                buffer.update_visual_selection(buffer.cursor);
+            }
+        }
+        Ok(())
+    }
+
+    fn action_line_first_char(&self, editor: &mut Editor) -> Result<()> {
+        let is_visual_mode = matches!(
+            editor.mode(),
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+        );
+        if let Some(buffer) = editor.current_buffer_mut() {
+            if let Some(line) = buffer.get_line(buffer.cursor.row) {
+                let mut idx = 0usize;
+                // Find first non-blank (not space or tab)
+                for (b, ch) in line.char_indices() {
+                    if ch != ' ' && ch != '\t' {
+                        idx = b;
+                        break;
+                    }
+                }
+                buffer.cursor.col = idx;
+            }
             if is_visual_mode {
                 buffer.update_visual_selection(buffer.cursor);
             }

@@ -2,6 +2,7 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use oxidized::core::editor::Editor;
 use oxidized::input::keymap::KeyHandler;
+use oxidized::ui::UI;
 
 fn make_editor_with_text(text: &str) -> Result<Editor> {
     let mut editor = Editor::new()?;
@@ -27,7 +28,9 @@ fn g0_with_wrap_moves_to_segment_start() -> Result<()> {
     editor.set_config_setting_ephemeral("wrap", "true");
     editor.set_config_setting_ephemeral("linebreak", "false");
     if let Some(win) = editor.window_manager.current_window_mut() {
-        win.width = 3; // 3 columns wide
+        // UI text width is window.width - gutter, so include gutter to get 3 text columns
+        let gutter = UI::new().compute_gutter_width(1);
+        win.width = (3 + gutter) as u16; // total window width
     }
 
     // Place cursor in second segment by moving to end of line first
