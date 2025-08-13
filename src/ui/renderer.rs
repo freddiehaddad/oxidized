@@ -18,6 +18,8 @@ struct LineRenderContext {
     editor_mode: crate::core::mode::Mode,
     /// Horizontal base offset into the logical line for rendering
     base_offset: usize,
+    /// Total character count of the full logical line (for selection math)
+    total_line_chars: usize,
 }
 
 pub struct UI {
@@ -371,13 +373,13 @@ impl UI {
     /// Calculate line selection range for visual selection using core helper
     fn calculate_line_selection_range(
         &self,
-        line: &str,
         line_number: usize,
         selection: Option<crate::core::mode::Selection>,
         base_offset: usize,
+        total_line_chars: usize,
     ) -> Option<(usize, usize)> {
         selection
-            .and_then(|sel| sel.highlight_span_for_line(line_number, line.chars().count()))
+            .and_then(|sel| sel.highlight_span_for_line(line_number, total_line_chars))
             .map(|(start, end)| {
                 (
                     start.saturating_sub(base_offset),
@@ -571,6 +573,7 @@ impl UI {
                                 selection: buffer.get_selection(),
                                 editor_mode: editor_state.mode,
                                 base_offset: base_offset_chars,
+                                total_line_chars: line.chars().count(),
                             };
                             let _rendered_cols = self.render_highlighted_line(
                                 terminal,
@@ -579,6 +582,12 @@ impl UI {
                                 &context,
                             )?;
                             if display_slice_cols < text_width {
+                                // Ensure filler uses the row background, not selection bg
+                                if is_cursor_line && self.show_cursor_line {
+                                    terminal.queue_set_bg_color(self.theme.cursor_line_bg)?;
+                                } else {
+                                    terminal.queue_set_bg_color(self.theme.background)?;
+                                }
                                 let filler = " ".repeat(text_width - display_slice_cols);
                                 terminal.queue_print(&filler)?;
                             }
@@ -591,8 +600,15 @@ impl UI {
                                 buffer.get_selection(),
                                 editor_state.mode,
                                 base_offset_chars,
+                                line.chars().count(),
                             )?;
                             if display_slice_cols < text_width {
+                                // Ensure filler uses the row background, not selection bg
+                                if is_cursor_line && self.show_cursor_line {
+                                    terminal.queue_set_bg_color(self.theme.cursor_line_bg)?;
+                                } else {
+                                    terminal.queue_set_bg_color(self.theme.background)?;
+                                }
                                 let filler = " ".repeat(text_width - display_slice_cols);
                                 terminal.queue_print(&filler)?;
                             }
@@ -617,7 +633,7 @@ impl UI {
                         let next_screen_row = window.y as usize + screen_rows_rendered;
                         terminal
                             .queue_move_cursor(Position::new(next_screen_row, window.x as usize))?;
-                        // Clear row background
+                        // Clear row background (do not carry selection bg)
                         terminal.queue_set_bg_color(self.theme.background)?;
                         let spaces = " ".repeat(window.width as usize);
                         terminal.queue_print(&spaces)?;
@@ -746,6 +762,7 @@ impl UI {
                         selection: buffer.get_selection(),
                         editor_mode: editor_state.mode,
                         base_offset: base_offset_chars,
+                        total_line_chars: line.chars().count(),
                     };
                     // Apply horizontal offset by slicing at a character boundary
                     let display_slice = if base_offset_bytes < line.len() {
@@ -817,13 +834,19 @@ impl UI {
                         buffer.get_selection(),
                         editor_state.mode,
                         base_offset_chars,
+                        line.chars().count(),
                     )?;
                     chars_seen
                 };
 
-                // Fill remaining width with appropriate background
+                // Fill remaining width with appropriate background (never selection)
                 if content_rendered < text_width {
                     let remaining_width = text_width - content_rendered;
+                    if is_cursor_line && self.show_cursor_line {
+                        terminal.queue_set_bg_color(self.theme.cursor_line_bg)?;
+                    } else {
+                        terminal.queue_set_bg_color(self.theme.background)?;
+                    }
                     let filler = " ".repeat(remaining_width);
                     terminal.queue_print(&filler)?;
                 }
@@ -1067,10 +1090,10 @@ impl UI {
 
         // Determine if this line has visual selection and what range
         let line_selection_range = self.calculate_line_selection_range(
-            line,
             context.line_number,
             context.selection,
             context.base_offset,
+            context.total_line_chars,
         );
 
         for highlight in highlights {
@@ -1253,10 +1276,15 @@ impl UI {
         selection: Option<crate::core::mode::Selection>,
         editor_mode: crate::core::mode::Mode,
         base_offset: usize,
+        total_line_chars: usize,
     ) -> io::Result<()> {
         // Determine if this line has visual selection and what range
-        let line_selection_range =
-            self.calculate_line_selection_range(line, line_number, selection, base_offset);
+        let line_selection_range = self.calculate_line_selection_range(
+            line_number,
+            selection,
+            base_offset,
+            total_line_chars,
+        );
 
         // Render the entire line with selection highlighting
         self.render_text_segment(
