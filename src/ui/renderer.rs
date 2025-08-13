@@ -13,7 +13,6 @@ use unicode_width::UnicodeWidthStr;
 struct LineRenderContext {
     line_number: usize,
     is_cursor_line: bool,
-    max_width: usize,
     selection: Option<crate::core::mode::Selection>,
     editor_mode: crate::core::mode::Mode,
     /// Horizontal base offset into the logical line for rendering
@@ -569,7 +568,6 @@ impl UI {
                             let context = LineRenderContext {
                                 line_number: buf_row,
                                 is_cursor_line,
-                                max_width: text_width,
                                 selection: buffer.get_selection(),
                                 editor_mode: editor_state.mode,
                                 base_offset: base_offset_chars,
@@ -758,7 +756,6 @@ impl UI {
                     let context = LineRenderContext {
                         line_number: buffer_row,
                         is_cursor_line,
-                        max_width: text_width,
                         selection: buffer.get_selection(),
                         editor_mode: editor_state.mode,
                         base_offset: base_offset_chars,
@@ -1085,8 +1082,9 @@ impl UI {
         let line_bytes = line.as_bytes();
         let mut current_pos = 0;
 
-        // Truncate highlights to fit within max_width
-        let display_len = std::cmp::min(line.len(), context.max_width);
+        // Use full slice length; caller already constrained by wrap/width.
+        // Avoid mixing byte length with column width to prevent truncation.
+        let display_len = line.len();
 
         // Determine if this line has visual selection and what range
         let line_selection_range = self.calculate_line_selection_range(
