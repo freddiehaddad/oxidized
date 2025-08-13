@@ -867,6 +867,92 @@ impl Editor {
         }
     }
 
+    /// Move cursor to the first non-blank character of the current display line
+    /// (screen/wrapped segment). Similar to Vim's `g^`.
+    pub fn move_cursor_display_line_first_nonblank(&mut self) {
+        // Capture immutable info to avoid borrow conflicts
+        let (wrap_lines, line_break, win_width, horiz_offset, side_scroll_off) = {
+            let wrap_lines = self.config.behavior.wrap_lines;
+            let line_break = self.config.behavior.line_break;
+            let win = match self.window_manager.current_window() {
+                Some(w) => (w.width as usize, w.horiz_offset),
+                None => return,
+            };
+            (
+                wrap_lines,
+                line_break,
+                win.0,
+                win.1,
+                self.config.interface.side_scroll_off,
+            )
+        };
+
+        // Access buffer immutably for computations
+        let (row, cursor_col, line, lines_len) = if let Some(buf) = self.current_buffer() {
+            let row = buf.cursor.row;
+            let cursor_col = buf.cursor.col;
+            let line = match buf.get_line(row) {
+                Some(s) => s.clone(),
+                None => return,
+            };
+            (row, cursor_col, line, buf.lines.len())
+        } else {
+            return;
+        };
+
+        // Match UI text width (window width minus gutter)
+        let gutter = self.ui.compute_gutter_width(lines_len);
+        let text_width = win_width.saturating_sub(gutter).max(1);
+
+        // Compute display segment [start, end)
+        let (start, end) = if wrap_lines {
+            let mut seg_start = 0usize;
+            let mut seg_end;
+            loop {
+                let (e, _cols) = self
+                    .ui
+                    .wrap_next_end_byte(&line, seg_start, text_width, line_break);
+                seg_end = e;
+                if cursor_col < seg_end {
+                    break;
+                }
+                if seg_end <= seg_start || seg_end >= line.len() {
+                    break;
+                }
+                seg_start = seg_end;
+            }
+            (seg_start, seg_end)
+        } else {
+            let start = UI::floor_char_boundary(&line, horiz_offset);
+            let eff_width = text_width.saturating_sub(side_scroll_off);
+            if eff_width == 0 {
+                (start, start)
+            } else {
+                let (end, _cols) = self
+                    .ui
+                    .wrap_next_end_byte(&line, start, eff_width, /*word_break*/ false);
+                (start, end)
+            }
+        };
+
+        // Find first non-blank (space or tab) within [start, end)
+        let mut target_raw = start;
+        if start < end
+            && end <= line.len()
+            && let Some((off, _ch)) = line[start..end]
+                .char_indices()
+                .find(|&(_i, c)| c != ' ' && c != '\t')
+        {
+            target_raw = start + off;
+        }
+
+        // Move cursor to grapheme boundary at/preceding target
+        if let Some(buffer) = self.current_buffer_mut() {
+            let target_col = buffer.prev_grapheme_boundary_inclusive(row, target_raw);
+            buffer.cursor.col = target_col;
+        }
+    }
+
     // Command completion methods
     pub fn start_command_completion(&mut self, input: &str) {
         // Build dynamic context for completion (cwd and buffers)

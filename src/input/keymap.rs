@@ -859,6 +859,7 @@ impl KeyHandler {
             // Line movement
             "line_start" => self.action_line_start(editor)?,
             "display_line_start" => self.action_display_line_start(editor)?,
+            "display_line_first_nonblank" => self.action_display_line_first_nonblank(editor)?,
             "display_line_end" => self.action_display_line_end(editor)?,
             "line_last_nonblank" => self.action_line_last_nonblank(editor)?,
             "line_end" => self.action_line_end(editor)?,
@@ -1268,6 +1269,18 @@ impl KeyHandler {
             Mode::Visual | Mode::VisualLine | Mode::VisualBlock
         );
         editor.move_cursor_display_line_start();
+        if is_visual_mode && let Some(buffer) = editor.current_buffer_mut() {
+            buffer.update_visual_selection(buffer.cursor);
+        }
+        Ok(())
+    }
+
+    fn action_display_line_first_nonblank(&self, editor: &mut Editor) -> Result<()> {
+        let is_visual_mode = matches!(
+            editor.mode(),
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+        );
+        editor.move_cursor_display_line_first_nonblank();
         if is_visual_mode && let Some(buffer) = editor.current_buffer_mut() {
             buffer.update_visual_selection(buffer.cursor);
         }

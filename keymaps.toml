@@ -30,6 +30,7 @@
 "e" = "word_end"            # Move to end of next word
 "0" = "line_start"          # Go to column 0
 "^" = "line_first_char"     # Go to first non-blank character
+"g^" = "display_line_first_nonblank" # Go to first non-blank of display line
 "$" = "line_end"            # Go to end of line
 "g_" = "line_last_nonblank" # Go to last non-blank character
 "gg" = "buffer_start"       # Go to first line of buffer
@@ -243,6 +244,7 @@
 "b" = "word_backward"   # Extend to previous word start
 "0" = "line_start"      # Extend to start of line
 "g0" = "display_line_start"  # Extend to start of display line
+"g^" = "display_line_first_nonblank" # Extend to first non-blank of display line
 "$" = "line_end"        # Extend to end of line
 "g_" = "line_last_nonblank" # Extend to last non-blank character
 "g$" = "display_line_end"    # Extend to end of display line
@@ -266,6 +268,7 @@
 "b" = "word_backward" # Extend to previous word start
 "0" = "line_start"    # Extend to start of line
 "g0" = "display_line_start"  # Extend to start of display line
+"g^" = "display_line_first_nonblank" # Extend to first non-blank of display line
 "$" = "line_end"      # Extend to end of line
 "g_" = "line_last_nonblank" # Extend to last non-blank character
 "g$" = "display_line_end"    # Extend to end of display line
@@ -290,6 +293,7 @@
 "b" = "word_backward" # Extend to previous word start
 "0" = "line_start"    # Extend to start of line
 "g0" = "display_line_start"  # Extend to start of display line
+"g^" = "display_line_first_nonblank" # Extend to first non-blank of display line
 "$" = "line_end"      # Extend to end of line
 "g_" = "line_last_nonblank" # Extend to last non-blank character
 "g$" = "display_line_end"    # Extend to end of display line
