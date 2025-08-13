@@ -1182,23 +1182,44 @@ cargo test -- --nocapture --test-threads=1
 
 ### Benchmarking
 
-Run micro-benchmarks for the search engine using Criterion (HTML reports enabled):
+Criterion benches (HTML reports enabled): run all benches or target one.
+
+- search_bench — search engine micro-benchmarks
+- wrap_bench — wrapping and Unicode display width paths
+- viewport_hscroll_bench — no-wrap horizontal scrolling under render
+- gutter_status_bench — gutter width and status line layout
+
+Run a single bench or everything:
 
 ```powershell
 # Windows (PowerShell)
-cargo bench --bench search_bench -- --quick    # fast sanity run
-cargo bench --bench search_bench               # full run with reports
+cargo bench                                 # run all benches
+cargo bench --bench wrap_bench              # run just one bench
+cargo bench --bench search_bench -- --quick # fast sanity run
 ```
 
 ```bash
 # Linux/macOS (Bash)
-cargo bench --bench search_bench -- --quick    # fast sanity run
-cargo bench --bench search_bench               # full run with reports
+cargo bench                                  # run all benches
+cargo bench --bench wrap_bench               # run just one bench
+cargo bench --bench search_bench -- --quick  # fast sanity run
 ```
 
-Benchmark reports are generated under `target/criterion/` (open the `report/index.html` inside each benchmark folder).
+Compare against a saved baseline locally:
 
-CI also runs quick benches on push and weekly (Mon 06:00 UTC) across Ubuntu, macOS, and Windows. HTML reports are uploaded as artifacts named `criterion-<os>` on each run.
+```powershell
+# Save a baseline (e.g., from main)
+cargo bench -- --save-baseline main
+# After changes, compare to baseline
+cargo bench -- --baseline main
+```
+
+Reports live under `target/criterion/<bench>/report/index.html`.
+
+Notes:
+
+- Benches are headless-safe; a real TTY is not required.
+- Use `--quick` for faster, lower-precision runs; omit it for full fidelity.
 
 **Test Categories:**
 
