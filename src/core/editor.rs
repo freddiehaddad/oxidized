@@ -690,6 +690,105 @@ impl Editor {
         self.status_message = message;
     }
 
+    /// Move the cursor to the beginning of the current display line
+    /// (start of screen/wrapped segment), similar to Vim's `g0`.
+    pub fn move_cursor_display_line_start(&mut self) {
+        // Capture immutable info first to avoid borrow conflicts
+        let (wrap_lines, line_break, win_width, horiz_offset) = {
+            let wrap_lines = self.config.behavior.wrap_lines;
+            let line_break = self.config.behavior.line_break;
+            let win = match self.window_manager.current_window() {
+                Some(w) => (w.width as usize, w.horiz_offset),
+                None => return,
+            };
+            (wrap_lines, line_break, win.0, win.1)
+        };
+
+        // Now mutably access the buffer
+        let Some(buffer) = self.current_buffer_mut() else {
+            return;
+        };
+        let row = buffer.cursor.row;
+        let line = match buffer.get_line(row) {
+            Some(s) => s.clone(),
+            None => return,
+        };
+
+        let target_col_raw = if wrap_lines {
+            use unicode_segmentation::UnicodeSegmentation;
+            use unicode_width::UnicodeWidthStr;
+            // Minimal local wrap computation equivalent to UI::wrap_next_end_byte
+            let mut start = 0usize;
+            'outer: loop {
+                // Compute next segment end
+                let slice = &line[start..];
+                if slice.is_empty() || win_width == 0 {
+                    break 'outer start;
+                }
+                let mut cols = 0usize;
+                let mut last_break_end_rel: Option<usize> = None;
+                let mut last_good_rel = 0usize;
+                for (rel, g) in slice.grapheme_indices(true) {
+                    let g_end = rel + g.len();
+                    let g_cols = UnicodeWidthStr::width(g);
+                    if g.trim().is_empty() {
+                        last_break_end_rel = Some(g_end);
+                    }
+                    if cols + g_cols > win_width {
+                        let end_rel = if line_break {
+                            last_break_end_rel.unwrap_or(last_good_rel)
+                        } else {
+                            last_good_rel
+                        };
+                        let end = start + end_rel;
+                        if buffer.cursor.col <= end {
+                            break 'outer start;
+                        }
+                        if end <= start || end >= line.len() {
+                            break 'outer start;
+                        }
+                        start = end;
+                        continue 'outer;
+                    }
+                    cols += g_cols;
+                    last_good_rel = g_end;
+                    if cols == win_width {
+                        let end_rel = if line_break {
+                            last_break_end_rel.unwrap_or(last_good_rel)
+                        } else {
+                            last_good_rel
+                        };
+                        let end = start + end_rel;
+                        if buffer.cursor.col <= end {
+                            break 'outer start;
+                        }
+                        if end <= start || end >= line.len() {
+                            break 'outer start;
+                        }
+                        start = end;
+                        continue 'outer;
+                    }
+                }
+                let end = start + slice.len();
+                if buffer.cursor.col <= end {
+                    break 'outer start;
+                }
+                if end <= start || end >= line.len() {
+                    break 'outer start;
+                }
+                start = end;
+            }
+        } else {
+            // When wrap is disabled, beginning of display line is the leftmost visible character
+            // Convert horiz_offset (characters) to a byte boundary
+            UI::floor_char_boundary(&line, horiz_offset)
+        };
+
+        // Snap to a valid grapheme boundary at or before the target column
+        let target_col = buffer.prev_grapheme_boundary_inclusive(row, target_col_raw);
+        buffer.cursor.col = target_col;
+    }
+
     // Command completion methods
     pub fn start_command_completion(&mut self, input: &str) {
         // Build dynamic context for completion (cwd and buffers)

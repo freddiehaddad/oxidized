@@ -19,6 +19,102 @@ fn make_editor_with_text(text: &str) -> Result<Editor> {
 }
 
 #[test]
+fn g0_with_wrap_moves_to_segment_start() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("A🙂BC")?; // 🙂 width 2
+
+    // Enable wrapping and set a small window width so line wraps
+    editor.set_config_setting_ephemeral("wrap", "true");
+    editor.set_config_setting_ephemeral("linebreak", "false");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        win.width = 3; // 3 columns wide
+    }
+
+    // Place cursor in second segment by moving to end of line first
+    if let Some(buf) = editor.current_buffer_mut()
+        && let Some(line) = buf.get_line(0)
+    {
+        buf.cursor.col = line.len();
+    }
+
+    // Press 'g' then '0'
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    // First segment should be "A🙂" (3 cols). Start of second segment is after that.
+    let first_seg_end = "A🙂".len();
+    assert_eq!(buf.cursor.col, first_seg_end);
+    Ok(())
+}
+
+#[test]
+fn g0_without_wrap_uses_horiz_offset_start() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    // String with an emoji (4 bytes, 1 grapheme) then ASCII
+    let mut editor = make_editor_with_text("🙂Xabc")?;
+
+    // Disable wrapping and set a non-zero horizontal offset
+    editor.set_config_setting_ephemeral("wrap", "false");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        win.horiz_offset = 1; // one grapheme to the right
+    }
+
+    // Put cursor somewhere not at start
+    if let Some(buf) = editor.current_buffer_mut()
+        && let Some(line) = buf.get_line(0)
+    {
+        buf.cursor.col = line.len();
+    }
+
+    // Press 'g' then '0'
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    // Start should be at the byte boundary after the first emoji grapheme
+    let expected = "🙂".len();
+    assert_eq!(buf.cursor.col, expected);
+    Ok(())
+}
+#[test]
+fn g0_moves_to_line_start_even_with_digit() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("hello")?;
+
+    // Put cursor away from start
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.col = 3;
+    }
+
+    // Press 'g' then '0'
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert_eq!(buf.cursor.col, 0);
+    Ok(())
+}
+
+#[test]
 fn g_joins_moves_to_last_non_blank_in_normal_mode() -> Result<()> {
     let mut key_handler = KeyHandler::new();
     let mut editor = make_editor_with_text("abc   ")?; // trailing spaces

@@ -34,6 +34,7 @@
 "g_" = "line_last_nonblank" # Go to last non-blank character
 "gg" = "buffer_start"       # Go to first line of buffer
 "G" = "buffer_end"          # Go to last line of buffer
+"g0" = "display_line_start"  # Go to first screen column (start of display line)
 
 # Mode transitions
 "i" = "insert_mode"            # Insert before cursor

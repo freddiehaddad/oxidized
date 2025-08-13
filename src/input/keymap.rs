@@ -343,7 +343,8 @@ impl KeyHandler {
                 // '0' is special: if no count started and no sequence, treat as line_start
                 let is_zero_no_count =
                     d == '0' && self.pending_count.is_none() && self.pending_sequence.is_empty();
-                if !is_zero_no_count {
+                // Only treat digits as count when there is no pending key sequence
+                if !is_zero_no_count && self.pending_sequence.is_empty() {
                     let digit = (d as u8 - b'0') as usize;
                     let new_count = self
                         .pending_count
@@ -823,6 +824,7 @@ impl KeyHandler {
 
             // Line movement
             "line_start" => self.action_line_start(editor)?,
+            "display_line_start" => self.action_display_line_start(editor)?,
             "line_last_nonblank" => self.action_line_last_nonblank(editor)?,
             "line_end" => self.action_line_end(editor)?,
             "line_first_char" => self.action_line_start(editor)?, // Temporary fallback
@@ -1197,6 +1199,18 @@ impl KeyHandler {
             if is_visual_mode {
                 buffer.update_visual_selection(buffer.cursor);
             }
+        }
+        Ok(())
+    }
+
+    fn action_display_line_start(&self, editor: &mut Editor) -> Result<()> {
+        let is_visual_mode = matches!(
+            editor.mode(),
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+        );
+        editor.move_cursor_display_line_start();
+        if is_visual_mode && let Some(buffer) = editor.current_buffer_mut() {
+            buffer.update_visual_selection(buffer.cursor);
         }
         Ok(())
     }
