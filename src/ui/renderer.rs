@@ -543,9 +543,11 @@ impl UI {
                     let mut start = 0usize;
                     loop {
                         // Determine the end of this segment using UTF-8 safe wrapping
-                        let (end, seg_chars) =
+                        let (end, _seg_count) =
                             self.wrap_next_end_byte(line, start, text_width, word_break);
                         let display_slice = &line[start..end];
+                        // Measure visual columns of this slice for correct padding
+                        let display_slice_cols = UnicodeWidthStr::width(display_slice);
 
                         // Compute base offset in character columns for selection math up to start
                         let base_offset_chars = line[..start].chars().count();
@@ -570,14 +572,14 @@ impl UI {
                                 editor_mode: editor_state.mode,
                                 base_offset: base_offset_chars,
                             };
-                            let rendered = self.render_highlighted_line(
+                            let _rendered_cols = self.render_highlighted_line(
                                 terminal,
                                 display_slice,
                                 &shifted,
                                 &context,
                             )?;
-                            if rendered < text_width {
-                                let filler = " ".repeat(text_width - rendered);
+                            if display_slice_cols < text_width {
+                                let filler = " ".repeat(text_width - display_slice_cols);
                                 terminal.queue_print(&filler)?;
                             }
                         } else {
@@ -590,8 +592,8 @@ impl UI {
                                 editor_state.mode,
                                 base_offset_chars,
                             )?;
-                            if seg_chars < text_width {
-                                let filler = " ".repeat(text_width - seg_chars);
+                            if display_slice_cols < text_width {
+                                let filler = " ".repeat(text_width - display_slice_cols);
                                 terminal.queue_print(&filler)?;
                             }
                         }
