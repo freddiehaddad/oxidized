@@ -823,6 +823,7 @@ impl KeyHandler {
 
             // Line movement
             "line_start" => self.action_line_start(editor)?,
+            "line_last_nonblank" => self.action_line_last_nonblank(editor)?,
             "line_end" => self.action_line_end(editor)?,
             "line_first_char" => self.action_line_start(editor)?, // Temporary fallback
 
@@ -1216,6 +1217,27 @@ impl KeyHandler {
         Ok(())
     }
 
+    fn action_line_last_nonblank(&self, editor: &mut Editor) -> Result<()> {
+        let is_visual_mode = matches!(
+            editor.mode(),
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+        );
+        if let Some(buffer) = editor.current_buffer_mut()
+            && let Some(line) = buffer.get_line(buffer.cursor.row)
+        {
+            // Find the byte index of the last non-whitespace character; default to 0 if none
+            if let Some((idx, _ch)) = line.char_indices().rev().find(|(_, c)| !c.is_whitespace()) {
+                buffer.cursor.col = idx;
+            } else {
+                buffer.cursor.col = 0;
+            }
+            if is_visual_mode {
+                buffer.update_visual_selection(buffer.cursor);
+            }
+        }
+        Ok(())
+    }
+
     fn action_buffer_start(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
@@ -1273,7 +1295,6 @@ impl KeyHandler {
         {
             buffer.cursor.col = line.len();
         }
-        editor.set_mode(Mode::Insert);
         Ok(())
     }
 
