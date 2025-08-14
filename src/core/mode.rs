@@ -72,6 +72,16 @@ impl Selection {
         }
     }
 
+    /// Normalize selection so that for character & line types start <= end in row/col ordering.
+    /// Block selections keep original start/end (anchor vs cursor) but still ensure returned
+    /// highlight spans use ordered columns via highlight_span_for_line logic. This method is
+    /// idempotent.
+    pub fn normalize(&mut self) {
+        if self.end.row < self.start.row {
+            std::mem::swap(&mut self.start, &mut self.end);
+        }
+        // Do not swap purely by column for same-row selections; preserves anchor semantics.
+    }
     pub fn new_with_type(start: Position, end: Position, selection_type: SelectionType) -> Self {
         Self {
             start,
@@ -113,8 +123,13 @@ impl Selection {
                     return None;
                 }
                 if start.row == end.row {
-                    // Single-line character selection uses an exclusive end
-                    Some((start.col, end.col))
+                    // Single-line character selection uses an exclusive end; order columns
+                    let (s_col, e_col) = if self.start.col <= self.end.col {
+                        (self.start.col, self.end.col)
+                    } else {
+                        (self.end.col, self.start.col)
+                    };
+                    Some((s_col, e_col))
                 } else if line_number == start.row {
                     Some((start.col, line_length))
                 } else if line_number == end.row {

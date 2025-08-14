@@ -1329,7 +1329,9 @@ impl Buffer {
             "Starting character-wise visual selection at position {:?}",
             self.cursor
         );
-        self.selection = Some(Selection::new(self.cursor, self.cursor));
+        let mut sel = Selection::new(self.cursor, self.cursor);
+        sel.normalize();
+        self.selection = Some(sel);
     }
 
     /// Start visual line selection at current cursor position  
@@ -1341,7 +1343,9 @@ impl Buffer {
         // For line-wise selection, we select entire lines
         let start_pos = Position::new(self.cursor.row, 0);
         let end_pos = Position::new(self.cursor.row, self.get_line_length(self.cursor.row));
-        self.selection = Some(Selection::new_line(start_pos, end_pos));
+        let mut sel = Selection::new_line(start_pos, end_pos);
+        sel.normalize();
+        self.selection = Some(sel);
     }
 
     /// Start visual block selection at current cursor position
@@ -1351,11 +1355,9 @@ impl Buffer {
             self.cursor
         );
         // For block-wise selection, start with a 1x1 block at cursor position
-        self.selection = Some(Selection::new_with_type(
-            self.cursor,
-            self.cursor,
-            SelectionType::Block,
-        ));
+        let mut sel = Selection::new_with_type(self.cursor, self.cursor, SelectionType::Block);
+        sel.normalize(); // no-op for block
+        self.selection = Some(sel);
     }
 
     /// Update visual selection end position as cursor moves
@@ -1369,6 +1371,7 @@ impl Buffer {
                 SelectionType::Character => {
                     // Character-wise: update end position directly
                     selection.end = end_pos;
+                    selection.normalize();
                 }
                 SelectionType::Line => {
                     // Line-wise: extend selection to include entire lines
@@ -1384,6 +1387,7 @@ impl Buffer {
 
                     selection.start = Position::new(start_row, 0);
                     selection.end = Position::new(end_row, end_line_length);
+                    selection.normalize();
 
                     debug!(
                         "Updated line-wise selection: rows {} to {}",
@@ -1397,6 +1401,7 @@ impl Buffer {
                         selection.start, end_pos
                     );
                     selection.end = end_pos;
+                    // No normalize swap for block; anchor semantics preserved
                 }
             }
         }

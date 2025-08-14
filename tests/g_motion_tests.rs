@@ -721,7 +721,8 @@ fn gk_extends_selection_in_visual_mode() -> Result<()> {
     let buf = editor.current_buffer().unwrap();
     assert!(buf.selection.is_some());
     let sel = buf.selection.as_ref().unwrap();
-    assert!(sel.end.row <= sel.start.row);
+    // After central normalization, start.row <= end.row invariant holds
+    assert!(sel.start.row <= sel.end.row);
     Ok(())
 }
 
