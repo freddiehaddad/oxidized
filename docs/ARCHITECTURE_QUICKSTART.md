@@ -125,6 +125,15 @@ Shifting ranges:
 - highlight_version: Atomic counter to drop stale results safely.
 - LRU cache: Fixed-capacity per-line highlights; cleared on theme change.
 
+## Testing (snapshot)
+
+- Fast, mostly unit-style integration tests in `tests/` (sub‑second).
+- Coverage buckets: buffer edits, motions (`gE`/`ge`, word/WORD), visual modes & wrapped selections, text objects, search, macros, keymaps/events, commands & config persistence, UI/status/wrap/layout, completion, replace/paste, window mgmt, grapheme safety.
+- Motion pattern: baseline, punctuation, cross-line, start-of-buffer, repetition.
+- Add regressions by appending to existing domain file; short `//!` doc comment when needed.
+- Run all: `cargo test`  |  Focus: `cargo test ge_`  |  Single: `cargo test --test g_motion_tests ge_hyphen_treated_as_separate_word`
+- Lint gate: `cargo clippy -- -D warnings`.
+
 ---
 
 See the complete guide: [ARCHITECTURE.md](./ARCHITECTURE.md)
