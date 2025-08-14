@@ -32,9 +32,8 @@ Common types: build, chore, ci, docs, feat, fix, perf, refactor, test
 
 ## Git hooks and templates
 
-This repository includes helpful Git hooks under `.githooks`:
+This repository includes a helpful Git pre-commit hook under `.githooks`:
 
-- `commit-msg`: validates the 50/72 rule for commit messages
 - `pre-commit`: runs `cargo fmt` and `cargo clippy -D warnings` and restages
   formatted files
 
