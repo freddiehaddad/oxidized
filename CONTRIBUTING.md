@@ -36,21 +36,16 @@ This repository includes helpful Git hooks under `.githooks`:
 
 - `commit-msg`: validates the 50/72 rule for commit messages
 - `pre-commit`: runs `cargo fmt` and `cargo clippy -D warnings` and restages
- formatted files
-
-There is also a commit message template at `.gitmessage`.
+  formatted files
 
 To enable them:
 
 ```sh
 # Use the repo's hooks directory
 git config core.hooksPath .githooks
-
-# Use the commit message template by default
-git config commit.template .gitmessage
 ```
 
-You can set these globally with `--global` if you prefer.
+You can set this globally with `--global` if you prefer.
 
 ## Expectations before opening a PR
 
