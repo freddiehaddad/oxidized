@@ -5,7 +5,7 @@ Thanks for your interest in contributing!
 Before you start, skim the developer docs under `docs/` for an overview and
 inline ASCII diagrams of the architecture:
 
-- docs/ARCHITECTURE.md — high-level guide
+- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — high-level guide
 
 ## Commit message conventions (50/72)
 

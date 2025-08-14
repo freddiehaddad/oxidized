@@ -1,6 +1,6 @@
 # Oxidized Architecture Quickstart (At a Glance)
 
-This one-pager gives a fast visual overview of how Oxidized fits together. See ARCHITECTURE.md for full details.
+This one-pager gives a fast visual overview of how Oxidized fits together. See [ARCHITECTURE.md](./ARCHITECTURE.md) for full details.
 
 ## Core ideas
 

@@ -60,14 +60,14 @@ If you touched public behavior, add/update tests, then repeat steps 1–3 until 
 
 ## Where to Put Things
 
-- New editor actions: src/input/keymap.rs (wire key to action), then call into Editor/Buffer.
-- Rendering tweaks: src/ui/renderer.rs (avoid unnecessary full redraws; keep width/grapheme correctness).
-- Buffer mutations: src/core/buffer.rs (ensure undo/redo deltas and grapheme safety).
+- New editor actions: [src/input/keymap.rs](../src/input/keymap.rs) (wire key to action), then call into Editor/Buffer.
+- Rendering tweaks: [src/ui/renderer.rs](../src/ui/renderer.rs) (avoid unnecessary full redraws; keep width/grapheme correctness).
+- Buffer mutations: [src/core/buffer.rs](../src/core/buffer.rs) (ensure undo/redo deltas and grapheme safety).
 - Configurable behavior: src/config/** (update schema, defaults, hot-reload, :set wiring).
-- Async/background: prefer event-driven flows via src/input/event_driven.rs and
- events.rs. The async syntax worker lives in src/features/syntax.rs and sends
+- Async/background: prefer event-driven flows via [src/input/event_driven.rs](../src/input/event_driven.rs) and
+ [events.rs](../src/input/events.rs). The async syntax worker lives in [src/features/syntax.rs](../src/features/syntax.rs) and sends
  results over a channel consumed by the dispatcher thread in
- src/input/event_driven.rs.
+ [src/input/event_driven.rs](../src/input/event_driven.rs).
 
 ## Adding a Feature: Mini-Checklist
 

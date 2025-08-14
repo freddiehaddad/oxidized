@@ -9,40 +9,40 @@ See also: [Architecture Quickstart (At a Glance)](./ARCHITECTURE_QUICKSTART.md) 
 
 ## Top-level Modules
 
-- src/core: buffer, editor, mode, window manager
-- src/ui: renderer + terminal glue
-- src/input: event loop, key handling, event types
-- src/features: syntax highlighting, search, macros, text objects, LSP (stub)
-- src/config: editor/theme/keymap config + file watchers
+- src/core: [buffer](../src/core/buffer.rs), [editor](../src/core/editor.rs), [mode](../src/core/mode.rs), [window manager](../src/core/window.rs)
+- src/ui: [renderer](../src/ui/renderer.rs) + [terminal glue](../src/ui/terminal.rs)
+- src/input: [event loop](../src/input/event_driven.rs), [key handling](../src/input/keymap.rs), [event types](../src/input/events.rs)
+- src/features: [syntax highlighting](../src/features/syntax.rs), [search](../src/features/search.rs), [macros](../src/features/macros.rs), [text objects](../src/features/text_objects.rs), [LSP (stub)](../src/features/lsp.rs)
+- src/config: editor/theme/keymap config + [file watchers](../src/config/watcher.rs)
 
 ### Component responsibilities (quick map)
 
-- core/buffer.rs
+- [core/buffer.rs](../src/core/buffer.rs)
   - Text storage as Vec<String> lines, cursor Position, selection, marks, clipboard.
   - Editing operations (insert/delete/indent/unindent/replace), undo/redo with delta tracking.
   - File IO (load/save), line ending handling, modified flag.
-- core/editor.rs
+- [core/editor.rs](../src/core/editor.rs)
   - Orchestrates buffers, window manager, UI, terminal, input handling, search, macros.
   - Holds config and theme state, async syntax highlighter, completion engine, and flags for redraw.
   - Produces EditorRenderState for the UI on each render.
-- core/window.rs
+- [core/window.rs](../src/core/window.rs)
   - WindowManager and Window data structures: splits, sizes, active window, viewport, horizontal offset.
   - Reserved rows for status line and command line.
-- ui/renderer.rs + ui/terminal.rs
+- [ui/renderer.rs](../src/ui/renderer.rs) + [ui/terminal.rs](../src/ui/terminal.rs)
   - Terminal abstraction with double-buffered queueing of draw commands.
   - Renderer computes gutter, wrapping, statusline, and draws highlighted text (from Editor state).
   - Grapheme-aware widths and safe UTF-8 slicing.
-- input/event_driven.rs + input/events.rs + input/keymap.rs
+- [input/event_driven.rs](../src/input/event_driven.rs) + [input/events.rs](../src/input/events.rs) + [input/keymap.rs](../src/input/keymap.rs)
   - EventDrivenEditor: input thread, config watcher, syntax results dispatcher, (future) render thread.
   - Key handling maps key sequences to editor actions and Ex commands.
-- features/syntax.rs
+- [features/syntax.rs](../src/features/syntax.rs)
   - Tree-sitter based synchronous highlighter and an AsyncSyntaxHighlighter worker pipeline.
   - Small per-line LRU cache for highlight results.
-- features/search.rs, features/macros.rs, features/text_objects.rs, features/completion.rs
+- [features/search.rs](../src/features/search.rs), [features/macros.rs](../src/features/macros.rs), [features/text_objects.rs](../src/features/text_objects.rs), [features/completion.rs](../src/features/completion.rs)
   - Focused subsystems used by Editor and keymaps.
-- utils/command.rs
+- [utils/command.rs](../src/utils/command.rs)
   - Ex-style command parser and executor, centralized :set handler (ephemeral vs persistent via :setp).
-- config/*
+- config/* (e.g. [config/editor.rs](../src/config/editor.rs), [config/theme.rs](../src/config/theme.rs), [config/keymap.rs](../src/input/keymap.rs))
   - EditorConfig, ThemeConfig, Keymap config, file watcher, and hot reload hooks.
 
 ## Key Runtime Flow

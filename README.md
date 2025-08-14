@@ -6,8 +6,8 @@
 
 Quick docs:
 
-- Architecture: see docs/ARCHITECTURE.md and docs/ARCHITECTURE_QUICKSTART.md
-- Contributing: see CONTRIBUTING.md and docs/CONTRIBUTING_ARCH.md
+- Architecture: see [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) and [docs/ARCHITECTURE_QUICKSTART.md](./docs/ARCHITECTURE_QUICKSTART.md)
+- Contributing: see [CONTRIBUTING.md](./CONTRIBUTING.md) and [docs/CONTRIBUTING_ARCH.md](./docs/CONTRIBUTING_ARCH.md)
 
 ## 📋 Table of Contents
 <!-- markdownlint-disable MD007 -->
@@ -831,7 +831,7 @@ constant = "#d33682"       # Constants
 
 Developer docs and diagrams:
 
-- docs/ARCHITECTURE.md — high-level guide with inline ASCII diagrams
+- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — high-level guide with inline ASCII diagrams
 
 ### Core Components
 
