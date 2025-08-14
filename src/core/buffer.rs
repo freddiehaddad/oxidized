@@ -1419,15 +1419,28 @@ impl Buffer {
     /// Returns (start, end) where start is always before end in document order
     pub fn get_selection_range(&self) -> Option<(Position, Position)> {
         self.selection.map(|sel| {
-            let start = sel.start;
-            let end = sel.end;
+            use crate::core::mode::SelectionType;
+            let mut start = sel.start;
+            let mut end = sel.end;
 
-            // Normalize the selection so start is before end
-            if start.row < end.row || (start.row == end.row && start.col <= end.col) {
-                (start, end)
-            } else {
-                (end, start)
+            // Normalize rows first
+            if start.row > end.row {
+                std::mem::swap(&mut start, &mut end);
             }
+
+            if sel.selection_type == SelectionType::Character && start.row == end.row {
+                // Forward selection: start.col <= end.col (end already exclusive) -> keep.
+                // Backward selection: anchor at start (original higher col) was lost after swap;
+                // we detect by comparing original ordering.
+                if sel.start.row == sel.end.row && sel.start.col > sel.end.col {
+                    // We swapped columns ordering; adjust exclusive end to include anchor char.
+                    let min_col = start.col.min(end.col);
+                    let max_col = start.col.max(end.col);
+                    start.col = min_col;
+                    end.col = max_col + 1; // make inclusive of anchor
+                }
+            }
+            (start, end)
         })
     }
 

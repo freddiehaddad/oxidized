@@ -52,6 +52,20 @@ mod visual_selection_tests {
     }
 
     #[test]
+    fn test_backward_visual_extension_includes_anchor_char() {
+        let mut buffer = Buffer::new(1, 100);
+        insert_test_text(&mut buffer, "abcdef");
+        // Anchor on 'd' (col 3)
+        buffer.cursor = Position::new(0, 3);
+        buffer.start_visual_selection();
+        // Move left to 'c' (col 2)
+        buffer.cursor = Position::new(0, 2);
+        buffer.update_visual_selection(buffer.cursor);
+        let selected = buffer.get_selected_text().unwrap();
+        assert_eq!(selected, "cd");
+    }
+
+    #[test]
     fn test_get_selection_range_normalized() {
         let mut buffer = Buffer::new(1, 100);
         insert_test_text(&mut buffer, "Hello, world!");
@@ -75,7 +89,8 @@ mod visual_selection_tests {
 
         if let Some((start, end)) = buffer.get_selection_range() {
             assert_eq!(start, Position::new(0, 2));
-            assert_eq!(end, Position::new(0, 7));
+            // Backward selection now extends end by 1 to include anchor char
+            assert_eq!(end, Position::new(0, 8));
         }
     }
 

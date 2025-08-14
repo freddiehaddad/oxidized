@@ -123,13 +123,16 @@ impl Selection {
                     return None;
                 }
                 if start.row == end.row {
-                    // Single-line character selection uses an exclusive end; order columns
-                    let (s_col, e_col) = if self.start.col <= self.end.col {
-                        (self.start.col, self.end.col)
+                    // Single-line character selection: ensure the anchor character remains
+                    // included when extending backward. For forward (start <= end) we keep
+                    // existing exclusive end semantics (end already points one past last char
+                    // when moving right). For backward (start.col > end.col) we extend range to
+                    // include original anchor by using anchor_col+1 as exclusive end.
+                    if self.start.col <= self.end.col {
+                        Some((self.start.col, self.end.col))
                     } else {
-                        (self.end.col, self.start.col)
-                    };
-                    Some((s_col, e_col))
+                        Some((self.end.col, self.start.col + 1))
+                    }
                 } else if line_number == start.row {
                     Some((start.col, line_length))
                 } else if line_number == end.row {
