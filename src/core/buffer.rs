@@ -597,6 +597,11 @@ impl Buffer {
 
                     let line_mut = &mut self.lines[row];
                     line_mut.drain(start..end);
+                    // Update clipboard (cut) so 'x' then 'p' works like Vim
+                    self.clipboard = ClipboardContent {
+                        text: deleted_text.clone(),
+                        yank_type: YankType::Character,
+                    };
                     self.modified = true;
                     trace!(
                         "Deleted grapheme at {}:{} ({} bytes)",
@@ -620,12 +625,17 @@ impl Buffer {
                 let deleted_text = self.lines[row][start..self.cursor.col].to_string();
                 let operation = EditOperation::Delete {
                     pos: Position { row, col: start },
-                    text: deleted_text,
+                    text: deleted_text.clone(),
                 };
                 self.save_operation(operation);
 
                 let line = &mut self.lines[row];
                 line.drain(start..self.cursor.col);
+                // Update clipboard so 'X' then 'p' works like Vim
+                self.clipboard = ClipboardContent {
+                    text: deleted_text,
+                    yank_type: YankType::Character,
+                };
                 self.cursor.col = start;
                 self.modified = true;
                 return true;
