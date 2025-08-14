@@ -24,6 +24,13 @@ Tips:
 Benches:
 
 - Run Criterion benchmarks: `cargo bench` (see `benches/` for available suites).
+- Current suites: `search_bench`, `wrap_bench`, `viewport_hscroll_bench`, `gutter_status_bench`, `visual_block_bench`.
+- Selection performance: `visual_block_bench` confirms block highlight span math is trivial (no caching needed yet).
+
+Selection semantics:
+
+- `Selection.start` is the anchor (original point). Do not assume ordering; derive ordered ranges via helpers.
+- Avoid manual normalization that would swap columns on same-row backward selections.
 
 ## Quick triage flow
 

@@ -61,3 +61,22 @@ You can set these globally with `--global` if you prefer.
 - Docs: Update README and/or docs/ when changing user-visible behavior
  (architecture notes live in docs/ARCHITECTURE.md). For async syntax or
  event-loop changes, ensure both README and ARCHITECTURE are updated.
+- Visual selection changes: preserve anchor semantics (`Selection.start` is anchor; not always <= end).
+  Use helpers (`highlight_span_for_line`, `get_selection_range`) for ordered spans and reflect any
+  semantic shifts in docs/ + tests.
+
+### Benchmarks
+
+Current Criterion benches (run with `cargo bench`):
+
+- `search_bench` – search engine
+- `wrap_bench` – wrapping & Unicode width
+- `viewport_hscroll_bench` – horizontal scrolling
+- `gutter_status_bench` – gutter + status layout
+- `visual_block_bench` – block selection highlight span computation (validates nanosecond-scale cost)
+
+If adding a new bench:
+
+- Keep iterations deterministic and avoid I/O.
+- Precompute shared data outside the innermost loop.
+- Document rationale and expected optimization targets in the commit body.

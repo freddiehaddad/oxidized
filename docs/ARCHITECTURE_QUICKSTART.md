@@ -8,6 +8,8 @@ This one-pager gives a fast visual overview of how Oxidized fits together. See A
 - Event-driven runtime: background threads send typed events; the main loop reacts and renders.
 - UI renders a snapshot (EditorRenderState) and uses cached per-line highlights.
 - Async syntax highlighting runs off-thread, prioritized, versioned, and cached via a small LRU.
+- Visual selection is anchor-oriented: `Selection.start` is the anchor and is not always
+      ordered before `end`. Helpers derive ordered spans; this preserves direction for motions.
 
 ## Event-driven threads and event bus
 
