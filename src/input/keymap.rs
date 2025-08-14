@@ -903,6 +903,7 @@ impl KeyHandler {
             "insert_mode" => self.action_insert_mode(editor)?,
             "insert_line_start" => self.action_insert_line_start(editor)?,
             "insert_line_absolute" => self.action_insert_line_absolute(editor)?,
+            "show_char_byte_sequence" => self.action_show_char_byte_sequence(editor)?,
             "insert_after" => self.action_insert_after(editor)?,
             "insert_line_end" => self.action_insert_line_end(editor)?,
             "insert_line_below" => self.action_insert_line_below(editor)?,
@@ -1451,6 +1452,44 @@ impl KeyHandler {
             buffer.cursor.col = 0; // In this implementation same as I; placeholder for indent-aware start if added.
         }
         editor.set_mode(Mode::Insert);
+        Ok(())
+    }
+
+    // g8: Show UTF-8 byte sequence of character under cursor (Vim-like)
+    fn action_show_char_byte_sequence(&self, editor: &mut Editor) -> Result<()> {
+        if let Some(buffer) = editor.current_buffer()
+            && buffer.cursor.row < buffer.lines.len()
+        {
+            let line = &buffer.lines[buffer.cursor.row];
+            if buffer.cursor.col < line.len() {
+                use unicode_segmentation::UnicodeSegmentation;
+                let slice = &line[buffer.cursor.col..];
+                if let Some(grapheme) = slice.graphemes(true).next() {
+                    let bytes: Vec<String> = grapheme
+                        .as_bytes()
+                        .iter()
+                        .map(|b| format!("{:02X}", b))
+                        .collect();
+                    let code_points: Vec<String> = grapheme
+                        .chars()
+                        .map(|c| format!("U+{:04X}", c as u32))
+                        .collect();
+                    let display = grapheme.replace('\n', "\\n").replace('\t', "\\t");
+                    let message = format!(
+                        "UTF-8: {}  ({})  [{}]",
+                        bytes.join(" "),
+                        code_points.join(" "),
+                        display
+                    );
+                    editor.set_status_message(message);
+                } else {
+                    editor.set_status_message("No character".to_string());
+                }
+            } else {
+                editor.set_status_message("End of line".to_string());
+            }
+        }
+        // Remain in the same mode (normal/visual etc.)
         Ok(())
     }
 

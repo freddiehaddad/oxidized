@@ -42,6 +42,7 @@
 "gj" = "display_line_down"    # Move down by display line (wrapped segment)
 "gk" = "display_line_up"      # Move up by display line (wrapped segment)
 "gm" = "display_line_middle"  # Move to middle of display line (wrapped segment)
+"g8" = "show_char_byte_sequence" # Show UTF-8 byte sequence of char under cursor
 
 # Mode transitions
 "i" = "insert_mode"            # Insert before cursor
