@@ -762,3 +762,106 @@ fn gk_moves_only_one_logical_line() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn gm_with_wrap_moves_to_segment_middle() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    // Segment width 3 columns: we'll wrap to two segments "A🙂" | "BC".
+    let mut editor = make_editor_with_text("A🙂BC")?; // 🙂 width 2
+    editor.set_config_setting_ephemeral("wrap", "true");
+    editor.set_config_setting_ephemeral("linebreak", "false");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(1);
+        win.width = (3 + gutter) as u16;
+    }
+
+    // Place cursor at start (so segment detection uses first segment)
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.col = 0;
+    }
+
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    // First segment is "A🙂" (visual width 3). Middle (floor(3/2)=1) => visual col 1 => byte after 'A'
+    let expected = "A".len();
+    assert_eq!(buf.cursor.col, expected);
+    Ok(())
+}
+
+#[test]
+fn gm_without_wrap_uses_visible_slice_middle() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    // No wrap; choose horiz_offset so we test slice logic.
+    let mut editor = make_editor_with_text("🙂XYZabc")?; // emoji width 2
+    editor.set_config_setting_ephemeral("wrap", "false");
+    editor.set_config_setting_ephemeral("sidescrolloff", "0");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(1);
+        win.width = (4 + gutter) as u16; // 4 text cols visible
+        win.horiz_offset = 1; // skip emoji visually; visible slice starts at 'X'
+    }
+
+    // Put cursor somewhere else
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.col = 0;
+    }
+
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    // Visible slice is 4 cols: X Y Z a ; floor(4/2)=2 -> visual col 2 => after two cols => on 'Z'
+    let expected = "🙂XY".len(); // start of 'Z'
+    assert_eq!(buf.cursor.col, expected);
+    Ok(())
+}
+
+#[test]
+fn gm_extends_selection_in_visual_mode() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("A🙂BC")?;
+    editor.set_config_setting_ephemeral("wrap", "true");
+    editor.set_config_setting_ephemeral("linebreak", "false");
+    if let Some(win) = editor.window_manager.current_window_mut() {
+        let gutter = UI::new().compute_gutter_width(1);
+        win.width = (3 + gutter) as u16;
+    }
+    if let Some(buf) = editor.current_buffer_mut() {
+        buf.cursor.col = 0;
+    }
+
+    // Enter visual, then gm
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert!(buf.selection.is_some());
+    let sel = buf.selection.as_ref().unwrap();
+    let expected = "A".len();
+    assert_eq!(sel.end.col, expected);
+    Ok(())
+}

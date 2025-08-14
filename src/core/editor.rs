@@ -953,6 +953,115 @@ impl Editor {
         }
     }
 
+    /// Move cursor to the middle of the current display line (wrapped segment).
+    /// Similar to Vim's `gm`. For odd display widths chooses the unique middle;
+    /// for even widths chooses the first grapheme whose right edge crosses
+    /// floor(width/2). Uses visual cell widths (unicode-width) like other
+    /// display-line motions.
+    pub fn move_cursor_display_line_middle(&mut self) {
+        use unicode_segmentation::UnicodeSegmentation;
+        use unicode_width::UnicodeWidthStr;
+
+        // Capture immutable info
+        let (wrap_lines, line_break, win_width, horiz_offset, side_scroll_off) = {
+            let wrap_lines = self.config.behavior.wrap_lines;
+            let line_break = self.config.behavior.line_break;
+            let win = match self.window_manager.current_window() {
+                Some(w) => (w.width as usize, w.horiz_offset),
+                None => return,
+            };
+            (
+                wrap_lines,
+                line_break,
+                win.0,
+                win.1,
+                self.config.interface.side_scroll_off,
+            )
+        };
+
+        // Immutable buffer access
+        let (row, cursor_col, line, lines_len) = if let Some(buf) = self.current_buffer() {
+            let row = buf.cursor.row;
+            let cursor_col = buf.cursor.col; // not strictly needed, but consistent
+            let line = match buf.get_line(row) {
+                Some(s) => s.clone(),
+                None => return,
+            };
+            (row, cursor_col, line, buf.lines.len())
+        } else {
+            return;
+        };
+
+        // Width of display text area
+        let gutter = self.ui.compute_gutter_width(lines_len);
+        let text_width = win_width.saturating_sub(gutter).max(1);
+
+        // Determine current segment [seg_start, seg_end)
+        let (seg_start, seg_end) = if wrap_lines {
+            let mut seg_start = 0usize;
+            let mut seg_end;
+            loop {
+                let (e, _cols) = self
+                    .ui
+                    .wrap_next_end_byte(&line, seg_start, text_width, line_break);
+                seg_end = e;
+                if cursor_col < seg_end {
+                    break;
+                }
+                if seg_end <= seg_start || seg_end >= line.len() {
+                    break;
+                }
+                seg_start = seg_end;
+            }
+            (seg_start, seg_end)
+        } else {
+            let start = UI::floor_char_boundary(&line, horiz_offset);
+            let eff_width = text_width.saturating_sub(side_scroll_off);
+            if eff_width == 0 {
+                (start, start)
+            } else {
+                let (end, _c) = self
+                    .ui
+                    .wrap_next_end_byte(&line, start, eff_width, /*word_break*/ false);
+                (start, end)
+            }
+        };
+
+        if seg_start >= seg_end {
+            return;
+        }
+
+        // Compute display width of segment in cells
+        let seg_slice = &line[seg_start..seg_end];
+        let mut width_cells = 0usize;
+        for g in seg_slice.graphemes(true) {
+            width_cells = width_cells.saturating_add(UnicodeWidthStr::width(g));
+        }
+        if width_cells == 0 {
+            return;
+        }
+        let target_visual = width_cells / 2; // floor
+
+        // Find grapheme whose right edge crosses target_visual (ceiling selection)
+        let mut acc = 0usize; // cells consumed so far
+        let mut chosen_rel = 0usize;
+        for (rel, g) in seg_slice.grapheme_indices(true) {
+            let w = UnicodeWidthStr::width(g);
+            if target_visual < acc.saturating_add(w) {
+                chosen_rel = rel;
+                break;
+            }
+            chosen_rel = rel; // may update; if target beyond segment end we'll end at last grapheme
+            acc = acc.saturating_add(w);
+        }
+        let target_raw = seg_start + chosen_rel;
+
+        if let Some(buffer) = self.current_buffer_mut() {
+            let target_col = buffer.prev_grapheme_boundary_inclusive(row, target_raw);
+            buffer.cursor.col = target_col;
+        }
+    }
+
     /// Move cursor down by one display line (wrapped segment). Similar to Vim's `gj`.
     /// When wrapping is enabled, this moves within the same logical line if possible,
     /// otherwise advances to the next line. It attempts to preserve the visual column

@@ -776,6 +776,12 @@ impl KeyHandler {
                     self.action_display_line_up(editor)?;
                 }
             }
+            "display_line_middle" => {
+                used_count = true;
+                for _ in 0..count {
+                    self.action_display_line_middle(editor)?;
+                }
+            }
 
             // Word movement
             "word_forward" => {
@@ -1329,6 +1335,18 @@ impl KeyHandler {
             Mode::Visual | Mode::VisualLine | Mode::VisualBlock
         );
         editor.move_cursor_display_line_up();
+        if is_visual_mode && let Some(buffer) = editor.current_buffer_mut() {
+            buffer.update_visual_selection(buffer.cursor);
+        }
+        Ok(())
+    }
+
+    fn action_display_line_middle(&self, editor: &mut Editor) -> Result<()> {
+        let is_visual_mode = matches!(
+            editor.mode(),
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+        );
+        editor.move_cursor_display_line_middle();
         if is_visual_mode && let Some(buffer) = editor.current_buffer_mut() {
             buffer.update_visual_selection(buffer.cursor);
         }

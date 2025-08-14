@@ -39,6 +39,7 @@
 "g$" = "display_line_end"    # Go to last screen column (end of display line)
 "gj" = "display_line_down"    # Move down by display line (wrapped segment)
 "gk" = "display_line_up"      # Move up by display line (wrapped segment)
+"gm" = "display_line_middle"  # Move to middle of display line (wrapped segment)
 
 # Mode transitions
 "i" = "insert_mode"            # Insert before cursor
@@ -252,6 +253,7 @@
 "g$" = "display_line_end"    # Extend to end of display line
 "gj" = "display_line_down"   # Extend down by display line
 "gk" = "display_line_up"     # Extend up by display line
+"gm" = "display_line_middle" # Extend to middle of display line
 
 # Actions
 "d" = "delete_selection" # Delete selection
@@ -278,6 +280,7 @@
 "g$" = "display_line_end"    # Extend to end of display line
 "gj" = "display_line_down"   # Extend down by display line
 "gk" = "display_line_up"     # Extend up by display line
+"gm" = "display_line_middle" # Extend to middle of display line
 
 # Actions
 "d" = "delete_selection" # Delete selected lines
