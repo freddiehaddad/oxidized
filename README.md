@@ -1188,6 +1188,7 @@ Criterion benches (HTML reports enabled): run all benches or target one.
 - wrap_bench — wrapping and Unicode display width paths
 - viewport_hscroll_bench — no-wrap horizontal scrolling under render
 - gutter_status_bench — gutter width and status line layout
+- visual_block_bench — block selection highlight span computation (validates that span math is nanosecond-scale and caching is unnecessary)
 
 Run a single bench or everything:
 

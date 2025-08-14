@@ -117,6 +117,7 @@ Core classes and relationships (high-level):
 - UI::compute_gutter_width reserves space for numbers or marks.
 - Rendering is width-aware using unicode-width; grapheme navigation/deletion uses unicode-segmentation.
 - Cursor column (no-wrap) uses Unicode width between base offset and cursor byte index to keep visual and logical positions in sync.
+- Visual selection semantics: `Selection.start` is always the anchor (original point where selection began) and is not reordered with `end` for character/block selections. Helpers like `highlight_span_for_line` and `Buffer::get_selection_range` derive ordered spans as needed. This preserves direction for motions and anchor-sensitive operations.
 
 ## Undo/Redo and Redraws
 
