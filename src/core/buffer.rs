@@ -75,7 +75,7 @@ pub enum EditOperation {
     Insert { pos: Position, text: String },
     /// Delete text at a position (stores deleted text for undo)
     Delete { pos: Position, text: String },
-    /// Replace text at a position
+    /// Replace text at a position (stores old and new for undo/redo)
     Replace {
         pos: Position,
         old: String,
@@ -83,32 +83,23 @@ pub enum EditOperation {
     },
 }
 
-/// Delta representing changes made to buffer state
+/// Buffer classification (extend as needed)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BufferType {
+    Normal,
+}
+
+/// A group of edit operations plus cursor state for undo/redo
 #[derive(Debug, Clone)]
 pub struct BufferDelta {
-    /// The edit operations performed
     pub operations: Vec<EditOperation>,
-    /// Cursor position before the edit
     pub cursor_before: Position,
-    /// Cursor position after the edit
     pub cursor_after: Position,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BufferType {
-    Normal,
-    Help,
-    Quickfix,
-    Terminal,
-    Scratch,
-}
-
 impl Buffer {
+    /// Create an empty, unnamed buffer
     pub fn new(id: usize, undo_levels: usize) -> Self {
-        debug!(
-            "Creating new empty buffer with ID: {} (undo levels: {})",
-            id, undo_levels
-        );
         Self {
             id,
             file_path: None,
@@ -803,21 +794,140 @@ impl Buffer {
 
         let mut pos = self.cursor.col;
 
-        // If we're on whitespace, skip to next word first
+        // If we're on whitespace, skip to the start of the next word
         if line.chars().nth(pos).unwrap_or(' ').is_whitespace() {
             while pos < line.len() && line.chars().nth(pos).unwrap_or(' ').is_whitespace() {
                 pos += 1;
             }
         }
 
-        // Move to end of current word
-        while pos < line.len() && !line.chars().nth(pos).unwrap_or(' ').is_whitespace() {
+        // Now move to end of that word
+        while pos + 1 < line.len() && !line.chars().nth(pos + 1).unwrap_or(' ').is_whitespace() {
             pos += 1;
         }
 
-        pos = pos.saturating_sub(1);
-
         self.cursor.col = pos.min(line.len().saturating_sub(1));
+    }
+
+    /// Move cursor to end of previous WORD ("gE" motion)
+    pub fn move_to_previous_word_end(&mut self) {
+        if self.cursor.row >= self.lines.len() {
+            return;
+        }
+
+        // Helper closure to move to end of last word on previous line
+        let move_to_prev_line_last_word_end = |this: &mut Buffer| {
+            if this.cursor.row == 0 {
+                this.cursor.col = 0;
+                return;
+            }
+            this.cursor.row -= 1;
+            if let Some(prev_line) = this.lines.get(this.cursor.row) {
+                if prev_line.is_empty() {
+                    this.cursor.col = 0;
+                    return;
+                }
+                let mut idx = prev_line.len().saturating_sub(1);
+                // Skip trailing whitespace
+                while idx > 0 && prev_line.chars().nth(idx).unwrap_or(' ').is_whitespace() {
+                    idx = idx.saturating_sub(1);
+                }
+                this.cursor.col = idx.min(prev_line.len().saturating_sub(1));
+            } else {
+                this.cursor.col = 0;
+            }
+        };
+
+        if self.cursor.col == 0 {
+            move_to_prev_line_last_word_end(self);
+            return;
+        }
+
+        let line = &self.lines[self.cursor.row];
+        if line.is_empty() {
+            // Treat as at column 0 and go to previous line
+            move_to_prev_line_last_word_end(self);
+            return;
+        }
+
+        let mut idx = self.cursor.col.saturating_sub(1);
+
+        // If we're at or before start, fallback to previous line
+        if idx >= line.len() {
+            idx = line.len().saturating_sub(1);
+        }
+
+        // Case 1: If char at idx is whitespace, skip whitespace left
+        if line.chars().nth(idx).unwrap_or(' ').is_whitespace() {
+            while idx > 0 && line.chars().nth(idx).unwrap_or(' ').is_whitespace() {
+                idx = idx.saturating_sub(1);
+            }
+            if line.chars().nth(idx).unwrap_or(' ').is_whitespace() {
+                // Only whitespace to the left
+                self.cursor.col = idx;
+                return;
+            }
+        }
+        // Now idx is within a word (non-whitespace). Move left to find its start to check if we need the previous word.
+        let mut word_start = idx;
+        while word_start > 0
+            && !line
+                .chars()
+                .nth(word_start - 1)
+                .unwrap_or(' ')
+                .is_whitespace()
+        {
+            word_start -= 1;
+        }
+        // Determine context relative to word boundaries
+        let orig_col = self.cursor.col;
+        let at_word_middle = orig_col > word_start
+            && orig_col <= line.len()
+            && !line
+                .chars()
+                .nth(orig_col - 1)
+                .unwrap_or(' ')
+                .is_whitespace()
+            && orig_col - 1 > word_start;
+
+        if at_word_middle {
+            if word_start == 0 {
+                move_to_prev_line_last_word_end(self);
+                return;
+            }
+            let mut scan = word_start.saturating_sub(1);
+            while scan > 0 && line.chars().nth(scan).unwrap_or(' ').is_whitespace() {
+                scan = scan.saturating_sub(1);
+            }
+            if line.chars().nth(scan).unwrap_or(' ').is_whitespace() {
+                self.cursor.col = scan;
+                return;
+            }
+            let mut end = scan;
+            while end + 1 < line.len() && !line.chars().nth(end + 1).unwrap_or(' ').is_whitespace()
+            {
+                end += 1;
+            }
+            self.cursor.col = end.min(line.len().saturating_sub(1));
+        } else if word_start == 0
+            && orig_col > 0
+            && orig_col <= line.len()
+            && !line
+                .chars()
+                .nth(orig_col - 1)
+                .unwrap_or(' ')
+                .is_whitespace()
+        {
+            // Cursor inside or at end of first WORD; Vim gE moves to end of previous line's last WORD
+            move_to_prev_line_last_word_end(self);
+        } else {
+            let mut end = word_start;
+            while end + 1 < line.len() && !line.chars().nth(end + 1).unwrap_or(' ').is_whitespace()
+            {
+                end += 1;
+            }
+            self.cursor.col = end.min(line.len().saturating_sub(1));
+        }
     }
 
     /// Yank (copy) the current line
@@ -825,7 +935,6 @@ impl Buffer {
         debug!("Yanking line at row {}", self.cursor.row);
         if self.cursor.row < self.lines.len() {
             let line = &self.lines[self.cursor.row];
-            // In vim, yanking a line includes the newline character
             let line_with_newline = format!("{}\n", line);
             self.clipboard = ClipboardContent {
                 text: line_with_newline,

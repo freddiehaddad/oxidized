@@ -802,6 +802,12 @@ impl KeyHandler {
                     self.action_word_end(editor)?;
                 }
             }
+            "word_end_backward" => {
+                used_count = true;
+                for _ in 0..count {
+                    self.action_word_end_backward(editor)?;
+                }
+            }
 
             // Character navigation
             "start_find_char_forward" => self.action_start_find_char_forward(editor)?,
@@ -1713,6 +1719,20 @@ impl KeyHandler {
         );
         if let Some(buffer) = editor.current_buffer_mut() {
             buffer.move_to_word_end();
+            if is_visual_mode {
+                buffer.update_visual_selection(buffer.cursor);
+            }
+        }
+        Ok(())
+    }
+
+    fn action_word_end_backward(&self, editor: &mut Editor) -> Result<()> {
+        let is_visual_mode = matches!(
+            editor.mode(),
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+        );
+        if let Some(buffer) = editor.current_buffer_mut() {
+            buffer.move_to_previous_word_end();
             if is_visual_mode {
                 buffer.update_visual_selection(buffer.cursor);
             }

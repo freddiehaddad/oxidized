@@ -910,3 +910,63 @@ fn gm_then_visual_left_does_not_panic_and_selects_left() -> Result<()> {
     assert!(span <= 1, "Selection unexpectedly large: {}", span);
     Ok(())
 }
+
+// === gE motion tests (backward WORD-end) ===
+use oxidized::core::buffer::Buffer as _HiddenBufferImportForGeTests; // ensure Buffer available without polluting earlier sections
+use oxidized::core::mode::Position as _HiddenPositionImportForGeTests;
+
+fn make_simple_buffer(text: &str) -> _HiddenBufferImportForGeTests {
+    let mut buf = _HiddenBufferImportForGeTests::new(1, 100);
+    buf.lines = text.lines().map(|s| s.to_string()).collect();
+    if buf.lines.is_empty() {
+        buf.lines.push(String::new());
+    }
+    buf
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn gE_basic_from_whitespace_after_WORD() {
+    let mut buf = make_simple_buffer("hello world  test");
+    buf.cursor = _HiddenPositionImportForGeTests::new(0, 12); // second space after 'world'
+    buf.move_to_previous_word_end();
+    assert_eq!(buf.cursor.col, 10); // 'd'
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn gE_from_middle_of_WORD_moves_to_prev_WORD_end() {
+    let mut buf = make_simple_buffer("alpha beta gamma");
+    buf.cursor = _HiddenPositionImportForGeTests::new(0, 8); // inside 'beta' on 't'
+    buf.move_to_previous_word_end();
+    assert_eq!(buf.cursor.col, 4); // 'a' of 'alpha'
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn gE_across_line_boundary() {
+    let mut buf = make_simple_buffer("one\n  two\nthree");
+    buf.cursor = _HiddenPositionImportForGeTests::new(1, 0); // start of indented line
+    buf.move_to_previous_word_end();
+    assert_eq!(buf.cursor.row, 0);
+    assert_eq!(buf.cursor.col, 2); // 'e' of 'one'
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn gE_from_inside_first_WORD_goes_prev_line() {
+    let mut buf = make_simple_buffer("abc\nxyz");
+    buf.cursor = _HiddenPositionImportForGeTests::new(1, 1); // 'y'
+    buf.move_to_previous_word_end();
+    assert_eq!(buf.cursor.row, 0);
+    assert_eq!(buf.cursor.col, 2); // 'c'
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn gE_at_buffer_start_stays_put() {
+    let mut buf = make_simple_buffer("start");
+    buf.cursor = _HiddenPositionImportForGeTests::new(0, 0);
+    buf.move_to_previous_word_end();
+    assert_eq!(buf.cursor, _HiddenPositionImportForGeTests::new(0, 0));
+}

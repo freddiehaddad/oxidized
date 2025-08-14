@@ -28,6 +28,7 @@
 "w" = "word_forward"        # Move to start of next word
 "b" = "word_backward"       # Move to start of previous word
 "e" = "word_end"            # Move to end of next word
+"gE" = "word_end_backward"   # Move to end of previous WORD
 "0" = "line_start"          # Go to column 0
 "^" = "line_first_char"     # Go to first non-blank character
 "g^" = "display_line_first_nonblank" # Go to first non-blank of display line
@@ -245,6 +246,7 @@
 "l" = "cursor_right"    # Extend right
 "w" = "word_forward"    # Extend to next word start
 "b" = "word_backward"   # Extend to previous word start
+"gE" = "word_end_backward" # Extend to end of previous WORD
 "0" = "line_start"      # Extend to start of line
 "g0" = "display_line_start"  # Extend to start of display line
 "g^" = "display_line_first_nonblank" # Extend to first non-blank of display line
@@ -272,6 +274,7 @@
 "l" = "cursor_right"  # Extend right by lines
 "w" = "word_forward"  # Extend to next word start
 "b" = "word_backward" # Extend to previous word start
+"gE" = "word_end_backward" # Extend to end of previous WORD
 "0" = "line_start"    # Extend to start of line
 "g0" = "display_line_start"  # Extend to start of display line
 "g^" = "display_line_first_nonblank" # Extend to first non-blank of display line
@@ -300,6 +303,7 @@
 "l" = "cursor_right"  # Extend block right
 "w" = "word_forward"  # Extend to next word start
 "b" = "word_backward" # Extend to previous word start
+"gE" = "word_end_backward" # Extend to end of previous WORD
 "0" = "line_start"    # Extend to start of line
 "g0" = "display_line_start"  # Extend to start of display line
 "g^" = "display_line_first_nonblank" # Extend to first non-blank of display line

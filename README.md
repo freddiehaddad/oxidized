@@ -386,6 +386,7 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 "w" = "word_forward"        # Move to start of next word
 "b" = "word_backward"       # Move to start of previous word
 "e" = "word_end"            # Move to end of next word
+"gE" = "word_end_backward"   # Move to end of previous WORD
 "0" = "line_start"          # Go to column 0
 "^" = "line_first_char"     # Go to first non-blank character
 "$" = "line_end"            # Go to end of line
