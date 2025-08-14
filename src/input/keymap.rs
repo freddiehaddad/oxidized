@@ -902,6 +902,7 @@ impl KeyHandler {
             // Mode transitions
             "insert_mode" => self.action_insert_mode(editor)?,
             "insert_line_start" => self.action_insert_line_start(editor)?,
+            "insert_line_absolute" => self.action_insert_line_absolute(editor)?,
             "insert_after" => self.action_insert_after(editor)?,
             "insert_line_end" => self.action_insert_line_end(editor)?,
             "insert_line_below" => self.action_insert_line_below(editor)?,
@@ -1438,6 +1439,15 @@ impl KeyHandler {
     fn action_insert_line_start(&self, editor: &mut Editor) -> Result<()> {
         if let Some(buffer) = editor.current_buffer_mut() {
             buffer.cursor.col = 0;
+        }
+        editor.set_mode(Mode::Insert);
+        Ok(())
+    }
+
+    // gI: Insert at absolute column 0 (like Vim's gI)
+    fn action_insert_line_absolute(&self, editor: &mut Editor) -> Result<()> {
+        if let Some(buffer) = editor.current_buffer_mut() {
+            buffer.cursor.col = 0; // In this implementation same as I; placeholder for indent-aware start if added.
         }
         editor.set_mode(Mode::Insert);
         Ok(())
