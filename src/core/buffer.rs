@@ -1798,13 +1798,29 @@ impl Buffer {
     /// Delete the currently selected text (visual mode delete)
     pub fn delete_selection(&mut self) -> Option<String> {
         if let Some((start, end)) = self.get_selection_range() {
-            // Preserve original (anchor + type) for gv before clearing
+            // Preserve original (anchor + type) for gv & clipboard before clearing
             let original_selection = self.selection;
+            // Capture text for clipboard (cut) prior to mutation
+            let selected_text = self.get_selected_text().unwrap_or_default();
+            let yank_type = if let Some(sel) = original_selection {
+                match sel.selection_type {
+                    SelectionType::Character => YankType::Character,
+                    SelectionType::Line => YankType::Line,
+                    SelectionType::Block => YankType::Block,
+                }
+            } else {
+                YankType::Character
+            };
             let deleted_text = self.delete_range(start, end);
+            // Update clipboard to behave like Vim (delete yanks into unnamed register)
+            self.clipboard = ClipboardContent {
+                text: selected_text,
+                yank_type,
+            };
             self.last_selection = original_selection;
             self.selection = None;
             debug!(
-                "Deleted visual selection: {} chars (saved to last_selection)",
+                "Deleted visual selection: {} chars (saved to last_selection, clipboard updated)",
                 deleted_text.len()
             );
             Some(deleted_text)

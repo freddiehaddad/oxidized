@@ -262,6 +262,7 @@
 
 # Actions
 "d" = "delete_selection" # Delete selection
+"x" = "delete_selection" # Delete (alias, like Vim)
 "y" = "yank_selection"   # Copy selection
 "c" = "change_selection" # Change selection
 
@@ -291,6 +292,7 @@
 
 # Actions
 "d" = "delete_selection" # Delete selected lines
+"x" = "delete_selection" # Delete (alias, like Vim)
 "y" = "yank_selection"   # Copy selected lines
 "c" = "change_selection" # Change selected lines
 
@@ -320,6 +322,7 @@
 
 # Actions
 "d" = "delete_selection" # Delete block
+"x" = "delete_selection" # Delete (alias, like Vim)
 "y" = "yank_selection"   # Copy block
 "c" = "change_selection" # Change block
 
