@@ -183,6 +183,10 @@ mod visual_selection_tests {
         assert_eq!(yanked, Some("world".to_string()));
         assert_eq!(buffer.clipboard.text, "world");
         assert_eq!(buffer.lines[0], "Hello, world!"); // Original text unchanged
+        // last_selection should now contain the yanked range for gv
+        assert!(buffer.last_selection.is_some());
+        let last = buffer.last_selection.unwrap();
+        assert_eq!(last.start, Position::new(0, 7));
     }
 
     #[test]
@@ -196,6 +200,43 @@ mod visual_selection_tests {
         buffer.clear_visual_selection();
         assert!(!buffer.has_selection());
         assert!(buffer.selection.is_none());
+        assert!(buffer.last_selection.is_some());
+    }
+
+    #[test]
+    fn test_gv_like_reselect_after_yank() {
+        let mut buffer = Buffer::new(1, 100);
+        insert_test_text(&mut buffer, "Hello world again");
+        // Select "world"
+        buffer.selection = Some(oxidized::core::mode::Selection::new(
+            Position::new(0, 6),
+            Position::new(0, 11),
+        ));
+        let _ = buffer.yank_selection();
+        assert!(buffer.selection.is_none());
+        assert!(buffer.last_selection.is_some());
+        assert!(buffer.reselect_last_visual());
+        assert!(buffer.selection.is_some());
+        let txt = buffer.get_selected_text().unwrap();
+        assert_eq!(txt, "world");
+    }
+
+    #[test]
+    fn test_gv_like_reselect_after_delete() {
+        let mut buffer = Buffer::new(1, 100);
+        insert_test_text(&mut buffer, "alpha beta gamma");
+        // Select "beta"
+        buffer.selection = Some(oxidized::core::mode::Selection::new(
+            Position::new(0, 6),
+            Position::new(0, 10),
+        ));
+        let deleted = buffer.delete_selection().unwrap();
+        assert_eq!(deleted, "beta");
+        assert!(buffer.selection.is_none());
+        assert!(buffer.last_selection.is_some());
+        // Reselect (even though text is gone) -> selection spans where it was
+        assert!(buffer.reselect_last_visual());
+        assert!(buffer.selection.is_some());
     }
 
     #[test]

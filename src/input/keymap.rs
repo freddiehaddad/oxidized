@@ -911,6 +911,7 @@ impl KeyHandler {
             "visual_mode" => self.action_visual_mode(editor)?,
             "visual_line_mode" => self.action_visual_line_mode(editor)?,
             "visual_block_mode" => self.action_visual_block_mode(editor)?,
+            "reselect_last_visual" => self.action_reselect_last_visual(editor)?,
             "replace_mode" => self.action_replace_mode(editor)?,
             "search_forward" => self.action_search_forward(editor)?,
             "search_backward" => self.action_search_backward(editor)?,
@@ -1523,6 +1524,24 @@ impl KeyHandler {
             buffer.start_visual_block_selection();
         }
         editor.set_mode(Mode::VisualBlock);
+        Ok(())
+    }
+
+    fn action_reselect_last_visual(&self, editor: &mut Editor) -> Result<()> {
+        // Vim's 'gv': reselect the last visual selection maintaining its type.
+        if let Some(buffer) = editor.current_buffer_mut()
+            && buffer.reselect_last_visual()
+        {
+            // Determine selection type to set appropriate visual mode
+            if let Some(sel) = buffer.selection {
+                use crate::core::mode::SelectionType;
+                match sel.selection_type {
+                    SelectionType::Character => editor.set_mode(Mode::Visual),
+                    SelectionType::Line => editor.set_mode(Mode::VisualLine),
+                    SelectionType::Block => editor.set_mode(Mode::VisualBlock),
+                }
+            }
+        }
         Ok(())
     }
 

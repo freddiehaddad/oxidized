@@ -54,6 +54,7 @@
 "V" = "visual_line_mode"       # Enter Visual Line mode
 "Ctrl+v" = "visual_block_mode" # Enter Visual Block mode
 "Alt+v" = "visual_block_mode"  # Alternative for terminals that intercept Ctrl+V (e.g., VS Code)
+"gv" = "reselect_last_visual"  # Reselect last visual selection
 "R" = "replace_mode"           # Enter Replace mode
 
 # Search

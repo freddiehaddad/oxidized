@@ -52,6 +52,8 @@ pub struct Buffer {
     pub cursor: Position,
     /// Visual selection (if any)
     pub selection: Option<Selection>,
+    /// Last visual selection (for 'gv' reselect)
+    pub last_selection: Option<Selection>,
     /// Undo stack
     pub undo_stack: VecDeque<BufferDelta>,
     /// Redo stack
@@ -107,6 +109,7 @@ impl Buffer {
             modified: false,
             cursor: Position::zero(),
             selection: None,
+            last_selection: None,
             undo_stack: VecDeque::new(),
             redo_stack: VecDeque::new(),
             buffer_type: BufferType::Normal,
@@ -147,6 +150,7 @@ impl Buffer {
             modified: false,
             cursor: Position::zero(),
             selection: None,
+            last_selection: None,
             undo_stack: VecDeque::new(),
             redo_stack: VecDeque::new(),
             buffer_type: BufferType::Normal,
@@ -1640,9 +1644,26 @@ impl Buffer {
 
     /// Clear visual selection
     pub fn clear_visual_selection(&mut self) {
-        if self.selection.is_some() {
-            debug!("Clearing visual selection");
+        if let Some(sel) = self.selection {
+            debug!("Clearing visual selection (saving as last_selection)");
+            self.last_selection = Some(sel);
             self.selection = None;
+        }
+    }
+
+    /// Reselect the last visual selection (used by 'gv')
+    pub fn reselect_last_visual(&mut self) -> bool {
+        if let Some(last) = self.last_selection {
+            debug!(
+                "Reselecting last visual selection: {:?} -> {:?}",
+                last.start, last.end
+            );
+            // Restore selection and move cursor to last.end (active position)
+            self.selection = Some(last);
+            self.cursor = last.end;
+            true
+        } else {
+            false
         }
     }
 
@@ -1777,9 +1798,15 @@ impl Buffer {
     /// Delete the currently selected text (visual mode delete)
     pub fn delete_selection(&mut self) -> Option<String> {
         if let Some((start, end)) = self.get_selection_range() {
+            // Preserve original (anchor + type) for gv before clearing
+            let original_selection = self.selection;
             let deleted_text = self.delete_range(start, end);
+            self.last_selection = original_selection;
             self.selection = None;
-            debug!("Deleted visual selection: {} chars", deleted_text.len());
+            debug!(
+                "Deleted visual selection: {} chars (saved to last_selection)",
+                deleted_text.len()
+            );
             Some(deleted_text)
         } else {
             None
@@ -1798,15 +1825,17 @@ impl Buffer {
             } else {
                 YankType::Character
             };
-
+            // Preserve original selection (anchor + type) for gv before clearing
+            let original_selection = self.selection;
             self.clipboard = ClipboardContent {
                 text: selected_text.clone(),
                 yank_type,
             };
+            self.last_selection = original_selection;
             // Clear the selection after yanking (matches Vim behavior)
             self.selection = None;
             debug!(
-                "Yanked visual selection: {} chars, type: {:?}",
+                "Yanked visual selection: {} chars, type: {:?} (saved to last_selection)",
                 selected_text.len(),
                 self.clipboard.yank_type
             );
