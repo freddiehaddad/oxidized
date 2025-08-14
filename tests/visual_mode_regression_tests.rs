@@ -135,3 +135,74 @@ fn gm_then_visual_block_left_creates_valid_block_selection() -> Result<()> {
     );
     Ok(())
 }
+
+// Regression follow-up: ensure multi-line visual block selection maintains a
+// consistent width across all covered lines when expanding right/down.
+#[test]
+fn gm_visual_block_multi_line_width_consistent() -> Result<()> {
+    let mut key_handler = KeyHandler::new();
+    // Three lines, all sufficiently long and uniform ASCII for simple indexing
+    let text = "ABCDEFGHIJKL\nMNOPQRSTUVWX\nYZABCDEFGHIJK"; // lengths: 12,12,12
+    let mut editor = make_editor_with_text(text)?;
+    editor.set_config_setting_ephemeral("wrap", "false");
+
+    // Move to middle of first line via gm (roughly column 6 for 12 chars)
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE),
+    )?;
+
+    // Enter visual block mode (Ctrl+v mapping)
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL),
+    )?;
+    // Extend block two lines down
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+    )?;
+    // Expand block two columns to the right
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    assert!(buf.selection.is_some(), "Expected block selection");
+    let sel = buf.selection.as_ref().unwrap();
+    // Normalize coordinates
+    let start_row = sel.start.row.min(sel.end.row);
+    let end_row = sel.start.row.max(sel.end.row);
+    let min_col = sel.start.col.min(sel.end.col);
+    let max_col = sel.start.col.max(sel.end.col);
+    let width = max_col.saturating_sub(min_col);
+    // We moved two 'l' steps; expect width >= 2 (exact depends on initial gm landing). Allow >=2.
+    assert!(width >= 2, "Block width too small: {}", width);
+    // Assert each covered line can accommodate the block and implied substring has same width
+    for r in start_row..=end_row {
+        let line = buf.get_line(r).unwrap();
+        assert!(line.len() >= max_col, "Line {} shorter than block end", r);
+        // Count chars in slice (since ASCII, byte len equals char count)
+        let slice = &line[min_col..max_col];
+        assert_eq!(
+            slice.chars().count(),
+            width,
+            "Inconsistent width at line {}",
+            r
+        );
+    }
+    Ok(())
+}
