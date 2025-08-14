@@ -212,8 +212,71 @@ Caching
 
 ## Testing
 
-- Unit tests under tests/ and src/**/tests.rs
-- Grapheme/emoji regression tests live in tests/grapheme_cursor_tests.rs
+Oxidized uses a broad, fast test suite emphasizing small, deterministic unit tests with a few higher-level integration/regression cases. The goals are: (1) protect core editing invariants (buffer text, cursor/selection semantics, undo/redo), (2) lock in motion/text-object behavior (including tricky Unicode + punctuation edges), and (3) ensure peripheral subsystems (config reload, search, macros, completion, syntax enqueue logic) remain stable.
+
+### Layout & Categories
+
+tests/ contains almost all tests (crate-level integration style) organized by concern:
+
+- Buffer & Editing: `buffer_integration.rs`, `buffer_range_tests.rs`, `buffer_yank_put_tests.rs`, deletion / paste corner cases.
+- Cursor & Grapheme Safety: `grapheme_cursor_tests.rs` (emoji, multi‑grapheme clusters) plus selection span tests.
+- Motions & Modes:
+  - Classic motions: covered across `g_motion_tests.rs`, `g_caret_motion_tests.rs`, `mode_tests.rs`.
+  - New extended motions: `g_motion_tests.rs` houses `gE` (WORD backward end) and `ge` (small word backward end) regression cases including punctuation (hyphen, ellipsis) and cross-line behavior.
+  - Visual / VisualLine / VisualBlock: `visual_*` and `wrapped_visual_selection_tests.rs` for selection growth, wrapped line invariants, exit behavior.
+- Text Objects: `text_objects_tests.rs` (parser + finder; word/WORD, quotes, brackets, sentences, paragraphs, inner/around variants).
+- Search: `search_integration.rs` (case sensitivity, regex toggle, multiple matches, empty pattern guard).
+- Macros: `macro_tests.rs` (record/playback, register management, filtering of control keys).
+- Keymaps & Events: `keymap_tests.rs`, `events_tests.rs` (ensures dispatcher stability and no panics on representative sequences).
+- Commands & Ex Layer: `command_tests.rs`, `ex_*_tests.rs` (write, saveas, force write, buffer edge cases, :set persistence vs ephemeral).
+- Config & Persistence: `config_tests.rs`, `config_persistence_tests.rs` (hot reload, theme propagation, persisted vs session settings).
+- Window/Layout/UI: `window_tests.rs`, `resize_tests.rs`, `statusline_tests.rs`, `ui_tests.rs`, `ui_wrap_tests.rs` (viewport math, status segments, wrapping correctness, horizontal offset behavior).
+- Completion: `completion_tests.rs` (basic acceptance & cycling semantics).
+- Replace / Insert Edge Cases: `replace_tests.rs`, paste & empty line handling tests.
+- Text Objects & Selection Interop: `selection_span_tests.rs`, `visual_*` variants.
+
+Some focused regression files carry a short doc comment (`//!`) at top describing the bug they lock in (e.g., visual mode exit, wrapped selection growth). When adding a regression, prefer appending to the most related existing file instead of creating a new one, unless the scenario is substantial and orthogonal.
+
+### Style & Conventions
+
+- Favor constructing minimal Buffers (helper constructors inside test files) instead of spinning a full `EventDrivenEditor` unless validating event threading / rendering interactions.
+- Tests treat positions as byte indices but rely on helper methods (e.g., grapheme boundary utilities) indirectly through Buffer APIs; avoid manual slicing of potentially multi-byte graphemes.
+- For motions that depend on classification (word vs WORD vs punctuation), each new motion gets: baseline behavior test, punctuation boundary test, whitespace/line-boundary test, buffer-start stability test, and (if relevant) multi-step repetition test.
+- Visual selection tests assert both existence and span correctness without assuming selection ordering (direction preserved internally).
+- Avoid sleeping or timing assertions; async syntax highlighting is validated structurally (enqueues & cache mechanics) elsewhere, not via timing-sensitive tests (worker thread currently lightly exercised – deeper integration tests can be introduced when LSP matures).
+
+### Adding New Tests
+
+1. Pick the closest existing file by domain; append tests near similar cases.
+2. Name with clear intent: `feature_condition_expectedOutcome` or `regression_issueDescription`.
+3. For regressions, add a short comment referencing the scenario (“Regression: previously panic when …”).
+4. Prefer explicit indices / cursor setup over derived logic to keep failures obvious.
+5. If introducing a new motion/operator: mirror the existing gE/ge pattern (baseline, punctuation, cross-line, start-of-buffer, repetition).
+
+### Running Tests
+
+- All tests:
+  - `cargo test` (fast; suite avoids heavy IO/network)
+- Focus by prefix substring:
+  - `cargo test gE_` or `cargo test ge_`
+- Single test (exact):
+  - `cargo test --test g_motion_tests ge_hyphen_treated_as_separate_word`
+
+Clippy (lint gate) should stay clean before committing motion or buffer changes:
+
+```console
+cargo clippy -- -D warnings
+```
+
+### Future Enhancements
+
+- Add targeted async syntax pipeline tests exercising version invalidation & LRU eviction ordering (currently validated indirectly via rendering path assumptions).
+- Introduce property tests (e.g., shrinking random edit sequences ensure undo stack invariants) using `proptest` once core APIs stabilize.
+- LSP client integration tests (scaffold only today).
+
+### Guiding Principle
+
+Keep tests descriptive, minimal, and colocated with similar behavior. Fast feedback (sub‑second `cargo test`) is a priority; defer heavier end‑to‑end benchmarks to `benches/` or future integration harnesses.
 
 ## Alternatives and trade-offs
 
