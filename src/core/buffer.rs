@@ -1370,8 +1370,7 @@ impl Buffer {
             match selection.selection_type {
                 SelectionType::Character => {
                     // Character-wise: update end position directly
-                    selection.end = end_pos;
-                    selection.normalize();
+                    selection.end = end_pos; // Preserve original anchor in selection.start
                 }
                 SelectionType::Line => {
                     // Line-wise: extend selection to include entire lines

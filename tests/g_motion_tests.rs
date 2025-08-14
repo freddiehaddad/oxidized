@@ -721,8 +721,13 @@ fn gk_extends_selection_in_visual_mode() -> Result<()> {
     let buf = editor.current_buffer().unwrap();
     assert!(buf.selection.is_some());
     let sel = buf.selection.as_ref().unwrap();
-    // After central normalization, start.row <= end.row invariant holds
-    assert!(sel.start.row <= sel.end.row);
+    // Anchor is preserved; allow either ordering but rows must differ by at most 1
+    assert!(
+        (sel.start.row as isize - sel.end.row as isize).abs() <= 1,
+        "Unexpected row distance in selection: start {:?} end {:?}",
+        sel.start,
+        sel.end
+    );
     Ok(())
 }
 

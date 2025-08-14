@@ -66,6 +66,32 @@ mod visual_selection_tests {
     }
 
     #[test]
+    fn test_visual_anchor_stable_when_moving_up() {
+        let mut buffer = Buffer::new(1, 100);
+        insert_test_text(&mut buffer, "line1\nline2\nline3");
+        // Place cursor on line2 col 0
+        buffer.cursor = Position::new(1, 0);
+        buffer.start_visual_selection();
+        let anchor = buffer.selection.unwrap().start;
+        assert_eq!(anchor, Position::new(1, 0));
+        // Move cursor up to line1
+        buffer.cursor = Position::new(0, 0);
+        buffer.update_visual_selection(buffer.cursor);
+        // Anchor should remain original line2
+        let sel = buffer.selection.unwrap();
+        assert_eq!(
+            sel.start, anchor,
+            "Anchor changed after moving up in visual mode"
+        );
+        // Move cursor back down to line2 (collapse selection)
+        buffer.cursor = Position::new(1, 0);
+        buffer.update_visual_selection(buffer.cursor);
+        let sel2 = buffer.selection.unwrap();
+        assert_eq!(sel2.start, anchor);
+        assert_eq!(sel2.end, anchor);
+    }
+
+    #[test]
     fn test_get_selection_range_normalized() {
         let mut buffer = Buffer::new(1, 100);
         insert_test_text(&mut buffer, "Hello, world!");
