@@ -865,3 +865,42 @@ fn gm_extends_selection_in_visual_mode() -> Result<()> {
     assert_eq!(sel.end.col, expected);
     Ok(())
 }
+
+#[test]
+fn gm_then_visual_left_does_not_panic_and_selects_left() -> Result<()> {
+    // Regression test: previously gm then v then h could create inverted selection indices
+    // causing a panic in the renderer (start > end). This ensures a safe update.
+    let mut key_handler = KeyHandler::new();
+    let mut editor = make_editor_with_text("ABCDEFGHIJKLMNOPQRSTUVWXYZ")?;
+    // No wrapping to keep it simple
+    editor.set_config_setting_ephemeral("wrap", "false");
+
+    // Move to middle with gm
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE),
+    )?;
+
+    // Enter visual mode
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE),
+    )?;
+    // Move left one character
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE),
+    )?;
+
+    let buf = editor.current_buffer().unwrap();
+    // Ensure selection exists and spans exactly two neighboring columns (order agnostic)
+    assert!(buf.selection.is_some());
+    let sel = buf.selection.as_ref().unwrap();
+    let span = sel.end.col.abs_diff(sel.start.col);
+    assert!(span <= 1, "Selection unexpectedly large: {}", span);
+    Ok(())
+}

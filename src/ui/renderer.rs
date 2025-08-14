@@ -1157,6 +1157,12 @@ impl UI {
         let end_col = start_col + char_count;
 
         if let Some((sel_start, sel_end)) = selection_range {
+            // Defensive clamp: ensure sel_start <= sel_end to avoid slice panics
+            let (sel_start, sel_end) = if sel_start <= sel_end {
+                (sel_start, sel_end)
+            } else {
+                (sel_end, sel_start)
+            };
             // Check if this text segment overlaps with the selection
             if start_col < sel_end && end_col > sel_start {
                 // There's an overlap, we need to split the segment
@@ -1223,6 +1229,11 @@ impl UI {
         let end_col = start_col + char_count;
 
         if let Some((sel_start, sel_end)) = selection_range {
+            let (sel_start, sel_end) = if sel_start <= sel_end {
+                (sel_start, sel_end)
+            } else {
+                (sel_end, sel_start)
+            };
             // Check if this highlighted segment overlaps with the selection
             if start_col < sel_end && end_col > sel_start {
                 // Selection overrides syntax highlighting
