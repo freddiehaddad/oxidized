@@ -61,3 +61,7 @@ harness = false
 [[bench]]
 name = "gutter_status_bench"
 harness = false
+
+[[bench]]
+name = "visual_block_bench"
+harness = false
