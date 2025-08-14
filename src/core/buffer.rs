@@ -930,6 +930,129 @@ impl Buffer {
         }
     }
 
+    /// Move cursor to end of previous small word ("ge" motion).
+    ///
+    /// Small words treat consecutive [A-Za-z0-9_] as a word ("keyword" run) and any other
+    /// non-whitespace, printable punctuation run as its own word. Whitespace separates words.
+    /// Behavior intentionally mirrors Vim's default `ge` semantics where punctuation (e.g. '-'
+    /// in "foo-bar") is considered a separate word: a first `ge` from inside "bar" lands on '-';
+    /// a second `ge` lands on the 'o' of "foo".
+    pub fn move_to_previous_small_word_end(&mut self) {
+        if self.cursor.row >= self.lines.len() {
+            return;
+        }
+
+        // Helper: move to previous line's last non-whitespace char (or column 0 if empty)
+        let prev_line_last_word_end = |this: &mut Buffer| {
+            if this.cursor.row == 0 {
+                this.cursor.col = 0;
+                return;
+            }
+            this.cursor.row -= 1;
+            if let Some(line) = this.lines.get(this.cursor.row) {
+                if line.is_empty() {
+                    this.cursor.col = 0;
+                    return;
+                }
+                // Find last non-whitespace character
+                let mut idx = line.len().saturating_sub(1);
+                while idx > 0 && line.chars().nth(idx).unwrap_or(' ').is_whitespace() {
+                    idx = idx.saturating_sub(1);
+                }
+                if line.chars().nth(idx).unwrap_or(' ').is_whitespace() {
+                    // Entire line whitespace
+                    this.cursor.col = 0;
+                } else {
+                    this.cursor.col = idx.min(line.len().saturating_sub(1));
+                }
+            } else {
+                this.cursor.col = 0;
+            }
+        };
+
+        if self.cursor.col == 0 {
+            prev_line_last_word_end(self);
+            return;
+        }
+
+        let line = &self.lines[self.cursor.row];
+        if line.is_empty() {
+            prev_line_last_word_end(self);
+            return;
+        }
+
+        // Classification helpers
+        let is_keyword = |c: char| c.is_alphanumeric() || c == '_';
+        let is_whitespace = |c: char| c.is_whitespace();
+        let classify = |c: char| -> u8 {
+            if is_whitespace(c) {
+                0
+            } else if is_keyword(c) {
+                1
+            } else {
+                2 // punctuation / other
+            }
+        };
+
+        let mut i = self.cursor.col; // position AFTER the char to the left we first inspect
+        if i > line.len() {
+            i = line.len();
+        }
+
+        // Step 1: if immediately preceded by whitespace, skip whitespace left and land on previous word end
+        let mut skipped_ws = false;
+        while i > 0 && line.chars().nth(i - 1).map(is_whitespace).unwrap_or(false) {
+            i -= 1;
+            skipped_ws = true;
+        }
+        if i == 0 {
+            // Only whitespace to left on this line
+            prev_line_last_word_end(self);
+            return;
+        }
+        if skipped_ws {
+            // We were in whitespace; the previous non-whitespace char is the target word end
+            self.cursor.col = (i - 1).min(line.len().saturating_sub(1));
+            return;
+        }
+
+        // At this point, we were NOT in whitespace initially.
+        // Determine the current run class (include char under cursor if it exists and is non-whitespace)
+        let mut current_run_class = classify(line.chars().nth(i - 1).unwrap_or(' '));
+        let mut start_i = i; // inclusive end boundary for skipping loop
+        if self.cursor.col < line.len() {
+            let under = line.chars().nth(self.cursor.col).unwrap_or(' ');
+            if !is_whitespace(under) {
+                current_run_class = classify(under);
+                // Start skipping from position AFTER the under-cursor char so loop processes it
+                start_i = self.cursor.col + 1;
+            }
+        }
+        i = start_i;
+        while i > 0 && classify(line.chars().nth(i - 1).unwrap_or(' ')) == current_run_class {
+            i -= 1;
+        }
+
+        if i == 0 {
+            // No previous run on this line
+            prev_line_last_word_end(self);
+            return;
+        }
+
+        // Now char at i-1 may be whitespace or part of previous run end.
+        // Skip intervening whitespace (shouldn't usually occur here, but handle robustness)
+        while i > 0 && line.chars().nth(i - 1).map(is_whitespace).unwrap_or(false) {
+            i -= 1;
+        }
+        if i == 0 {
+            prev_line_last_word_end(self);
+            return;
+        }
+
+        // Char at i-1 is the last char of the previous run.
+        self.cursor.col = (i - 1).min(line.len().saturating_sub(1));
+    }
+
     /// Yank (copy) the current line
     pub fn yank_line(&mut self) {
         debug!("Yanking line at row {}", self.cursor.row);

@@ -970,3 +970,62 @@ fn gE_at_buffer_start_stays_put() {
     buf.move_to_previous_word_end();
     assert_eq!(buf.cursor, _HiddenPositionImportForGeTests::new(0, 0));
 }
+
+// === ge motion tests (backward small-word end) ===
+#[test]
+fn ge_basic_from_whitespace_after_word() {
+    let mut buf = make_simple_buffer("alpha beta  gamma");
+    buf.cursor = _HiddenPositionImportForGeTests::new(0, 12); // after two spaces before 'gamma'
+    buf.move_to_previous_small_word_end();
+    assert_eq!(buf.cursor.col, 9); // 'a' of beta (indexing end) -> beta length 4, alpha(0..4), space(5), beta(6..10) end at 9
+}
+
+#[test]
+fn ge_inside_word_moves_to_prev_small_word_end() {
+    let mut buf = make_simple_buffer("foo bar baz");
+    buf.cursor = _HiddenPositionImportForGeTests::new(0, 8); // inside 'baz' on 'a'
+    buf.move_to_previous_small_word_end();
+    assert_eq!(buf.cursor.col, 6); // 'r' of bar
+}
+
+#[test]
+fn ge_hyphen_treated_as_separate_word() {
+    let mut buf = make_simple_buffer("hello-world again");
+    // Place cursor inside 'world'
+    buf.cursor = _HiddenPositionImportForGeTests::new(0, 8); // 'r'
+    buf.move_to_previous_small_word_end();
+    assert_eq!(buf.cursor.col, 5); // '-'
+    // Second ge should land on 'o' of hello
+    buf.move_to_previous_small_word_end();
+    assert_eq!(buf.cursor.col, 4);
+}
+
+#[test]
+fn ge_punctuation_cluster_steps_then_previous() {
+    let mut buf = make_simple_buffer("foo...bar");
+    // Inside 'bar'
+    buf.cursor = _HiddenPositionImportForGeTests::new(0, 8); // 'a'
+    buf.move_to_previous_small_word_end();
+    // First ge lands on last '.' (index 5: f0 o1 o2 .3 .4 .5 b6 a7 r8)
+    assert_eq!(buf.cursor.col, 5);
+    // Second ge lands on 'o' of foo (index 2)
+    buf.move_to_previous_small_word_end();
+    assert_eq!(buf.cursor.col, 2);
+}
+
+#[test]
+fn ge_across_line_boundary() {
+    let mut buf = make_simple_buffer("one\n  two\nthree");
+    buf.cursor = _HiddenPositionImportForGeTests::new(1, 3); // end of 'two'
+    buf.move_to_previous_small_word_end();
+    assert_eq!(buf.cursor.row, 0);
+    assert_eq!(buf.cursor.col, 2); // 'e' of 'one'
+}
+
+#[test]
+fn ge_at_buffer_start_stays_put() {
+    let mut buf = make_simple_buffer("start");
+    buf.cursor = _HiddenPositionImportForGeTests::new(0, 0);
+    buf.move_to_previous_small_word_end();
+    assert_eq!(buf.cursor, _HiddenPositionImportForGeTests::new(0, 0));
+}
