@@ -136,7 +136,14 @@ impl Selection {
                 } else if line_number == start.row {
                     Some((start.col, line_length))
                 } else if line_number == end.row {
-                    Some((0, end.col))
+                    // End row: include up to end.col (exclusive). If the original ordering was
+                    // backward (anchor below), end represents original anchor; include anchor
+                    // char by extending one column. Detect by comparing original start/end rows.
+                    if self.start.row > self.end.row {
+                        Some((0, (end.col + 1).min(line_length)))
+                    } else {
+                        Some((0, end.col))
+                    }
                 } else {
                     Some((0, line_length))
                 }

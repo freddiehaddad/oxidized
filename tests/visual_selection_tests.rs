@@ -92,6 +92,23 @@ mod visual_selection_tests {
     }
 
     #[test]
+    fn test_visual_up_includes_anchor_char() {
+        let mut buffer = Buffer::new(1, 100);
+        insert_test_text(&mut buffer, "abc\nXYZ\nq");
+        // Anchor on second line 'Y' (col 1)
+        buffer.cursor = Position::new(1, 1);
+        buffer.start_visual_selection();
+        // Move up to first line at col 1
+        buffer.cursor = Position::new(0, 1);
+        buffer.update_visual_selection(buffer.cursor);
+        let text = buffer.get_selected_text().unwrap();
+        assert!(
+            text.contains('Y'),
+            "Selection after moving up should include anchor char 'Y' but was: {text}"
+        );
+    }
+
+    #[test]
     fn test_get_selection_range_normalized() {
         let mut buffer = Buffer::new(1, 100);
         insert_test_text(&mut buffer, "Hello, world!");

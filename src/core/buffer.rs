@@ -1427,16 +1427,25 @@ impl Buffer {
                 std::mem::swap(&mut start, &mut end);
             }
 
-            if sel.selection_type == SelectionType::Character && start.row == end.row {
-                // Forward selection: start.col <= end.col (end already exclusive) -> keep.
-                // Backward selection: anchor at start (original higher col) was lost after swap;
-                // we detect by comparing original ordering.
-                if sel.start.row == sel.end.row && sel.start.col > sel.end.col {
-                    // We swapped columns ordering; adjust exclusive end to include anchor char.
-                    let min_col = start.col.min(end.col);
-                    let max_col = start.col.max(end.col);
-                    start.col = min_col;
-                    end.col = max_col + 1; // make inclusive of anchor
+            if sel.selection_type == SelectionType::Character {
+                if start.row == end.row {
+                    // Single-line backward selection: include anchor char
+                    if sel.start.row == sel.end.row && sel.start.col > sel.end.col {
+                        let min_col = start.col.min(end.col);
+                        let max_col = start.col.max(end.col);
+                        start.col = min_col;
+                        end.col = max_col + 1;
+                    }
+                } else {
+                    // Multi-line backward (anchor below cursor originally): include anchor char on end row
+                    if sel.start.row > sel.end.row
+                        && let Some(line) = self.lines.get(end.row)
+                    {
+                        let line_len = line.chars().count();
+                        if end.col < line_len {
+                            end.col += 1;
+                        }
+                    }
                 }
             }
             (start, end)
