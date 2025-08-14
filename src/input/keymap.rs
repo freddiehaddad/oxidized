@@ -1438,7 +1438,8 @@ impl KeyHandler {
 
     fn action_insert_line_start(&self, editor: &mut Editor) -> Result<()> {
         if let Some(buffer) = editor.current_buffer_mut() {
-            buffer.cursor.col = 0;
+            let row = buffer.cursor.row;
+            buffer.cursor.col = buffer.first_non_blank_col(row);
         }
         editor.set_mode(Mode::Insert);
         Ok(())

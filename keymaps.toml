@@ -45,7 +45,7 @@
 
 # Mode transitions
 "i" = "insert_mode"            # Insert before cursor
-"I" = "insert_line_start"      # Insert at start of line
+"I" = "insert_line_start"      # Insert at first non-blank character of line
 "gI" = "insert_line_absolute"  # Insert at absolute column 0 (like Vim gI)
 "a" = "insert_after"           # Insert after cursor
 "A" = "insert_line_end"        # Insert at end of line

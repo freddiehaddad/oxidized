@@ -544,6 +544,14 @@ impl Buffer {
         self.lines.get(row)
     }
 
+    /// Compute the column index of the first non-blank (non-whitespace) character
+    /// on the given line. Returns 0 if the line is empty or all whitespace.
+    pub fn first_non_blank_col(&self, row: usize) -> usize {
+        self.get_line(row)
+            .map(|l| l.chars().position(|c| !c.is_whitespace()).unwrap_or(0))
+            .unwrap_or(0)
+    }
+
     pub fn line_count(&self) -> usize {
         self.lines.len()
     }
