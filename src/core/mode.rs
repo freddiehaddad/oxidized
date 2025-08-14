@@ -58,6 +58,26 @@ pub enum SelectionType {
 /// Selection range for visual mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Selection {
+    /// Selection range for visual/visual-* modes.
+    ///
+    /// Anchor semantics:
+    /// - `start` is always the anchor (the position where the selection began).
+    /// - `end` is the active cursor position.
+    ///
+    /// Ordering / invariants:
+    /// - We intentionally DO NOT guarantee `start.row <= end.row` nor `start.col <= end.col`.
+    ///   Backward / upward selections keep the original anchor in `start` so consumers can
+    ///   reason about direction if needed.
+    /// - Code that needs an ordered range must derive it (see `Buffer::get_selection_range` or
+    ///   use local ordering like `highlight_span_for_line`).
+    /// - `Selection::normalize` will swap rows (only) so that `start.row <= end.row`, but it is
+    ///   not invoked automatically for character selections to preserve anchor orientation.
+    /// - Same-row backward selections keep `start.col > end.col` until interpreted by helpers;
+    ///   inclusive highlight logic is centralized in `highlight_span_for_line`.
+    ///
+    /// Rationale: Preserving anchor orientation matches modal editor expectations (e.g. Vim)
+    /// and avoids losing which side of the selection the user began from when extending or
+    /// performing directional operations.
     pub start: Position,
     pub end: Position,
     pub selection_type: SelectionType,
