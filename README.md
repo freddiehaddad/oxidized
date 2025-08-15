@@ -9,9 +9,6 @@
 <a href="https://github.com/freddiehaddad/oxidized/actions/workflows/ci.yml">
    <img alt="Clippy" src="https://img.shields.io/badge/lint-clippy-orange?logo=rust&logoColor=white&color=ce422b" />
 </a>
-<a href="https://freddiehaddad.github.io/oxidized/badges/coverage.json">
-   <img alt="Coverage" src="https://img.shields.io/endpoint?url=https%3A%2F%2Ffreddiehaddad.github.io%2Foxidized%2Fbadges%2Fcoverage.json&logo=rust&logoColor=white" />
-</a>
 <a href="https://github.com/freddiehaddad/oxidized/blob/master/LICENSE">
    <img alt="License" src="https://img.shields.io/badge/license-MIT-yellow?color=997f5f" />
 </a>
