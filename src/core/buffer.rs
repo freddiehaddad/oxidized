@@ -21,6 +21,13 @@ pub enum YankType {
     Block,     // Block-wise yank (visual block mode)
 }
 
+/// Kind of write for register semantics
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteKind {
+    Yank,
+    Delete,
+}
+
 /// Content stored in the clipboard
 #[derive(Debug, Clone)]
 pub struct ClipboardContent {
@@ -71,6 +78,12 @@ pub struct Buffer {
     /// Named registers bank and pending active register (Phase 1 registers)
     registers: HashMap<char, ClipboardContent>,
     active_register: Option<char>,
+    /// Numbered delete/change registers "1".."9" (index 0 -> "1")
+    numbered_registers: VecDeque<ClipboardContent>,
+    /// Yank register "0" (last yank)
+    yank_register0: ClipboardContent,
+    /// Small delete register "-" (characterwise deletes)
+    small_delete_register: ClipboardContent,
 }
 
 /// Represents a single edit operation for delta-based undo system
@@ -122,6 +135,9 @@ impl Buffer {
             eol: LineEnding::LF,
             registers: HashMap::new(),
             active_register: None,
+            numbered_registers: VecDeque::from(vec![ClipboardContent::default(); 9]),
+            yank_register0: ClipboardContent::default(),
+            small_delete_register: ClipboardContent::default(),
         }
     }
 
@@ -165,10 +181,13 @@ impl Buffer {
             eol: detected_eol,
             registers: HashMap::new(),
             active_register: None,
+            numbered_registers: VecDeque::from(vec![ClipboardContent::default(); 9]),
+            yank_register0: ClipboardContent::default(),
+            small_delete_register: ClipboardContent::default(),
         })
     }
 
-    // ===== Register System (Phase 1) =====
+    // ===== Register System (Phase 2: numbered rotation) =====
     /// Set the next active register (consumed on next write/read op)
     pub fn set_active_register(&mut self, register: char) {
         self.active_register = Some(register);
@@ -181,10 +200,16 @@ impl Buffer {
 
     /// Get a snapshot of a register (including unnamed '"').
     pub fn get_register(&self, register: char) -> Option<&ClipboardContent> {
-        if register == '"' {
-            return Some(&self.clipboard);
+        match register {
+            '"' => Some(&self.clipboard),
+            '0' => Some(&self.yank_register0),
+            '-' => Some(&self.small_delete_register),
+            '1'..='9' => {
+                let idx = (register as u8 - b'1') as usize;
+                self.numbered_registers.get(idx)
+            }
+            _ => self.registers.get(&register),
         }
-        self.registers.get(&register)
     }
 
     fn take_active_register(&mut self) -> Option<char> {
@@ -192,35 +217,80 @@ impl Buffer {
     }
 
     fn is_valid_register_name(ch: char) -> bool {
-        ch == '"' || ch == '_' || ch.is_ascii_alphanumeric()
+        ch == '"' || ch == '_' || ch == '-' || ch.is_ascii_alphanumeric()
     }
 
     /// Public helper to write text into registers applying active selection rules.
-    pub fn write_register_content(&mut self, text: String, yank_type: YankType) {
+    pub fn write_register_content(&mut self, text: String, yank_type: YankType, kind: WriteKind) {
         let content = ClipboardContent { text, yank_type };
-        self.register_write(content);
+        self.register_write_with_kind(content, kind);
     }
 
     /// Internal write applying unnamed/named/append/black-hole semantics.
-    fn register_write(&mut self, content: ClipboardContent) {
+    fn register_write_with_kind(&mut self, content: ClipboardContent, kind: WriteKind) {
         match self.take_active_register() {
             Some('_') => {
                 trace!("Register write to black-hole, dropping content");
+                // Explicit black-hole: do not update unnamed/0/numbered
             }
             Some('"') | None => {
-                self.clipboard = content;
+                // Default destination: unnamed plus special semantics
+                self.clipboard = content.clone();
+                match kind {
+                    WriteKind::Yank => {
+                        // Yanks always set register 0 (unless black-hole which is handled above)
+                        self.yank_register0 = content;
+                    }
+                    WriteKind::Delete => {
+                        // Deletes: line-wise (or multi-line) rotate into 1..9; small delete -> '-'
+                        match content.yank_type {
+                            YankType::Line => {
+                                // rotate: 8->9, 7->8, ..., 1->2
+                                if self.numbered_registers.len() == 9 {
+                                    for i in (1..9).rev() {
+                                        self.numbered_registers[i] =
+                                            self.numbered_registers[i - 1].clone();
+                                    }
+                                    self.numbered_registers[0] = content;
+                                } else {
+                                    // Fallback if somehow not size 9
+                                    self.numbered_registers.push_front(content);
+                                    self.numbered_registers.truncate(9);
+                                }
+                            }
+                            _ => {
+                                // character-wise or block-wise
+                                self.small_delete_register = content;
+                            }
+                        }
+                    }
+                }
             }
             Some(reg) if Self::is_valid_register_name(reg) => {
+                // Explicit destination: write there and unnamed; don't rotate numbered unless explicitly targeting them
                 if reg.is_ascii_uppercase() {
                     let lower = reg.to_ascii_lowercase();
                     let entry = self.registers.entry(lower).or_default();
                     entry.text.push_str(&content.text);
                     entry.yank_type = content.yank_type.clone();
+                } else if reg == '0' {
+                    self.yank_register0 = content.clone();
+                } else if ('1'..='9').contains(&reg) {
+                    let idx = (reg as u8 - b'1') as usize;
+                    if idx < self.numbered_registers.len() {
+                        self.numbered_registers[idx] = content.clone();
+                    }
+                } else if reg == '-' {
+                    self.small_delete_register = content.clone();
                 } else {
                     self.registers.insert(reg, content.clone());
                 }
                 // Also update unnamed
-                self.clipboard = content;
+                self.clipboard = content.clone();
+                if let WriteKind::Yank = kind {
+                    // Yanks also set register 0 unless explicitly using black-hole (handled above)
+                    self.yank_register0 = content;
+                }
             }
             Some(_) => {
                 // Fallback to unnamed
@@ -234,6 +304,16 @@ impl Buffer {
         match self.take_active_register() {
             Some('_') => ClipboardContent::default(),
             Some('"') | None => self.clipboard.clone(),
+            Some('0') => self.yank_register0.clone(),
+            Some('-') => self.small_delete_register.clone(),
+            Some(reg @ '1'..='9') => {
+                let idx = (reg as u8 - b'1') as usize;
+                if idx < self.numbered_registers.len() {
+                    self.numbered_registers[idx].clone()
+                } else {
+                    ClipboardContent::default()
+                }
+            }
             Some(reg) => self
                 .registers
                 .get(&reg)
@@ -686,11 +766,14 @@ impl Buffer {
 
                     let line_mut = &mut self.lines[row];
                     line_mut.drain(start..end);
-                    // Write into registers (updates unnamed by default)
-                    self.register_write(ClipboardContent {
-                        text: deleted_text.clone(),
-                        yank_type: YankType::Character,
-                    });
+                    // Write into registers
+                    self.register_write_with_kind(
+                        ClipboardContent {
+                            text: deleted_text.clone(),
+                            yank_type: YankType::Character,
+                        },
+                        WriteKind::Delete,
+                    );
                     self.modified = true;
                     trace!(
                         "Deleted grapheme at {}:{} ({} bytes)",
@@ -721,10 +804,13 @@ impl Buffer {
                 let line = &mut self.lines[row];
                 line.drain(start..self.cursor.col);
                 // Registers write
-                self.register_write(ClipboardContent {
-                    text: deleted_text,
-                    yank_type: YankType::Character,
-                });
+                self.register_write_with_kind(
+                    ClipboardContent {
+                        text: deleted_text,
+                        yank_type: YankType::Character,
+                    },
+                    WriteKind::Delete,
+                );
                 self.cursor.col = start;
                 self.modified = true;
                 return true;
@@ -809,11 +895,14 @@ impl Buffer {
             };
             self.save_operation(operation);
 
-            // Update registers like Vim: dd yanks the line into a register
-            self.register_write(ClipboardContent {
-                text: format!("{}\n", deleted_line),
-                yank_type: YankType::Line,
-            });
+            // Update registers like Vim: dd yanks the line into a register (delete kind)
+            self.register_write_with_kind(
+                ClipboardContent {
+                    text: format!("{}\n", deleted_line),
+                    yank_type: YankType::Line,
+                },
+                WriteKind::Delete,
+            );
 
             // If this is the only line, just clear it
             if self.lines.len() == 1 {
@@ -1168,10 +1257,13 @@ impl Buffer {
         if self.cursor.row < self.lines.len() {
             let line_text = self.lines[self.cursor.row].clone();
             let line_with_newline = format!("{}\n", line_text);
-            self.register_write(ClipboardContent {
-                text: line_with_newline,
-                yank_type: YankType::Line,
-            });
+            self.register_write_with_kind(
+                ClipboardContent {
+                    text: line_with_newline,
+                    yank_type: YankType::Line,
+                },
+                WriteKind::Yank,
+            );
             debug!("Yanked line: '{}'", line_text);
         } else {
             warn!(
@@ -1203,10 +1295,13 @@ impl Buffer {
 
         if end_pos > start_pos {
             let word: String = chars[start_pos..end_pos].iter().collect();
-            self.register_write(ClipboardContent {
-                text: word,
-                yank_type: YankType::Character,
-            });
+            self.register_write_with_kind(
+                ClipboardContent {
+                    text: word,
+                    yank_type: YankType::Character,
+                },
+                WriteKind::Yank,
+            );
         }
     }
 
@@ -1221,10 +1316,13 @@ impl Buffer {
                 String::new()
             };
 
-            self.register_write(ClipboardContent {
-                text,
-                yank_type: YankType::Character,
-            });
+            self.register_write_with_kind(
+                ClipboardContent {
+                    text,
+                    yank_type: YankType::Character,
+                },
+                WriteKind::Yank,
+            );
         }
     }
 
@@ -1919,11 +2017,14 @@ impl Buffer {
                 YankType::Character
             };
             let deleted_text = self.delete_range(start, end);
-            // Write into register bank (delete yanks into unnamed by default)
-            self.register_write(ClipboardContent {
-                text: selected_text,
-                yank_type,
-            });
+            // Write into register bank (delete writes)
+            self.register_write_with_kind(
+                ClipboardContent {
+                    text: selected_text,
+                    yank_type,
+                },
+                WriteKind::Delete,
+            );
             self.last_selection = original_selection;
             self.selection = None;
             debug!(
@@ -1950,10 +2051,13 @@ impl Buffer {
             };
             // Preserve original selection (anchor + type) for gv before clearing
             let original_selection = self.selection;
-            self.register_write(ClipboardContent {
-                text: selected_text.clone(),
-                yank_type,
-            });
+            self.register_write_with_kind(
+                ClipboardContent {
+                    text: selected_text.clone(),
+                    yank_type,
+                },
+                WriteKind::Yank,
+            );
             self.last_selection = original_selection;
             // Clear the selection after yanking (matches Vim behavior)
             self.selection = None;

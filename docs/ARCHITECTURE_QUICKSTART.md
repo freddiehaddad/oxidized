@@ -138,14 +138,16 @@ Shifting ranges:
 
 See the complete guide: [ARCHITECTURE.md](./ARCHITECTURE.md)
 
-## Registers (Phase 1)
+## Registers (Phase 2)
 
-Basics implemented:
+Implemented:
 
 - Unnamed register (") as default source/target for yank/delete/put.
 - Named registers a-z; A-Z appends to lowercase.
-- Black-hole register (_) discards writes.
-- One-shot prefix '"{register}' to select register.
+- Numbered registers: 0 holds the last yank; 1..9 rotate on line-wise deletes/changes (most recent in 1).
+- Small delete register (-): character-wise deletes/changes (x, dw when not spanning lines) write here.
+- Black-hole register (_): discards writes.
+- One-shot prefix '"{register}': select a register for the next read/write.
 
 > Tip
 >
@@ -155,4 +157,4 @@ Basics implemented:
 > - "\_ dw deletes a word and discards it.
 > - Works with counts and motions: e.g., "\_ 3dd, "\_ d$.
 
-Next phases: numbered rotation ("1.."9, small delete "-), and optional system clipboards.
+Next phases: optional system clipboards (+, *), :registers view.

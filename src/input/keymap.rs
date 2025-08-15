@@ -3054,6 +3054,7 @@ impl KeyHandler {
                 buffer.write_register_content(
                     deleted_text.clone(),
                     crate::core::buffer::YankType::Character,
+                    crate::core::buffer::WriteKind::Delete,
                 );
                 info!("Deleted text to end of line: '{}'", deleted_text);
             } else {

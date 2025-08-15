@@ -65,3 +65,74 @@ fn upper_case_appends_to_lowercase_register() {
     b.yank_word();
     assert_eq!(b.get_register('a').unwrap().text, "cdab");
 }
+
+#[test]
+fn yank_sets_register_0_and_is_stable_across_deletes() {
+    let mut b = buf_from("one two\nthree");
+    // Yank 'two' to set register 0
+    b.cursor = Position::new(0, 4);
+    b.yank_to_end_of_line();
+    assert_eq!(b.get_register('0').unwrap().text, "two");
+    // Now delete a line to change numbered/unnamed, but 0 must remain 'two'
+    b.cursor = Position::new(1, 0);
+    assert!(b.delete_line());
+    assert_eq!(b.get_register('0').unwrap().text, "two");
+    // Put from register 0 before cursor (into whatever line exists)
+    b.set_active_register('0');
+    b.put_before();
+    assert!(b.lines.iter().any(|ln| ln.contains("two")));
+}
+
+#[test]
+fn delete_line_rotates_numbered_registers() {
+    let mut b = buf_from("L1\nL2\nL3\nL4");
+    // Delete L1, then L2, then L3
+    b.cursor = Position::new(0, 0);
+    assert!(b.delete_line());
+    assert_eq!(b.get_register('1').unwrap().text, "L1\n");
+    b.cursor = Position::new(0, 0);
+    assert!(b.delete_line());
+    assert_eq!(b.get_register('1').unwrap().text, "L2\n");
+    assert_eq!(b.get_register('2').unwrap().text, "L1\n");
+    b.cursor = Position::new(0, 0);
+    assert!(b.delete_line());
+    assert_eq!(b.get_register('1').unwrap().text, "L3\n");
+    assert_eq!(b.get_register('2').unwrap().text, "L2\n");
+    assert_eq!(b.get_register('3').unwrap().text, "L1\n");
+}
+
+#[test]
+fn small_delete_writes_to_dash() {
+    let mut b = buf_from("abc");
+    b.cursor = Position::new(0, 1); // on 'b'
+    assert!(b.delete_char_at_cursor()); // delete 'b'
+    assert_eq!(b.get_register('-').unwrap().text, "b");
+    // Numbered delete registers should remain empty
+    assert_eq!(b.get_register('1').unwrap().text, "");
+}
+
+#[test]
+fn explicit_write_to_numbered_does_not_rotate() {
+    let mut b = buf_from("xyz");
+    b.set_active_register('2');
+    b.yank_line();
+    assert_eq!(b.get_register('2').unwrap().text, "xyz\n");
+    // '1' should still be empty
+    assert_eq!(b.get_register('1').unwrap().text, "");
+}
+
+#[test]
+fn black_hole_delete_does_not_touch_0_or_numbered() {
+    let mut b = buf_from("A\nB\nC");
+    // Prime register 0 with a yank
+    b.cursor = Position::new(0, 0);
+    b.yank_line();
+    assert_eq!(b.get_register('0').unwrap().text, "A\n");
+    // Black-hole a delete-line
+    b.set_active_register('_');
+    b.cursor = Position::new(1, 0);
+    assert!(b.delete_line());
+    // 0 unchanged, numbered unchanged
+    assert_eq!(b.get_register('0').unwrap().text, "A\n");
+    assert_eq!(b.get_register('1').unwrap().text, "");
+}

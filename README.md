@@ -222,6 +222,8 @@ Notes:
 - "{register} selects a one-shot register for the next yank/delete/put.
   - Unnamed register " is the default source/target.
   - Named registers a–z store text; A–Z appends to the lowercase register.
+  - Numbered registers: 0 holds the last yank; 1..9 rotate on line-wise deletes/changes.
+  - Small delete register - stores character-wise deletes/changes.
   - Black-hole register _ discards writes (doesn’t alter any register).
 - Examples:
   - "a yy yanks current line into register a; paste later with "a p.

@@ -1615,7 +1615,11 @@ impl Editor {
         } else {
             crate::core::buffer::YankType::Character
         };
-        buffer.write_register_content(deleted_text.clone(), yank_type);
+        buffer.write_register_content(
+            deleted_text.clone(),
+            yank_type,
+            crate::core::buffer::WriteKind::Delete,
+        );
 
         debug!("Buffer modified flag set to true");
         self.status_message = format!("Deleted text: '{}'", deleted_text);
@@ -1633,7 +1637,7 @@ impl Editor {
         } else {
             crate::core::buffer::YankType::Character
         };
-        buffer.write_register_content(yanked_text, yank_type);
+        buffer.write_register_content(yanked_text, yank_type, crate::core::buffer::WriteKind::Yank);
 
         self.status_message = format!(
             "Yanked {} text object",
