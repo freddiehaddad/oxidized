@@ -33,6 +33,17 @@ Selection & Select mode semantics:
 - Avoid manual normalization that would swap columns on same-row backward selections.
 - Select modes (`gh` character-wise, `gH` line-wise) reuse visual span computation but treat any printable input as an atomic replace operation followed by an automatic transition into Insert mode. Tests in `select_mode_tests.rs` lock in: single-grapheme replacement, multi-byte Unicode replacement, and correct cursor placement post-insert.
 
+Registers (Phase 1):
+
+- One-shot prefix: "{register} sets the active register for the next yank/delete/put only.
+- Unnamed register (") is the default for reads/writes.
+- Named registers a–z store text; A–Z appends to the lowercase register.
+- Black-hole register (_) discards writes and doesn’t update unnamed.
+- Writes: buffer.register_write is invoked by delete/yank helpers; unnamed is updated alongside named except for `_`.
+- Reads: put operations call register_read_for_put(), which consumes any pending one-shot selection.
+- Code pointers: src/core/buffer.rs (registers HashMap, active_register, write_register_content, register_write, register_read_for_put); src/input/keymap.rs (register_prefix state and consumption).
+- Tests: tests/registers_tests.rs covers unnamed default, named, append with A, and black-hole semantics; keymaps embed '"' = register_prefix.
+
 ## Quick triage flow
 
 When iterating locally, prefer this tight loop:

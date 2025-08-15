@@ -116,6 +116,9 @@
 "<" = "operator_unindent"          # Unindent operator
 "~" = "operator_toggle_case"       # Toggle case operator
 
+# Registers prefix
+"\"" = "register_prefix"            # '"{register}' prefix to select register
+
 # Yank (copy) operations
 "yy" = "yank_line"                 # Yank (copy) current line
 "yw" = "yank_word"                 # Yank word

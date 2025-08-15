@@ -68,6 +68,9 @@ pub struct Buffer {
     pub marks: HashMap<char, Position>,
     /// Preferred line ending for this buffer
     pub eol: LineEnding,
+    /// Named registers bank and pending active register (Phase 1 registers)
+    registers: HashMap<char, ClipboardContent>,
+    active_register: Option<char>,
 }
 
 /// Represents a single edit operation for delta-based undo system
@@ -117,6 +120,8 @@ impl Buffer {
             undo_levels,
             marks: HashMap::new(),
             eol: LineEnding::LF,
+            registers: HashMap::new(),
+            active_register: None,
         }
     }
 
@@ -158,7 +163,83 @@ impl Buffer {
             undo_levels,
             marks: HashMap::new(),
             eol: detected_eol,
+            registers: HashMap::new(),
+            active_register: None,
         })
+    }
+
+    // ===== Register System (Phase 1) =====
+    /// Set the next active register (consumed on next write/read op)
+    pub fn set_active_register(&mut self, register: char) {
+        self.active_register = Some(register);
+    }
+
+    /// Clear any pending active register.
+    pub fn clear_active_register(&mut self) {
+        self.active_register = None;
+    }
+
+    /// Get a snapshot of a register (including unnamed '"').
+    pub fn get_register(&self, register: char) -> Option<&ClipboardContent> {
+        if register == '"' {
+            return Some(&self.clipboard);
+        }
+        self.registers.get(&register)
+    }
+
+    fn take_active_register(&mut self) -> Option<char> {
+        self.active_register.take()
+    }
+
+    fn is_valid_register_name(ch: char) -> bool {
+        ch == '"' || ch == '_' || ch.is_ascii_alphanumeric()
+    }
+
+    /// Public helper to write text into registers applying active selection rules.
+    pub fn write_register_content(&mut self, text: String, yank_type: YankType) {
+        let content = ClipboardContent { text, yank_type };
+        self.register_write(content);
+    }
+
+    /// Internal write applying unnamed/named/append/black-hole semantics.
+    fn register_write(&mut self, content: ClipboardContent) {
+        match self.take_active_register() {
+            Some('_') => {
+                trace!("Register write to black-hole, dropping content");
+            }
+            Some('"') | None => {
+                self.clipboard = content;
+            }
+            Some(reg) if Self::is_valid_register_name(reg) => {
+                if reg.is_ascii_uppercase() {
+                    let lower = reg.to_ascii_lowercase();
+                    let entry = self.registers.entry(lower).or_default();
+                    entry.text.push_str(&content.text);
+                    entry.yank_type = content.yank_type.clone();
+                } else {
+                    self.registers.insert(reg, content.clone());
+                }
+                // Also update unnamed
+                self.clipboard = content;
+            }
+            Some(_) => {
+                // Fallback to unnamed
+                self.clipboard = content;
+            }
+        }
+    }
+
+    /// Read the content for a put; consumes active register if any.
+    fn register_read_for_put(&mut self) -> ClipboardContent {
+        match self.take_active_register() {
+            Some('_') => ClipboardContent::default(),
+            Some('"') | None => self.clipboard.clone(),
+            Some(reg) => self
+                .registers
+                .get(&reg)
+                .cloned()
+                .unwrap_or_else(ClipboardContent::default),
+        }
     }
 
     /// Set a mark at the current cursor position
@@ -605,11 +686,11 @@ impl Buffer {
 
                     let line_mut = &mut self.lines[row];
                     line_mut.drain(start..end);
-                    // Update clipboard (cut) so 'x' then 'p' works like Vim
-                    self.clipboard = ClipboardContent {
+                    // Write into registers (updates unnamed by default)
+                    self.register_write(ClipboardContent {
                         text: deleted_text.clone(),
                         yank_type: YankType::Character,
-                    };
+                    });
                     self.modified = true;
                     trace!(
                         "Deleted grapheme at {}:{} ({} bytes)",
@@ -639,11 +720,11 @@ impl Buffer {
 
                 let line = &mut self.lines[row];
                 line.drain(start..self.cursor.col);
-                // Update clipboard so 'X' then 'p' works like Vim
-                self.clipboard = ClipboardContent {
+                // Registers write
+                self.register_write(ClipboardContent {
                     text: deleted_text,
                     yank_type: YankType::Character,
-                };
+                });
                 self.cursor.col = start;
                 self.modified = true;
                 return true;
@@ -727,6 +808,12 @@ impl Buffer {
                 text: format!("{}\n", deleted_line),
             };
             self.save_operation(operation);
+
+            // Update registers like Vim: dd yanks the line into a register
+            self.register_write(ClipboardContent {
+                text: format!("{}\n", deleted_line),
+                yank_type: YankType::Line,
+            });
 
             // If this is the only line, just clear it
             if self.lines.len() == 1 {
@@ -1079,13 +1166,13 @@ impl Buffer {
     pub fn yank_line(&mut self) {
         debug!("Yanking line at row {}", self.cursor.row);
         if self.cursor.row < self.lines.len() {
-            let line = &self.lines[self.cursor.row];
-            let line_with_newline = format!("{}\n", line);
-            self.clipboard = ClipboardContent {
+            let line_text = self.lines[self.cursor.row].clone();
+            let line_with_newline = format!("{}\n", line_text);
+            self.register_write(ClipboardContent {
                 text: line_with_newline,
                 yank_type: YankType::Line,
-            };
-            debug!("Yanked line: '{}'", line);
+            });
+            debug!("Yanked line: '{}'", line_text);
         } else {
             warn!(
                 "Cannot yank line: cursor row {} out of bounds",
@@ -1116,10 +1203,10 @@ impl Buffer {
 
         if end_pos > start_pos {
             let word: String = chars[start_pos..end_pos].iter().collect();
-            self.clipboard = ClipboardContent {
+            self.register_write(ClipboardContent {
                 text: word,
                 yank_type: YankType::Character,
-            };
+            });
         }
     }
 
@@ -1134,28 +1221,29 @@ impl Buffer {
                 String::new()
             };
 
-            self.clipboard = ClipboardContent {
+            self.register_write(ClipboardContent {
                 text,
                 yank_type: YankType::Character,
-            };
+            });
         }
     }
 
     /// Put (paste) clipboard content after cursor
     pub fn put_after(&mut self) {
-        match self.clipboard.yank_type {
+        let content = self.register_read_for_put();
+        match content.yank_type {
             YankType::Line => {
                 let operation = EditOperation::Insert {
                     pos: Position {
                         row: self.cursor.row + 1,
                         col: 0,
                     },
-                    text: format!("{}\n", self.clipboard.text),
+                    text: format!("{}\n", content.text),
                 };
                 self.save_operation(operation);
 
                 // Insert new line after current line
-                let new_line = self.clipboard.text.clone();
+                let new_line = content.text.clone();
                 if self.cursor.row < self.lines.len() {
                     self.lines.insert(self.cursor.row + 1, new_line);
                     self.cursor.row += 1;
@@ -1165,7 +1253,7 @@ impl Buffer {
             }
             YankType::Character => {
                 // Handle multi-line character-wise paste properly
-                let clipboard_text = self.clipboard.text.clone();
+                let clipboard_text = content.text.clone();
 
                 // Early return if clipboard is empty
                 if clipboard_text.is_empty() {
@@ -1232,33 +1320,34 @@ impl Buffer {
                 }
             }
             YankType::Block => {
-                self.put_after_block();
+                self.put_after_block(&content.text);
             }
         }
     }
 
     /// Put (paste) clipboard content before cursor
     pub fn put_before(&mut self) {
-        match self.clipboard.yank_type {
+        let content = self.register_read_for_put();
+        match content.yank_type {
             YankType::Line => {
                 let operation = EditOperation::Insert {
                     pos: Position {
                         row: self.cursor.row,
                         col: 0,
                     },
-                    text: format!("{}\n", self.clipboard.text),
+                    text: format!("{}\n", content.text),
                 };
                 self.save_operation(operation);
 
                 // Insert new line before current line
-                let new_line = self.clipboard.text.clone();
+                let new_line = content.text.clone();
                 self.lines.insert(self.cursor.row, new_line);
                 self.cursor.col = 0;
                 self.modified = true;
             }
             YankType::Character => {
                 // Handle multi-line character-wise paste properly
-                let clipboard_text = self.clipboard.text.clone();
+                let clipboard_text = content.text.clone();
 
                 // Early return if clipboard is empty
                 if clipboard_text.is_empty() {
@@ -1319,7 +1408,7 @@ impl Buffer {
                 }
             }
             YankType::Block => {
-                self.put_before_block();
+                self.put_before_block(&content.text);
             }
         }
     }
@@ -1830,11 +1919,11 @@ impl Buffer {
                 YankType::Character
             };
             let deleted_text = self.delete_range(start, end);
-            // Update clipboard to behave like Vim (delete yanks into unnamed register)
-            self.clipboard = ClipboardContent {
+            // Write into register bank (delete yanks into unnamed by default)
+            self.register_write(ClipboardContent {
                 text: selected_text,
                 yank_type,
-            };
+            });
             self.last_selection = original_selection;
             self.selection = None;
             debug!(
@@ -1861,10 +1950,10 @@ impl Buffer {
             };
             // Preserve original selection (anchor + type) for gv before clearing
             let original_selection = self.selection;
-            self.clipboard = ClipboardContent {
+            self.register_write(ClipboardContent {
                 text: selected_text.clone(),
                 yank_type,
-            };
+            });
             self.last_selection = original_selection;
             // Clear the selection after yanking (matches Vim behavior)
             self.selection = None;
@@ -1885,8 +1974,8 @@ impl Buffer {
     }
 
     /// Helper for block-wise paste after cursor
-    fn put_after_block(&mut self) {
-        let text = self.clipboard.text.clone();
+    fn put_after_block(&mut self, text: &str) {
+        let text = text.to_string();
         if text.is_empty() {
             return;
         }
@@ -1916,8 +2005,8 @@ impl Buffer {
     }
 
     /// Helper for block-wise paste before cursor
-    fn put_before_block(&mut self) {
-        let text = self.clipboard.text.clone();
+    fn put_before_block(&mut self, text: &str) {
+        let text = text.to_string();
         if text.is_empty() {
             return;
         }

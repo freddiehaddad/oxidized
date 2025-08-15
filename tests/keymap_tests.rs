@@ -162,6 +162,54 @@ fn test_function_keys() -> Result<()> {
 }
 
 #[test]
+fn test_register_prefix_then_yy_exits_operator_pending() -> Result<()> {
+    use crossterm::event::KeyCode;
+
+    let mut key_handler = KeyHandler::test_with_embedded();
+    let mut editor = create_test_editor()?;
+
+    // Prepare a buffer with one line so yank has an effect
+    editor.create_buffer(None)?;
+    {
+        let b = editor.current_buffer_mut().unwrap();
+        b.lines.clear();
+        b.lines.push("hello".to_string());
+        b.cursor.col = 0;
+    }
+
+    // '"' to start register prefix
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('"'), KeyModifiers::NONE),
+    )?;
+    // 'a' to pick register a
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+    )?;
+    // 'y' then 'y' for line yank
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+    )?;
+    key_handler.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+    )?;
+
+    // Ensure we returned to Normal mode (not stuck in operator-pending)
+    assert_eq!(editor.mode(), oxidized::core::mode::Mode::Normal);
+    // And the named register 'a' got the line with newline
+    {
+        let b = editor.current_buffer_mut().unwrap();
+        let reg = b.get_register('a');
+        assert!(reg.is_some());
+        assert_eq!(reg.unwrap().text, "hello\n");
+    }
+    Ok(())
+}
+
+#[test]
 fn test_arrow_keys() -> Result<()> {
     let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;

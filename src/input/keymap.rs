@@ -45,6 +45,8 @@ pub struct KeyHandler {
     pub pending_mark_jump_line: bool,
     // Mark: pending register after '`' (exact jump)
     pub pending_mark_jump_exact: bool,
+    // Registers: awaiting a register after '"'
+    pub pending_register_prefix: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -94,6 +96,7 @@ impl KeyHandler {
             pending_mark_set: false,
             pending_mark_jump_line: false,
             pending_mark_jump_exact: false,
+            pending_register_prefix: false,
         }
     }
 
@@ -118,6 +121,7 @@ impl KeyHandler {
             pending_mark_set: false,
             pending_mark_jump_line: false,
             pending_mark_jump_exact: false,
+            pending_register_prefix: false,
         }
     }
 
@@ -162,6 +166,29 @@ impl KeyHandler {
     }
 
     pub fn handle_key(&mut self, editor: &mut Editor, key: KeyEvent) -> Result<()> {
+        // Handle register selection after '"'
+        if self.pending_register_prefix {
+            match key.code {
+                KeyCode::Char(reg) => {
+                    self.pending_register_prefix = false;
+                    if let Some(buffer) = editor.current_buffer_mut() {
+                        buffer.set_active_register(reg);
+                    }
+                    self.pending_sequence.clear();
+                    return Ok(());
+                }
+                KeyCode::Esc => {
+                    self.pending_register_prefix = false;
+                    self.pending_sequence.clear();
+                    return Ok(());
+                }
+                _ => {
+                    self.pending_register_prefix = false;
+                    self.pending_sequence.clear();
+                    return Ok(());
+                }
+            }
+        }
         let key_string = Self::key_event_to_string(key);
         trace!(
             "Handling key: '{}' in mode: {:?}",
@@ -949,6 +976,8 @@ impl KeyHandler {
             // Put (paste) operations
             "put_after" => self.action_put_after(editor)?,
             "put_before" => self.action_put_before(editor)?,
+            // Register prefix
+            "register_prefix" => self.action_register_prefix(editor, key)?,
 
             // Line movement
             "line_start" => self.action_line_start(editor)?,
@@ -2429,6 +2458,10 @@ impl KeyHandler {
             buffer.yank_line();
             editor.set_status_message("Line yanked".to_string());
         }
+        // If this was triggered as the second key of an operator sequence (e.g., 'yy'),
+        // ensure we exit operator-pending and return to Normal like Vim.
+        editor.clear_pending_operator();
+        editor.set_mode(Mode::Normal);
         Ok(())
     }
 
@@ -2461,6 +2494,19 @@ impl KeyHandler {
             buffer.put_before();
             editor.set_status_message("Text pasted before cursor".to_string());
         }
+        Ok(())
+    }
+
+    // Registers
+    fn action_register_prefix(&mut self, _editor: &mut Editor, key: KeyEvent) -> Result<()> {
+        // If invoked via a binding other than '"', still arm register selection
+        if let KeyCode::Char('"') = key.code {
+            self.pending_register_prefix = true;
+        } else {
+            self.pending_register_prefix = true;
+        }
+        self.pending_sequence.clear();
+        debug!("Armed register prefix; awaiting register name");
         Ok(())
     }
 
@@ -3004,6 +3050,11 @@ impl KeyHandler {
                 let start = buffer.cursor;
                 let end = Position::new(buffer.cursor.row, line.len());
                 let deleted_text = buffer.delete_range(start, end);
+                // Mirror Vim: deletions write to unnamed register
+                buffer.write_register_content(
+                    deleted_text.clone(),
+                    crate::core::buffer::YankType::Character,
+                );
                 info!("Deleted text to end of line: '{}'", deleted_text);
             } else {
                 debug!("Already at end of line, nothing to delete");

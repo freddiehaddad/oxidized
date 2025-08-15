@@ -1609,13 +1609,13 @@ impl Editor {
         let deleted_text = buffer.delete_range(range.start, range.end);
         debug!("Text deleted: '{}'", deleted_text);
 
-        // Store in clipboard
-        buffer.clipboard.text = deleted_text.clone();
-        buffer.clipboard.yank_type = if range.start.row != range.end.row {
+        // Store into registers (unnamed by default)
+        let yank_type = if range.start.row != range.end.row {
             crate::core::buffer::YankType::Line
         } else {
             crate::core::buffer::YankType::Character
         };
+        buffer.write_register_content(deleted_text.clone(), yank_type);
 
         debug!("Buffer modified flag set to true");
         self.status_message = format!("Deleted text: '{}'", deleted_text);
@@ -1628,12 +1628,12 @@ impl Editor {
         };
 
         let yanked_text = range.get_text(buffer);
-        buffer.clipboard.text = yanked_text;
-        buffer.clipboard.yank_type = if range.start.row != range.end.row {
+        let yank_type = if range.start.row != range.end.row {
             crate::core::buffer::YankType::Line
         } else {
             crate::core::buffer::YankType::Character
         };
+        buffer.write_register_content(yanked_text, yank_type);
 
         self.status_message = format!(
             "Yanked {} text object",

@@ -171,6 +171,8 @@ cargo run README.md
 - `p/P` - Paste (after/before cursor)
 - `x` - Delete character
 
+Tip: Use the black-hole register to avoid clobbering your clipboard. For example, "\_ dd deletes the current line without changing any registers; "\_ dw deletes a word and discards it.
+
 **Counts (numeric prefixes):**
 
 - Use a number before a motion or action to repeat it.
@@ -214,6 +216,18 @@ Notes:
 
 - Marks are currently buffer-local. If a mark is not set, a status message
    will indicate it.
+
+**Registers (copy/paste):**
+
+- "{register} selects a one-shot register for the next yank/delete/put.
+  - Unnamed register " is the default source/target.
+  - Named registers a–z store text; A–Z appends to the lowercase register.
+  - Black-hole register _ discards writes (doesn’t alter any register).
+- Examples:
+  - "a yy yanks current line into register a; paste later with "a p.
+  - "_ dd deletes line without touching your clipboard/registers.
+  - "A yw appends word to existing contents of register a.
+  - p/P paste from the selected register if one-shot is set, otherwise from unnamed.
 
 ### Advanced Window Management
 
@@ -487,6 +501,9 @@ Below is the current authoritative default `keymaps.toml` (kept in sync with the
 ">" = "operator_indent"            # Indent operator
 "<" = "operator_unindent"          # Unindent operator
 "~" = "operator_toggle_case"       # Toggle case operator
+
+# Registers prefix
+"\"" = "register_prefix"            # '"{register}' prefix to select register
 
 # Yank (copy) operations
 "yy" = "yank_line"                 # Yank (copy) current line
