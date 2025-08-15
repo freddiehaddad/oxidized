@@ -94,11 +94,18 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-      - name: Run tarpaulin
-        uses: actions-rs/tarpaulin@v0.1
-        with:
-          version: 'latest'
-          args: '--out Xml'
+      - name: Install tarpaulin (cargo)
+        run: |
+          cargo install cargo-tarpaulin --locked --version 0.30.0 || echo "tarpaulin already installed"
+      - name: Run tarpaulin (generate Cobertura XML)
+        run: |
+          # Tarpaulin only officially supports Linux; this job runs on ubuntu-latest.
+          # Using manual install instead of deprecated action (was failing to fetch 'latest' binary).
+          cargo tarpaulin --workspace --all-features --out Xml --output-dir coverage --timeout 600
+          # Normalize output file name to cobertura.xml for downstream steps.
+          found=$(ls coverage/*.xml 2>/dev/null | head -1)
+          if [ -z "$found" ]; then echo "No XML coverage report produced"; exit 1; fi
+          cp "$found" cobertura.xml
       - name: Extract coverage & build badge json
         id: cov
         run: |
