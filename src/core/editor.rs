@@ -706,6 +706,8 @@ impl Editor {
             | Mode::Visual
             | Mode::VisualLine
             | Mode::VisualBlock
+            | Mode::Select
+            | Mode::SelectLine
             | Mode::Command
             | Mode::Search
             | Mode::OperatorPending => {

@@ -365,6 +365,8 @@ impl UI {
             Mode::Visual => self.theme.visual_char_bg,
             Mode::VisualLine => self.theme.visual_line_bg,
             Mode::VisualBlock => self.theme.visual_block_bg,
+            Mode::Select => self.theme.select_char_bg,
+            Mode::SelectLine => self.theme.select_line_bg,
             _ => self.theme.selection_bg, // Fallback for other cases
         }
     }
@@ -933,6 +935,8 @@ impl UI {
             | Mode::Visual
             | Mode::VisualLine
             | Mode::VisualBlock
+            | Mode::Select
+            | Mode::SelectLine
             | Mode::Command
             | Mode::Search
             | Mode::OperatorPending => {
@@ -1458,6 +1462,14 @@ impl UI {
             Mode::VisualBlock => (
                 self.theme.mode_colors.visual_block_fg,
                 self.theme.mode_colors.visual_block_bg,
+            ),
+            Mode::Select => (
+                self.theme.mode_colors.select_fg,
+                self.theme.mode_colors.select_bg,
+            ),
+            Mode::SelectLine => (
+                self.theme.mode_colors.select_line_fg,
+                self.theme.mode_colors.select_line_bg,
             ),
             Mode::Replace => (
                 self.theme.mode_colors.replace_fg,

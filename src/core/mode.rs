@@ -8,6 +8,8 @@ pub enum Mode {
     Visual,
     VisualLine,
     VisualBlock,
+    Select,     // Select (character-wise) mode (like Visual but prepares for direct insertion)
+    SelectLine, // Select line-wise mode
     Command,
     Replace,
     Search,
@@ -22,6 +24,8 @@ impl fmt::Display for Mode {
             Mode::Visual => write!(f, "VISUAL"),
             Mode::VisualLine => write!(f, "V-LINE"),
             Mode::VisualBlock => write!(f, "V-BLOCK"),
+            Mode::Select => write!(f, "SELECT"),
+            Mode::SelectLine => write!(f, "S-LINE"),
             Mode::Command => write!(f, "COMMAND"),
             Mode::Replace => write!(f, "REPLACE"),
             Mode::Search => write!(f, "SEARCH"),

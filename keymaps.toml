@@ -43,6 +43,8 @@
 "gk" = "display_line_up"      # Move up by display line (wrapped segment)
 "gm" = "display_line_middle"  # Move to middle of display line (wrapped segment)
 "g8" = "show_char_byte_sequence" # Show UTF-8 byte sequence of char under cursor
+"gh" = "select_mode"            # Enter Select (character) mode
+"gH" = "select_line_mode"        # Enter Select Line mode
 
 # Mode transitions
 "i" = "insert_mode"            # Insert before cursor
@@ -333,6 +335,14 @@
 "Ctrl+v" = "normal_mode" # Toggle Visual Block off
 "Alt+v" = "normal_mode"  # Toggle Visual Block off (alternative)
 "v" = "visual_mode"      # Switch to Visual (character)
+
+[select_mode]
+"Char" = "select_insert_char" # Any printable char replaces selection and enters insert
+"Escape" = "normal_mode"
+
+[select_line_mode]
+"Char" = "select_insert_char" # Replace selection with char and enter insert
+"Escape" = "normal_mode"
 
 [replace_mode]
 # Character replacement

@@ -46,6 +46,10 @@ pub struct ModeColors {
     pub visual_line_fg: String,
     pub visual_block_bg: String,
     pub visual_block_fg: String,
+    pub select_bg: String,
+    pub select_fg: String,
+    pub select_line_bg: String,
+    pub select_line_fg: String,
     pub replace_bg: String,
     pub replace_fg: String,
     pub command_bg: String,
@@ -80,6 +84,8 @@ pub struct UIColors {
     pub visual_line_bg: String,  // Line-wise visual selection background
     pub visual_char_bg: String,  // Character-wise visual selection background
     pub visual_block_bg: String, // Block-wise visual selection background (future)
+    pub select_char_bg: String,  // Character-wise select mode background
+    pub select_line_bg: String,  // Line-wise select mode background
     pub warning: String,
     pub error: String,
     /// Optional: granular status line colors per segment
@@ -121,6 +127,8 @@ pub struct UITheme {
     pub visual_line_bg: Color,  // Line-wise visual selection background
     pub visual_char_bg: Color,  // Character-wise visual selection background
     pub visual_block_bg: Color, // Block-wise visual selection background (future)
+    pub select_char_bg: Color,  // Character-wise select mode background
+    pub select_line_bg: Color,  // Line-wise select mode background
     pub warning: Color,
     pub error: Color,
     pub mode_colors: ModeThemeColors,
@@ -216,6 +224,8 @@ impl ThemeConfig {
             visual_line_bg: "#8c4a2b".to_string(),
             visual_char_bg: "#7a3f28".to_string(),
             visual_block_bg: "#9a5235".to_string(),
+            select_char_bg: "#7d4a30".to_string(),
+            select_line_bg: "#8a5236".to_string(),
             warning: "#ff8c00".to_string(),
             error: "#dc322f".to_string(),
             statusline: Some(StatusLineColors {
@@ -237,6 +247,10 @@ impl ThemeConfig {
                 visual_line_fg: "#ffedd5".to_string(),
                 visual_block_bg: "#ce422b".to_string(),
                 visual_block_fg: "#fffbeb".to_string(),
+                select_bg: "#ce422b".to_string(),
+                select_fg: "#ffefd5".to_string(),
+                select_line_bg: "#ce422b".to_string(),
+                select_line_fg: "#ffe8c7".to_string(),
                 replace_bg: "#ce422b".to_string(),
                 replace_fg: "#ffd1c1".to_string(),
                 command_bg: "#ce422b".to_string(),
@@ -461,6 +475,8 @@ impl UITheme {
             visual_line_bg: parse_color(&colors.visual_line_bg),
             visual_char_bg: parse_color(&colors.visual_char_bg),
             visual_block_bg: parse_color(&colors.visual_block_bg),
+            select_char_bg: parse_color(&colors.select_char_bg),
+            select_line_bg: parse_color(&colors.select_line_bg),
             warning: parse_color(&colors.warning),
             error: parse_color(&colors.error),
             mode_colors,
@@ -496,6 +512,10 @@ pub struct ModeThemeColors {
     pub visual_line_bg: Color,
     pub visual_block_fg: Color,
     pub visual_block_bg: Color,
+    pub select_fg: Color,
+    pub select_bg: Color,
+    pub select_line_fg: Color,
+    pub select_line_bg: Color,
     pub replace_fg: Color,
     pub replace_bg: Color,
     pub command_fg: Color,
@@ -522,6 +542,10 @@ impl ModeThemeColors {
                 visual_line_bg: get_bg(Some(&m.visual_line_bg)),
                 visual_block_fg: get(Some(&m.visual_block_fg)),
                 visual_block_bg: get_bg(Some(&m.visual_block_bg)),
+                select_fg: get(Some(&m.select_fg)),
+                select_bg: get_bg(Some(&m.select_bg)),
+                select_line_fg: get(Some(&m.select_line_fg)),
+                select_line_bg: get_bg(Some(&m.select_line_bg)),
                 replace_fg: get(Some(&m.replace_fg)),
                 replace_bg: get_bg(Some(&m.replace_bg)),
                 command_fg: get(Some(&m.command_fg)),
@@ -540,6 +564,10 @@ impl ModeThemeColors {
                 visual_line_bg: default_bg,
                 visual_block_fg: default_fg,
                 visual_block_bg: default_bg,
+                select_fg: default_fg,
+                select_bg: default_bg,
+                select_line_fg: default_fg,
+                select_line_bg: default_bg,
                 replace_fg: default_fg,
                 replace_bg: default_bg,
                 command_fg: default_fg,

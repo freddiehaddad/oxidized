@@ -24,6 +24,8 @@ mod mode_tests {
         assert_eq!(Mode::Replace.to_string(), "REPLACE");
         assert_eq!(Mode::Search.to_string(), "SEARCH");
         assert_eq!(Mode::OperatorPending.to_string(), "OP-PENDING");
+        assert_eq!(Mode::Select.to_string(), "SELECT");
+        assert_eq!(Mode::SelectLine.to_string(), "S-LINE");
     }
 
     #[test]

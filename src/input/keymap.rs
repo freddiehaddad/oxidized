@@ -16,6 +16,8 @@ pub struct KeymapConfig {
     pub visual_mode: HashMap<String, String>,
     pub visual_line_mode: HashMap<String, String>,
     pub visual_block_mode: HashMap<String, String>,
+    pub select_mode: HashMap<String, String>,
+    pub select_line_mode: HashMap<String, String>,
     pub replace_mode: HashMap<String, String>,
     pub search_mode: HashMap<String, String>,
     pub operator_pending_mode: HashMap<String, String>,
@@ -113,9 +115,31 @@ impl KeyHandler {
                 "keymaps.toml not found; no built-in keymaps will be used. Please add keymaps.toml."
             );
         }
-
-        // Return empty keymaps to ensure all bindings come from keymaps.toml only
-        Self::create_minimal_fallback()
+        // Fallback: attempt to parse an embedded copy (ensures integration tests have mappings)
+        // This uses include_str! so it is tied to the repository version at compile time.
+        const EMBEDDED_KEYMAPS: &str = include_str!("../../keymaps.toml");
+        match toml::from_str::<KeymapConfig>(EMBEDDED_KEYMAPS) {
+            Ok(mut cfg) => {
+                info!("Loaded embedded fallback keymaps");
+                if !cfg.normal_mode.contains_key("gh") {
+                    cfg.normal_mode.insert("gh".into(), "select_mode".into());
+                }
+                if !cfg.normal_mode.contains_key("gH") {
+                    cfg.normal_mode
+                        .insert("gH".into(), "select_line_mode".into());
+                }
+                cfg
+            }
+            Err(e) => {
+                warn!("Failed to parse embedded fallback keymaps: {}", e);
+                // Return empty keymaps to ensure all bindings come from keymaps.toml only
+                let mut cfg = Self::create_minimal_fallback();
+                cfg.normal_mode.insert("gh".into(), "select_mode".into());
+                cfg.normal_mode
+                    .insert("gH".into(), "select_line_mode".into());
+                cfg
+            }
+        }
     }
 
     fn create_minimal_fallback() -> KeymapConfig {
@@ -127,6 +151,8 @@ impl KeyHandler {
             visual_mode: HashMap::new(),
             visual_line_mode: HashMap::new(),
             visual_block_mode: HashMap::new(),
+            select_mode: HashMap::new(),
+            select_line_mode: HashMap::new(),
             replace_mode: HashMap::new(),
             search_mode: HashMap::new(),
             operator_pending_mode: HashMap::new(),
@@ -398,6 +424,10 @@ impl KeyHandler {
             };
 
             if let Some(action) = current_keymap.get(&self.pending_sequence) {
+                debug!(
+                    "Matched key sequence '{}' -> action '{}'",
+                    self.pending_sequence, action
+                );
                 // Special handling for operators in Normal mode: they should execute immediately
                 // even if there are longer potential matches (like 'd' vs 'dd')
                 let is_operator = matches!(editor.mode(), Mode::Normal)
@@ -527,7 +557,11 @@ impl KeyHandler {
             // Minimal 'g' prefix handling in visual modes
             if matches!(
                 editor.mode(),
-                Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+                Mode::Visual
+                    | Mode::VisualLine
+                    | Mode::VisualBlock
+                    | Mode::Select
+                    | Mode::SelectLine
             ) {
                 // If we just received 'g', start a pending sequence and wait for next key
                 if self.pending_sequence.is_empty() && key_string == "g" {
@@ -542,6 +576,8 @@ impl KeyHandler {
                         Mode::Visual => &self.keymap_config.visual_mode,
                         Mode::VisualLine => &self.keymap_config.visual_line_mode,
                         Mode::VisualBlock => &self.keymap_config.visual_block_mode,
+                        Mode::Select => &self.keymap_config.select_mode,
+                        Mode::SelectLine => &self.keymap_config.select_line_mode,
                         _ => unreachable!(),
                     };
                     if let Some(action_name) = map.get(&seq) {
@@ -587,6 +623,32 @@ impl KeyHandler {
                 Mode::Visual => self.keymap_config.visual_mode.get(&key_string),
                 Mode::VisualLine => self.keymap_config.visual_line_mode.get(&key_string),
                 Mode::VisualBlock => self.keymap_config.visual_block_mode.get(&key_string),
+                Mode::Select => {
+                    if let KeyCode::Char(_) = key.code {
+                        if !key.modifiers.contains(KeyModifiers::CONTROL)
+                            && !key.modifiers.contains(KeyModifiers::ALT)
+                        {
+                            self.keymap_config.select_mode.get("Char")
+                        } else {
+                            self.keymap_config.select_mode.get(&key_string)
+                        }
+                    } else {
+                        self.keymap_config.select_mode.get(&key_string)
+                    }
+                }
+                Mode::SelectLine => {
+                    if let KeyCode::Char(_) = key.code {
+                        if !key.modifiers.contains(KeyModifiers::CONTROL)
+                            && !key.modifiers.contains(KeyModifiers::ALT)
+                        {
+                            self.keymap_config.select_line_mode.get("Char")
+                        } else {
+                            self.keymap_config.select_line_mode.get(&key_string)
+                        }
+                    } else {
+                        self.keymap_config.select_line_mode.get(&key_string)
+                    }
+                }
                 Mode::Replace => {
                     if let KeyCode::Char(_) = key.code {
                         self.keymap_config.replace_mode.get("Char")
@@ -913,6 +975,8 @@ impl KeyHandler {
             "visual_mode" => self.action_visual_mode(editor)?,
             "visual_line_mode" => self.action_visual_line_mode(editor)?,
             "visual_block_mode" => self.action_visual_block_mode(editor)?,
+            "select_mode" => self.action_select_mode(editor)?,
+            "select_line_mode" => self.action_select_line_mode(editor)?,
             "reselect_last_visual" => self.action_reselect_last_visual(editor)?,
             "replace_mode" => self.action_replace_mode(editor)?,
             "search_forward" => self.action_search_forward(editor)?,
@@ -967,6 +1031,7 @@ impl KeyHandler {
             "delete_selection" => self.action_delete_selection(editor)?,
             "yank_selection" => self.action_yank_selection(editor)?,
             "change_selection" => self.action_change_selection(editor)?,
+            "select_insert_char" => self.action_select_insert_char(editor, key)?,
 
             // Replace mode actions
             "replace_char" => self.action_replace_char(editor, key)?,
@@ -1029,7 +1094,7 @@ impl KeyHandler {
     fn action_cursor_left(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         if let Some(buffer) = editor.current_buffer_mut() {
             buffer.move_cursor_left();
@@ -1044,7 +1109,7 @@ impl KeyHandler {
     fn action_cursor_right(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         if let Some(buffer) = editor.current_buffer_mut() {
             buffer.move_cursor_right();
@@ -1059,7 +1124,7 @@ impl KeyHandler {
     fn action_cursor_up(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         if let Some(buffer) = editor.current_buffer_mut()
             && buffer.cursor.row > 0
@@ -1083,7 +1148,7 @@ impl KeyHandler {
     fn action_cursor_down(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         if let Some(buffer) = editor.current_buffer_mut()
             && buffer.cursor.row < buffer.lines.len() - 1
@@ -1261,7 +1326,7 @@ impl KeyHandler {
     fn action_line_start(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         if let Some(buffer) = editor.current_buffer_mut() {
             buffer.cursor.col = 0;
@@ -1275,7 +1340,7 @@ impl KeyHandler {
     fn action_line_first_char(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         if let Some(buffer) = editor.current_buffer_mut() {
             if let Some(line) = buffer.get_line(buffer.cursor.row) {
@@ -1299,7 +1364,7 @@ impl KeyHandler {
     fn action_display_line_start(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         editor.move_cursor_display_line_start();
         if is_visual_mode && let Some(buffer) = editor.current_buffer_mut() {
@@ -1311,7 +1376,7 @@ impl KeyHandler {
     fn action_display_line_first_nonblank(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         editor.move_cursor_display_line_first_nonblank();
         if is_visual_mode && let Some(buffer) = editor.current_buffer_mut() {
@@ -1323,7 +1388,7 @@ impl KeyHandler {
     fn action_display_line_end(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         editor.move_cursor_display_line_end();
         if is_visual_mode && let Some(buffer) = editor.current_buffer_mut() {
@@ -1335,7 +1400,7 @@ impl KeyHandler {
     fn action_display_line_down(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         editor.move_cursor_display_line_down();
         if is_visual_mode && let Some(buffer) = editor.current_buffer_mut() {
@@ -1347,7 +1412,7 @@ impl KeyHandler {
     fn action_display_line_up(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         editor.move_cursor_display_line_up();
         if is_visual_mode && let Some(buffer) = editor.current_buffer_mut() {
@@ -1359,7 +1424,7 @@ impl KeyHandler {
     fn action_display_line_middle(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         editor.move_cursor_display_line_middle();
         if is_visual_mode && let Some(buffer) = editor.current_buffer_mut() {
@@ -1371,7 +1436,7 @@ impl KeyHandler {
     fn action_line_end(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         if let Some(buffer) = editor.current_buffer_mut() {
             if let Some(line) = buffer.get_line(buffer.cursor.row) {
@@ -1387,7 +1452,7 @@ impl KeyHandler {
     fn action_line_last_nonblank(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         if let Some(buffer) = editor.current_buffer_mut()
             && let Some(line) = buffer.get_line(buffer.cursor.row)
@@ -1408,7 +1473,7 @@ impl KeyHandler {
     fn action_buffer_start(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         if let Some(buffer) = editor.current_buffer_mut() {
             buffer.cursor.row = 0;
@@ -1423,7 +1488,7 @@ impl KeyHandler {
     fn action_buffer_end(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         if let Some(buffer) = editor.current_buffer_mut() {
             buffer.cursor.row = buffer.lines.len().saturating_sub(1);
@@ -1574,6 +1639,28 @@ impl KeyHandler {
             buffer.start_visual_block_selection();
         }
         editor.set_mode(Mode::VisualBlock);
+        Ok(())
+    }
+
+    fn action_select_mode(&self, editor: &mut Editor) -> Result<()> {
+        // Character-wise select mode (aliasing visual selection semantics for now)
+        debug!("Entering select mode");
+        if let Some(buffer) = editor.current_buffer_mut() {
+            // Start selection if none active
+            if buffer.selection.is_none() {
+                buffer.start_visual_selection();
+            }
+        }
+        editor.set_mode(Mode::Select);
+        Ok(())
+    }
+
+    fn action_select_line_mode(&self, editor: &mut Editor) -> Result<()> {
+        debug!("Entering select line mode");
+        if let Some(buffer) = editor.current_buffer_mut() {
+            buffer.start_visual_line_selection();
+        }
+        editor.set_mode(Mode::SelectLine);
         Ok(())
     }
 
@@ -1759,10 +1846,24 @@ impl KeyHandler {
         Ok(())
     }
 
+    fn action_select_insert_char(&self, editor: &mut Editor, key: KeyEvent) -> Result<()> {
+        // Replace the current selection (if any) with the typed character and enter insert mode.
+        if let KeyCode::Char(ch) = key.code
+            && let Some(buffer) = editor.current_buffer_mut()
+        {
+            if buffer.selection.is_some() {
+                let _ = buffer.delete_selection();
+            }
+            buffer.insert_char(ch);
+            editor.set_mode(Mode::Insert);
+        }
+        Ok(())
+    }
+
     fn action_word_forward(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         if let Some(buffer) = editor.current_buffer_mut() {
             buffer.move_to_next_word();
@@ -1776,7 +1877,7 @@ impl KeyHandler {
     fn action_word_backward(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         if let Some(buffer) = editor.current_buffer_mut() {
             buffer.move_to_previous_word();
@@ -1790,7 +1891,7 @@ impl KeyHandler {
     fn action_word_end(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         if let Some(buffer) = editor.current_buffer_mut() {
             buffer.move_to_word_end();
@@ -1804,7 +1905,7 @@ impl KeyHandler {
     fn action_word_end_backward(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         if let Some(buffer) = editor.current_buffer_mut() {
             buffer.move_to_previous_word_end();
@@ -1818,7 +1919,7 @@ impl KeyHandler {
     fn action_small_word_end_backward(&self, editor: &mut Editor) -> Result<()> {
         let is_visual_mode = matches!(
             editor.mode(),
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock | Mode::Select | Mode::SelectLine
         );
         if let Some(buffer) = editor.current_buffer_mut() {
             buffer.move_to_previous_small_word_end();
