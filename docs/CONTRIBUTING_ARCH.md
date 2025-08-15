@@ -27,10 +27,11 @@ Benches:
 - Current suites: `search_bench`, `wrap_bench`, `viewport_hscroll_bench`, `gutter_status_bench`, `visual_block_bench`.
 - Selection performance: `visual_block_bench` confirms block highlight span math is trivial (no caching needed yet).
 
-Selection semantics:
+Selection & Select mode semantics:
 
 - `Selection.start` is the anchor (original point). Do not assume ordering; derive ordered ranges via helpers.
 - Avoid manual normalization that would swap columns on same-row backward selections.
+- Select modes (`gh` character-wise, `gH` line-wise) reuse visual span computation but treat any printable input as an atomic replace operation followed by an automatic transition into Insert mode. Tests in `select_mode_tests.rs` lock in: single-grapheme replacement, multi-byte Unicode replacement, and correct cursor placement post-insert.
 
 ## Quick triage flow
 

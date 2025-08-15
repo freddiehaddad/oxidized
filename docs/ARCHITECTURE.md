@@ -223,7 +223,7 @@ tests/ contains almost all tests (crate-level integration style) organized by co
 - Motions & Modes:
   - Classic motions: covered across `g_motion_tests.rs`, `g_caret_motion_tests.rs`, `mode_tests.rs`.
   - New extended motions: `g_motion_tests.rs` houses `gE` (WORD backward end) and `ge` (small word backward end) regression cases including punctuation (hyphen, ellipsis) and cross-line behavior.
-  - Visual / VisualLine / VisualBlock: `visual_*` and `wrapped_visual_selection_tests.rs` for selection growth, wrapped line invariants, exit behavior.
+  - Visual / VisualLine / VisualBlock / Select / SelectLine: `visual_*`, `select_mode_tests.rs`, and `wrapped_visual_selection_tests.rs` for selection growth, wrapped line invariants, exit behavior, and typed char replacement semantics in Select modes.
 - Text Objects: `text_objects_tests.rs` (parser + finder; word/WORD, quotes, brackets, sentences, paragraphs, inner/around variants).
 - Search: `search_integration.rs` (case sensitivity, regex toggle, multiple matches, empty pattern guard).
 - Macros: `macro_tests.rs` (record/playback, register management, filtering of control keys).
@@ -233,7 +233,7 @@ tests/ contains almost all tests (crate-level integration style) organized by co
 - Window/Layout/UI: `window_tests.rs`, `resize_tests.rs`, `statusline_tests.rs`, `ui_tests.rs`, `ui_wrap_tests.rs` (viewport math, status segments, wrapping correctness, horizontal offset behavior).
 - Completion: `completion_tests.rs` (basic acceptance & cycling semantics).
 - Replace / Insert Edge Cases: `replace_tests.rs`, paste & empty line handling tests.
-- Text Objects & Selection Interop: `selection_span_tests.rs`, `visual_*` variants.
+- Text Objects & Selection Interop: `selection_span_tests.rs`, `visual_*` variants, and Select mode tests (character/line replacement path).
 
 Some focused regression files carry a short doc comment (`//!`) at top describing the bug they lock in (e.g., visual mode exit, wrapped selection growth). When adding a regression, prefer appending to the most related existing file instead of creating a new one, unless the scenario is substantial and orthogonal.
 

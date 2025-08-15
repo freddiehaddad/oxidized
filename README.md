@@ -373,22 +373,21 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 
 ### Keymap Customization (`keymaps.toml`)
 
+#### Select Modes (New)
+
+Oxidized adds Vim-compatible Select modes:
+
+- `gh` enters character-wise Select mode.
+- `gH` enters line-wise Select mode.
+
+In Select mode, any printable character you type immediately replaces the current selection (or the line selection for Select Line) and the editor transitions into Insert mode with the cursor positioned after the inserted text (character-wise) or at the start of the replaced line span (line-wise). `Esc` cancels and returns to Normal without modifying the selection. This mirrors common GUI editor semantics while preserving modal predictability.
+
+Below is the current authoritative default `keymaps.toml` (kept in sync with the repository; see drift‑guard tests). Copy and modify this in your config directory to customize bindings.
+
 ```toml
 # ###############################################################################
 # Oxidized Keymaps Configuration
-#
-# This file enumerates all supported default keybindings. Each mapping has an
-# inline comment describing its purpose. You can customize or remove any map;
-# unspecified actions fall back to built-in defaults.
-#
-# Format:
-#   key = "action"
-#   key = { action = "command", args = ["arg1", "arg2"] }
-#
-# Notes:
-# - Some terminals intercept certain chords (e.g., Ctrl+V); alternatives are
-#   provided where practical (see Alt+v for Visual Block).
-# - After editing, save the file; the editor will live-reload keymaps.
+# (Synced from repository keymaps.toml)
 # ###############################################################################
 
 [normal_mode]
@@ -405,15 +404,27 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 "b" = "word_backward"       # Move to start of previous word
 "e" = "word_end"            # Move to end of next word
 "gE" = "word_end_backward"   # Move to end of previous WORD
+"ge" = "small_word_end_backward" # Move to end of previous small word (treat punctuation as words)
 "0" = "line_start"          # Go to column 0
 "^" = "line_first_char"     # Go to first non-blank character
+"g^" = "display_line_first_nonblank" # Go to first non-blank of display line
 "$" = "line_end"            # Go to end of line
+"g_" = "line_last_nonblank" # Go to last non-blank character
 "gg" = "buffer_start"       # Go to first line of buffer
 "G" = "buffer_end"          # Go to last line of buffer
+"g0" = "display_line_start"  # Go to first screen column (start of display line)
+"g$" = "display_line_end"    # Go to last screen column (end of display line)
+"gj" = "display_line_down"    # Move down by display line (wrapped segment)
+"gk" = "display_line_up"      # Move up by display line (wrapped segment)
+"gm" = "display_line_middle"  # Move to middle of display line (wrapped segment)
+"g8" = "show_char_byte_sequence" # Show UTF-8 byte sequence of char under cursor
+"gh" = "select_mode"            # Enter Select (character) mode
+"gH" = "select_line_mode"        # Enter Select Line mode
 
 # Mode transitions
 "i" = "insert_mode"            # Insert before cursor
-"I" = "insert_line_start"      # Insert at start of line
+"I" = "insert_line_start"      # Insert at first non-blank character of line
+"gI" = "insert_line_absolute"  # Insert at absolute column 0 (like Vim gI)
 "a" = "insert_after"           # Insert after cursor
 "A" = "insert_line_end"        # Insert at end of line
 "o" = "insert_line_below"      # Open a new line below and insert
@@ -422,6 +433,7 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 "V" = "visual_line_mode"       # Enter Visual Line mode
 "Ctrl+v" = "visual_block_mode" # Enter Visual Block mode
 "Alt+v" = "visual_block_mode"  # Alternative for terminals that intercept Ctrl+V (e.g., VS Code)
+"gv" = "reselect_last_visual"  # Reselect last visual selection
 "R" = "replace_mode"           # Enter Replace mode
 
 # Search
@@ -462,12 +474,10 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 
 # Sentence movement
 "(" = "sentence_backward"         # Move to previous sentence
-
 ")" = "sentence_forward"          # Move to next sentence
 
 # Section movement
 "[[" = "section_backward"         # Move to previous section
-
 "]]" = "section_forward"          # Move to next section
 
 # Repeat operations
@@ -617,11 +627,21 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 "l" = "cursor_right"    # Extend right
 "w" = "word_forward"    # Extend to next word start
 "b" = "word_backward"   # Extend to previous word start
+"gE" = "word_end_backward" # Extend to end of previous WORD
+"ge" = "small_word_end_backward" # Extend to end of previous small word
 "0" = "line_start"      # Extend to start of line
+"g0" = "display_line_start"  # Extend to start of display line
+"g^" = "display_line_first_nonblank" # Extend to first non-blank of display line
 "$" = "line_end"        # Extend to end of line
+"g_" = "line_last_nonblank" # Extend to last non-blank character
+"g$" = "display_line_end"    # Extend to end of display line
+"gj" = "display_line_down"   # Extend down by display line
+"gk" = "display_line_up"     # Extend up by display line
+"gm" = "display_line_middle" # Extend to middle of display line
 
 # Actions
 "d" = "delete_selection" # Delete selection
+"x" = "delete_selection" # Delete (alias, like Vim)
 "y" = "yank_selection"   # Copy selection
 "c" = "change_selection" # Change selection
 
@@ -637,11 +657,21 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 "l" = "cursor_right"  # Extend right by lines
 "w" = "word_forward"  # Extend to next word start
 "b" = "word_backward" # Extend to previous word start
+"gE" = "word_end_backward" # Extend to end of previous WORD
+"ge" = "small_word_end_backward" # Extend to end of previous small word
 "0" = "line_start"    # Extend to start of line
+"g0" = "display_line_start"  # Extend to start of display line
+"g^" = "display_line_first_nonblank" # Extend to first non-blank of display line
 "$" = "line_end"      # Extend to end of line
+"g_" = "line_last_nonblank" # Extend to last non-blank character
+"g$" = "display_line_end"    # Extend to end of display line
+"gj" = "display_line_down"   # Extend down by display line
+"gk" = "display_line_up"     # Extend up by display line
+"gm" = "display_line_middle" # Extend to middle of display line
 
 # Actions
 "d" = "delete_selection" # Delete selected lines
+"x" = "delete_selection" # Delete (alias, like Vim)
 "y" = "yank_selection"   # Copy selected lines
 "c" = "change_selection" # Change selected lines
 
@@ -658,11 +688,20 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 "l" = "cursor_right"  # Extend block right
 "w" = "word_forward"  # Extend to next word start
 "b" = "word_backward" # Extend to previous word start
+"gE" = "word_end_backward" # Extend to end of previous WORD
+"ge" = "small_word_end_backward" # Extend to end of previous small word
 "0" = "line_start"    # Extend to start of line
+"g0" = "display_line_start"  # Extend to start of display line
+"g^" = "display_line_first_nonblank" # Extend to first non-blank of display line
 "$" = "line_end"      # Extend to end of line
+"g_" = "line_last_nonblank" # Extend to last non-blank character
+"g$" = "display_line_end"    # Extend to end of display line
+"gj" = "display_line_down"   # Extend down by display line
+"gk" = "display_line_up"     # Extend up by display line
 
 # Actions
 "d" = "delete_selection" # Delete block
+"x" = "delete_selection" # Delete (alias, like Vim)
 "y" = "yank_selection"   # Copy block
 "c" = "change_selection" # Change block
 
@@ -671,6 +710,14 @@ Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in
 "Ctrl+v" = "normal_mode" # Toggle Visual Block off
 "Alt+v" = "normal_mode"  # Toggle Visual Block off (alternative)
 "v" = "visual_mode"      # Switch to Visual (character)
+
+[select_mode]
+"Char" = "select_insert_char" # Any printable char replaces selection and enters insert
+"Escape" = "normal_mode"
+
+[select_line_mode]
+"Char" = "select_insert_char" # Replace selection with char and enter insert
+"Escape" = "normal_mode"
 
 [replace_mode]
 # Character replacement
