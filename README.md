@@ -1,5 +1,23 @@
 # Oxidized: A High-Performance Vim Clone in Rust
 
+<div align="left">
+
+<!-- Status Badges -->
+<a href="https://github.com/freddiehaddad/oxidized/actions/workflows/ci.yml">
+   <img alt="CI" src="https://img.shields.io/github/actions/workflow/status/freddiehaddad/oxidized/ci.yml?branch=master&label=build%2Ftest&logo=github&logoColor=white&color=dea584" />
+</a>
+<a href="https://github.com/freddiehaddad/oxidized/actions/workflows/ci.yml">
+   <img alt="Clippy" src="https://img.shields.io/badge/lint-clippy-orange?logo=rust&logoColor=white&color=ce422b" />
+</a>
+<a href="https://freddiehaddad.github.io/oxidized/badges/coverage.json">
+   <img alt="Coverage" src="https://img.shields.io/endpoint?url=https%3A%2F%2Ffreddiehaddad.github.io%2Foxidized%2Fbadges%2Fcoverage.json&logo=rust&logoColor=white" />
+</a>
+<a href="https://github.com/freddiehaddad/oxidized/blob/master/LICENSE">
+   <img alt="License" src="https://img.shields.io/badge/license-MIT-yellow?color=997f5f" />
+</a>
+
+</div>
+
 **Oxidized** is a modern terminal-based text editor that brings Vim's powerful modal editing to the 21st century. Built from the ground up in Rust, it combines Vim's time-tested editing philosophy with cutting-edge architecture, delivering exceptional performance, memory safety, and extensibility.
 
 > Note: This project is under active development. Features, behavior, and APIs may change.
