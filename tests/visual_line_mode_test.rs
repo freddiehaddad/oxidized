@@ -17,7 +17,7 @@ fn insert_test_text(buffer: &mut Buffer, text: &str) {
 
 #[test]
 fn test_visual_line_mode_activation() {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = Editor::new().unwrap();
 
     // Start in normal mode

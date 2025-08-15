@@ -8,7 +8,7 @@ fn make() -> (KeyHandler, Editor) {
     let _ = std::env::set_current_dir(env!("CARGO_MANIFEST_DIR"));
     let mut editor = Editor::new().unwrap();
     let _ = editor.create_buffer(None).unwrap();
-    (KeyHandler::new(), editor)
+    (KeyHandler::test_with_embedded(), editor)
 }
 
 #[test]

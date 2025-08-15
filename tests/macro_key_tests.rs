@@ -15,7 +15,7 @@ fn make_editor_with_buffer() -> Result<Editor> {
 
 #[test]
 fn macro_register_selection_does_not_trigger_mappings() -> Result<()> {
-    let mut handler = KeyHandler::new();
+    let mut handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor()?;
 
     // Press 'q' to arm register selection
@@ -51,7 +51,7 @@ fn macro_register_selection_does_not_trigger_mappings() -> Result<()> {
 
 #[test]
 fn macro_q_toggles_stop() -> Result<()> {
-    let mut handler = KeyHandler::new();
+    let mut handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor()?;
 
     // Start recording: q a
@@ -77,7 +77,7 @@ fn macro_q_toggles_stop() -> Result<()> {
 
 #[test]
 fn macro_pending_register_can_cancel_with_esc() -> Result<()> {
-    let mut handler = KeyHandler::new();
+    let mut handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor()?;
 
     // Arm register selection
@@ -104,7 +104,7 @@ fn macro_pending_register_can_cancel_with_esc() -> Result<()> {
 
 #[test]
 fn macro_at_arms_pending_and_executes_on_register() -> Result<()> {
-    let mut handler = KeyHandler::new();
+    let mut handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_buffer()?;
 
     // Record a simple macro 'a' that inserts 'x'
@@ -158,7 +158,7 @@ fn macro_at_arms_pending_and_executes_on_register() -> Result<()> {
 
 #[test]
 fn macro_at_at_repeats_last_macro() -> Result<()> {
-    let mut handler = KeyHandler::new();
+    let mut handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_buffer()?;
 
     // Record macro 'b' that inserts 'y'
@@ -217,7 +217,7 @@ fn macro_at_at_repeats_last_macro() -> Result<()> {
 
 #[test]
 fn macro_single_at_only_arms_pending_no_execution() -> Result<()> {
-    let mut handler = KeyHandler::new();
+    let mut handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor()?;
 
     // Ensure no last macro exists

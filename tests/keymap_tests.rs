@@ -10,13 +10,13 @@ fn create_test_editor() -> Result<Editor> {
 
 #[test]
 fn test_keyhandler_creation() -> Result<()> {
-    let _key_handler = KeyHandler::new();
+    let _key_handler = KeyHandler::test_with_embedded();
     Ok(())
 }
 
 #[test]
 fn test_basic_navigation() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Test h key (left)
@@ -40,7 +40,7 @@ fn test_basic_navigation() -> Result<()> {
 
 #[test]
 fn test_insert_mode_transition() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Test i key (insert)
@@ -60,7 +60,7 @@ fn test_insert_mode_transition() -> Result<()> {
 
 #[test]
 fn test_visual_mode() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Test v key (visual)
@@ -76,7 +76,7 @@ fn test_visual_mode() -> Result<()> {
 
 #[test]
 fn test_command_mode() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Test colon key (command mode)
@@ -92,7 +92,7 @@ fn test_command_mode() -> Result<()> {
 
 #[test]
 fn test_character_input() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // First enter insert mode
@@ -111,7 +111,7 @@ fn test_character_input() -> Result<()> {
 
 #[test]
 fn test_backspace_and_enter() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Enter insert mode
@@ -131,7 +131,7 @@ fn test_backspace_and_enter() -> Result<()> {
 
 #[test]
 fn test_tab_and_shift_tab() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Test tab
@@ -147,7 +147,7 @@ fn test_tab_and_shift_tab() -> Result<()> {
 
 #[test]
 fn test_function_keys() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Test F1 key
@@ -163,7 +163,7 @@ fn test_function_keys() -> Result<()> {
 
 #[test]
 fn test_arrow_keys() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Test arrow keys
@@ -184,7 +184,7 @@ fn test_arrow_keys() -> Result<()> {
 
 #[test]
 fn test_modifier_keys() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Test Ctrl+key combinations
@@ -203,7 +203,7 @@ fn test_modifier_keys() -> Result<()> {
 
 #[test]
 fn test_command_sequence() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Test entering command mode and typing a command
@@ -226,7 +226,7 @@ fn test_command_sequence() -> Result<()> {
 
 #[test]
 fn test_delete_operations() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Test x key (delete character)
@@ -242,7 +242,7 @@ fn test_delete_operations() -> Result<()> {
 
 #[test]
 fn test_search_keys() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Test forward slash (search forward)
@@ -266,7 +266,7 @@ fn test_search_keys() -> Result<()> {
 
 #[test]
 fn test_word_movement() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Test w key (word forward)
@@ -286,7 +286,7 @@ fn test_word_movement() -> Result<()> {
 
 #[test]
 fn test_line_movement() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Test 0 key (beginning of line)
@@ -302,7 +302,7 @@ fn test_line_movement() -> Result<()> {
 
 #[test]
 fn test_page_movement() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Test Ctrl+f (page down)
@@ -318,7 +318,7 @@ fn test_page_movement() -> Result<()> {
 
 #[test]
 fn test_file_operations() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_test_editor()?;
 
     // Test Ctrl+s (save - if mapped)

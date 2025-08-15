@@ -21,7 +21,7 @@ fn make_editor_with_text(text: &str) -> Result<Editor> {
 
 #[test]
 fn g0_with_wrap_moves_to_segment_start() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("A🙂BC")?; // 🙂 width 2
 
     // Enable wrapping and set a small window width so line wraps
@@ -59,7 +59,7 @@ fn g0_with_wrap_moves_to_segment_start() -> Result<()> {
 
 #[test]
 fn g0_without_wrap_uses_horiz_offset_start() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     // String with an emoji (4 bytes, 1 grapheme) then ASCII
     let mut editor = make_editor_with_text("🙂Xabc")?;
 
@@ -94,7 +94,7 @@ fn g0_without_wrap_uses_horiz_offset_start() -> Result<()> {
 }
 #[test]
 fn g0_moves_to_line_start_even_with_digit() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("hello")?;
 
     // Put cursor away from start
@@ -119,7 +119,7 @@ fn g0_moves_to_line_start_even_with_digit() -> Result<()> {
 
 #[test]
 fn g_dollar_with_wrap_moves_to_segment_end() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("A🙂BC")?; // 🙂 width 2
 
     // Enable wrapping and set a small window width so line wraps into segments of 3 cols
@@ -154,7 +154,7 @@ fn g_dollar_with_wrap_moves_to_segment_end() -> Result<()> {
 
 #[test]
 fn g_dollar_without_wrap_does_not_scroll() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("🙂Xabc")?; // emoji then ASCII
 
     // Disable wrapping and set a small content width; start after the emoji
@@ -190,7 +190,7 @@ fn g_dollar_without_wrap_does_not_scroll() -> Result<()> {
 
 #[test]
 fn g_dollar_extends_in_visual_mode_with_wrap() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("A🙂BC")?; // 🙂 width 2
 
     // Enable wrapping and set a small window width so line wraps into 3-col segment
@@ -232,7 +232,7 @@ fn g_dollar_extends_in_visual_mode_with_wrap() -> Result<()> {
 
 #[test]
 fn g_dollar_extends_in_visual_mode_without_wrap_no_scroll() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("🙂Xabc")?;
 
     // No wrap; narrow content width with horiz_offset=1 so visible starts after emoji
@@ -279,7 +279,7 @@ fn g_dollar_extends_in_visual_mode_without_wrap_no_scroll() -> Result<()> {
 
 #[test]
 fn g_joins_moves_to_last_non_blank_in_normal_mode() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("abc   ")?; // trailing spaces
 
     // Move to end first to ensure we're not already there
@@ -307,7 +307,7 @@ fn g_joins_moves_to_last_non_blank_in_normal_mode() -> Result<()> {
 
 #[test]
 fn g_joins_extends_in_visual_mode() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("hey   ")?;
 
     // Enter visual mode
@@ -346,7 +346,7 @@ fn g_joins_extends_in_visual_mode() -> Result<()> {
 
 #[test]
 fn g0_extends_in_visual_mode_with_wrap() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("A🙂BC")?; // 🙂 width 2
 
     // Enable wrapping with 3 text columns so first segment is "A🙂"
@@ -390,7 +390,7 @@ fn g0_extends_in_visual_mode_with_wrap() -> Result<()> {
 
 #[test]
 fn g0_extends_in_visual_mode_without_wrap_no_scroll() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("🙂Xabc")?; // emoji then ASCII
 
     // No wrap; 3 text columns visible, offset 1 so visible starts after emoji
@@ -436,7 +436,7 @@ fn g0_extends_in_visual_mode_without_wrap_no_scroll() -> Result<()> {
 
 #[test]
 fn gj_with_wrap_moves_within_wrapped_segments() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("A🙂BC")?; // 🙂 width 2
 
     // Enable wrapping into 3 text columns so segments: "A🙂" | "BC"
@@ -473,7 +473,7 @@ fn gj_with_wrap_moves_within_wrapped_segments() -> Result<()> {
 
 #[test]
 fn gj_with_wrap_moves_to_next_line_when_last_segment() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("A🙂BC\nxyz")?; // two lines
 
     // Wrap into 3 columns
@@ -510,7 +510,7 @@ fn gj_with_wrap_moves_to_next_line_when_last_segment() -> Result<()> {
 
 #[test]
 fn gj_without_wrap_moves_down_one_buffer_line_preserving_byte_col() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("🙂ab\n🙂xyz")?;
 
     editor.set_config_setting_ephemeral("wrap", "false");
@@ -545,7 +545,7 @@ fn gj_without_wrap_moves_down_one_buffer_line_preserving_byte_col() -> Result<()
 
 #[test]
 fn gj_extends_selection_in_visual_mode() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("A🙂BC\nDEF")?;
 
     // Wrap into 3 cols so first line segments: "A🙂" | "BC"
@@ -583,7 +583,7 @@ fn gj_extends_selection_in_visual_mode() -> Result<()> {
 
 #[test]
 fn gk_with_wrap_moves_within_wrapped_segments() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("A🙂BC")?; // 🙂 width 2
 
     // Wrap into 3 columns -> segments: "A🙂" | "BC"
@@ -619,7 +619,7 @@ fn gk_with_wrap_moves_within_wrapped_segments() -> Result<()> {
 
 #[test]
 fn gk_with_wrap_moves_to_prev_line_when_first_segment() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("A🙂BC\nxyz")?; // two lines
 
     // Wrap into 3 columns
@@ -655,7 +655,7 @@ fn gk_with_wrap_moves_to_prev_line_when_first_segment() -> Result<()> {
 
 #[test]
 fn gk_without_wrap_moves_up_one_buffer_line_preserving_byte_col() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("🙂ab\n🙂xyz")?;
 
     editor.set_config_setting_ephemeral("wrap", "false");
@@ -689,7 +689,7 @@ fn gk_without_wrap_moves_up_one_buffer_line_preserving_byte_col() -> Result<()> 
 
 #[test]
 fn gk_extends_selection_in_visual_mode() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("A🙂BC\nDEF")?;
 
     // Wrap into 3 columns

@@ -20,7 +20,7 @@ fn make_editor_with_text(text: &str) -> Result<Editor> {
 
 #[test]
 fn g_caret_with_wrap_moves_to_segment_first_nonblank() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     // Leading spaces ensure first-nonblank isn't at segment start
     let mut editor = make_editor_with_text("  A🙂B")?; // 🙂 width 2, wraps into 2 segments
 
@@ -58,7 +58,7 @@ fn g_caret_with_wrap_moves_to_segment_first_nonblank() -> Result<()> {
 
 #[test]
 fn g_caret_without_wrap_uses_visible_first_nonblank() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("  abcd")?;
 
     // No wrap; set horiz_offset so visible window starts at first space, 3 text cols width
@@ -93,7 +93,7 @@ fn g_caret_without_wrap_uses_visible_first_nonblank() -> Result<()> {
 
 #[test]
 fn g_caret_extends_in_visual_mode_with_wrap() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("  A🙂B")?;
 
     // Enable wrapping

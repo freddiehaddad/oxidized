@@ -27,7 +27,7 @@ fn visual_v_then_j_highlights_all_wrapped_segments_of_first_line() -> Result<()>
     }
 
     // Enter visual mode at (0,0), then press 'j' to extend selection to next line
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     key_handler.handle_key(
         &mut editor,
         KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE),

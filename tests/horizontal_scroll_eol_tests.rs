@@ -60,7 +60,7 @@ fn zero_reveals_bol_in_no_wrap() -> Result<()> {
     }
 
     // Press '0' (beginning of line)
-    let mut key_handler = oxidized::input::keymap::KeyHandler::new();
+    let mut key_handler = oxidized::input::keymap::KeyHandler::test_with_embedded();
     key_handler.handle_key(
         &mut editor,
         KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE),
@@ -108,7 +108,7 @@ fn caret_reveals_first_nonblank_in_no_wrap() -> Result<()> {
     }
 
     // Map '^' to line_first_char per keymaps; action currently routes to line_start fallback
-    let mut key_handler = oxidized::input::keymap::KeyHandler::new();
+    let mut key_handler = oxidized::input::keymap::KeyHandler::test_with_embedded();
     key_handler.handle_key(
         &mut editor,
         KeyEvent::new(KeyCode::Char('^'), KeyModifiers::NONE),
@@ -144,7 +144,7 @@ fn wrap_l_moves_to_next_line_at_eol() -> Result<()> {
         win.width = 10;
     }
 
-    let mut key_handler = oxidized::input::keymap::KeyHandler::new();
+    let mut key_handler = oxidized::input::keymap::KeyHandler::test_with_embedded();
     key_handler.handle_key(
         &mut editor,
         KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),
@@ -167,7 +167,7 @@ fn dollar_reveals_eol_in_no_wrap() -> Result<()> {
     }
 
     // Press '$' (end of line)
-    let mut key_handler = oxidized::input::keymap::KeyHandler::new();
+    let mut key_handler = oxidized::input::keymap::KeyHandler::test_with_embedded();
     key_handler.handle_key(
         &mut editor,
         KeyEvent::new(KeyCode::Char('$'), KeyModifiers::NONE),
@@ -212,7 +212,7 @@ fn l_reaches_eol_in_no_wrap() -> Result<()> {
     }
 
     // Press 'l' to step to EOL
-    let mut key_handler = oxidized::input::keymap::KeyHandler::new();
+    let mut key_handler = oxidized::input::keymap::KeyHandler::test_with_embedded();
     key_handler.handle_key(
         &mut editor,
         KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),

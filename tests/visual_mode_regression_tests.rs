@@ -21,7 +21,7 @@ fn make_editor_with_text(text: &str) -> Result<Editor> {
 // should create a small (1 char) selection regardless of internal start/end ordering.
 #[test]
 fn gm_then_visual_left_creates_valid_selection() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("ABCDEFGHIJKLMNOPQRSTUVWXYZ")?;
     editor.set_config_setting_ephemeral("wrap", "false");
 
@@ -57,7 +57,7 @@ fn gm_then_visual_left_creates_valid_selection() -> Result<()> {
 // Regression: gm then Visual Line then left should not panic and selection should remain line-wise
 #[test]
 fn gm_then_visual_line_left_creates_valid_line_selection() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = make_editor_with_text("ABCDEFGHIJKLMNOPQRSTUVWXYZ\nsecond line")?;
     editor.set_config_setting_ephemeral("wrap", "false");
 
@@ -97,7 +97,7 @@ fn gm_then_visual_line_left_creates_valid_line_selection() -> Result<()> {
 // Regression: gm then Visual Block then left should not panic and block should shrink/adjust safely
 #[test]
 fn gm_then_visual_block_left_creates_valid_block_selection() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     // Two lines to give block height context
     let mut editor = make_editor_with_text("ABCDEFGHIJKLMNOPQRSTUVWXYZ\nABCDEFGHIJKLMNOPQRSTUVWX")?;
     editor.set_config_setting_ephemeral("wrap", "false");
@@ -140,7 +140,7 @@ fn gm_then_visual_block_left_creates_valid_block_selection() -> Result<()> {
 // consistent width across all covered lines when expanding right/down.
 #[test]
 fn gm_visual_block_multi_line_width_consistent() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     // Three lines, all sufficiently long and uniform ASCII for simple indexing
     let text = "ABCDEFGHIJKL\nMNOPQRSTUVWX\nYZABCDEFGHIJK"; // lengths: 12,12,12
     let mut editor = make_editor_with_text(text)?;

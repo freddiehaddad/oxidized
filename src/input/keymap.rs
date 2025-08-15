@@ -97,6 +97,30 @@ impl KeyHandler {
         }
     }
 
+    /// Test-only helper: build a `KeyHandler` using the repository-embedded default
+    /// `keymaps.toml` (via `include_str!`) without attempting to read from the
+    /// filesystem. This gives tests deterministic keymaps even when they modify or
+    /// temporarily remove the workspace `keymaps.toml`.
+    pub fn test_with_embedded() -> Self {
+        const EMBEDDED_KEYMAPS: &str = include_str!("../../keymaps.toml");
+        let keymap_config = toml::from_str::<KeymapConfig>(EMBEDDED_KEYMAPS)
+            .unwrap_or_else(|_| Self::create_minimal_fallback());
+        Self {
+            keymap_config,
+            pending_sequence: String::new(),
+            last_key_time: None,
+            pending_count: None,
+            last_char_search: None,
+            pending_char_command: None,
+            last_command: None,
+            pending_macro_register: false,
+            pending_macro_execute: false,
+            pending_mark_set: false,
+            pending_mark_jump_line: false,
+            pending_mark_jump_exact: false,
+        }
+    }
+
     fn load_default_keymaps() -> KeymapConfig {
         info!("Loading keymap configuration");
         // Try to load from keymaps.toml file
@@ -115,31 +139,9 @@ impl KeyHandler {
                 "keymaps.toml not found; no built-in keymaps will be used. Please add keymaps.toml."
             );
         }
-        // Fallback: attempt to parse an embedded copy (ensures integration tests have mappings)
-        // This uses include_str! so it is tied to the repository version at compile time.
-        const EMBEDDED_KEYMAPS: &str = include_str!("../../keymaps.toml");
-        match toml::from_str::<KeymapConfig>(EMBEDDED_KEYMAPS) {
-            Ok(mut cfg) => {
-                info!("Loaded embedded fallback keymaps");
-                if !cfg.normal_mode.contains_key("gh") {
-                    cfg.normal_mode.insert("gh".into(), "select_mode".into());
-                }
-                if !cfg.normal_mode.contains_key("gH") {
-                    cfg.normal_mode
-                        .insert("gH".into(), "select_line_mode".into());
-                }
-                cfg
-            }
-            Err(e) => {
-                warn!("Failed to parse embedded fallback keymaps: {}", e);
-                // Return empty keymaps to ensure all bindings come from keymaps.toml only
-                let mut cfg = Self::create_minimal_fallback();
-                cfg.normal_mode.insert("gh".into(), "select_mode".into());
-                cfg.normal_mode
-                    .insert("gH".into(), "select_line_mode".into());
-                cfg
-            }
-        }
+        // Fallback: return minimal empty maps (no hard-coded runtime seeding).
+        // Tests should use `KeyHandler::test_with_embedded()` for deterministic mappings.
+        Self::create_minimal_fallback()
     }
 
     fn create_minimal_fallback() -> KeymapConfig {

@@ -17,7 +17,7 @@ fn create_editor_with_text(lines: &[&str]) -> Result<Editor> {
 
 #[test]
 fn count_moves_cursor_down() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor =
         create_editor_with_text(&["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"])?;
 
@@ -35,7 +35,7 @@ fn count_moves_cursor_down() -> Result<()> {
 
 #[test]
 fn count_deletes_multiple_lines() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_editor_with_text(&["l1", "l2", "l3", "l4", "l5"])?;
 
     // 3 d d  (3dd)
@@ -61,7 +61,7 @@ fn count_deletes_multiple_lines() -> Result<()> {
 
 #[test]
 fn count_deletes_chars_with_x() -> Result<()> {
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
     let mut editor = create_editor_with_text(&["abcdef"])?;
 
     // Move to start to be explicit

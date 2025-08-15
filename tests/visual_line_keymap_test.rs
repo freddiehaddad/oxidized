@@ -6,7 +6,7 @@ use oxidized::input::keymap::KeyHandler;
 #[test]
 fn test_visual_line_cursor_movement_updates_selection() {
     let mut editor = Editor::new().unwrap();
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
 
     // Insert some test content
     let test_content = vec![
@@ -75,7 +75,7 @@ fn test_visual_line_cursor_movement_updates_selection() {
 #[test]
 fn test_visual_line_yank_multiple_lines() {
     let mut editor = Editor::new().unwrap();
-    let mut key_handler = KeyHandler::new();
+    let mut key_handler = KeyHandler::test_with_embedded();
 
     // Insert test content
     let test_content = vec![
