@@ -412,6 +412,38 @@ impl UI {
         let reserved_rows: u16 = (editor_state.config.interface.show_status_line as u16)
             + (editor_state.config.interface.show_command as u16);
 
+        // If the completion popup is not being shown this frame, proactively clear the
+        // potential popup region above the command line BEFORE rendering windows. This
+        // ensures any leftover characters/colors from a prior popup are erased and the
+        // subsequent window render will repaint content cleanly.
+        let popup_showing = editor_state.config.interface.show_command
+            && editor_state.mode == Mode::Command
+            && editor_state.command_completion.should_show();
+        if !popup_showing {
+            // Compute the maximum popup height we might have drawn previously
+            const MIN_MENU_HEIGHT: u16 = 3;
+            let max_menu_height = editor_state
+                .config
+                .interface
+                .completion_menu_height
+                .max(MIN_MENU_HEIGHT);
+            // Limit by available space: keep 2 rows for status+command lines and at least 1 for content
+            let max_rows = (height.saturating_sub(3)).min(max_menu_height);
+            if max_rows > 0 {
+                let top_row = height.saturating_sub(2).saturating_sub(max_rows);
+                for i in 0..max_rows {
+                    let row = top_row + i;
+                    terminal.queue_move_cursor(Position::new(row as usize, 0))?;
+                    terminal.queue_set_bg_color(self.theme.background)?;
+                    terminal.queue_clear_line()?;
+                    // Also write spaces to full width to normalize background where clear_line
+                    // may be terminal-dependent
+                    terminal.queue_print(&" ".repeat(width as usize))?;
+                    terminal.queue_reset_color()?;
+                }
+            }
+        }
+
         // Render all windows
         self.render_windows(terminal, editor_state, reserved_rows)?;
 
@@ -1975,6 +2007,7 @@ impl UI {
 
         // Final color reset to ensure no artifacts
         terminal.queue_reset_color()?;
+
         Ok(())
     }
 
