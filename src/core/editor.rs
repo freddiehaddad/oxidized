@@ -82,6 +82,8 @@ pub struct Editor {
     buffers: HashMap<usize, Buffer>,
     /// Currently active buffer ID
     pub current_buffer_id: Option<usize>,
+    /// Most-recently used buffer ID (used for MRU fallback on close)
+    last_buffer_id: Option<usize>,
     /// Next buffer ID to assign
     next_buffer_id: usize,
     /// Window management for splits
@@ -195,6 +197,7 @@ impl Editor {
         let mut editor = Self {
             buffers: HashMap::new(),
             current_buffer_id: None,
+            last_buffer_id: None,
             next_buffer_id: 1,
             window_manager,
             mode: Mode::Normal,
@@ -258,6 +261,9 @@ impl Editor {
         };
 
         self.buffers.insert(id, buffer);
+        if self.current_buffer_id != Some(id) {
+            self.last_buffer_id = self.current_buffer_id;
+        }
         self.current_buffer_id = Some(id);
         debug!("Buffer {} created and set as current", id);
 
@@ -293,7 +299,20 @@ impl Editor {
     pub fn switch_to_buffer(&mut self, id: usize) -> bool {
         if self.buffers.contains_key(&id) {
             debug!("Switching to buffer ID: {}", id);
+            if self.current_buffer_id != Some(id) {
+                self.last_buffer_id = self.current_buffer_id;
+            }
             self.current_buffer_id = Some(id);
+            // Apply to current window and preserve cursor position
+            if let Some(win) = self.window_manager.current_window_mut()
+                && let Some(buf) = self.buffers.get(&id)
+            {
+                win.set_buffer(id);
+                win.save_cursor_position(buf.cursor.row, buf.cursor.col);
+            }
+            // Queue highlighting and redraw for the newly shown buffer
+            self.request_visible_line_highlighting();
+            self.request_redraw();
             true
         } else {
             warn!("Attempted to switch to non-existent buffer ID: {}", id);
@@ -353,6 +372,9 @@ impl Editor {
 
         let next_index = (current_index + 1) % buffer_ids.len();
         let new_id = buffer_ids[next_index];
+        if self.current_buffer_id != Some(new_id) {
+            self.last_buffer_id = self.current_buffer_id;
+        }
         self.current_buffer_id = Some(new_id);
         // Apply to current window and preserve cursor position
         if let Some(win) = self.window_manager.current_window_mut()
@@ -385,6 +407,9 @@ impl Editor {
             current_index - 1
         };
         let new_id = buffer_ids[prev_index];
+        if self.current_buffer_id != Some(new_id) {
+            self.last_buffer_id = self.current_buffer_id;
+        }
         self.current_buffer_id = Some(new_id);
         if let Some(win) = self.window_manager.current_window_mut()
             && let Some(buf) = self.buffers.get(&new_id)
@@ -400,22 +425,7 @@ impl Editor {
     /// Close the current buffer
     pub fn close_current_buffer(&mut self) -> Result<String> {
         if let Some(current_id) = self.current_buffer_id {
-            if let Some(buffer) = self.buffers.get(&current_id)
-                && buffer.modified
-            {
-                return Ok("Buffer has unsaved changes! Use :bd! to force close".to_string());
-            }
-
-            self.buffers.remove(&current_id);
-
-            // Switch to another buffer or create a new one if this was the last
-            if self.buffers.is_empty() {
-                self.create_buffer(None)?;
-                Ok("Closed buffer, created new empty buffer".to_string())
-            } else {
-                self.current_buffer_id = self.buffers.keys().next().copied();
-                Ok("Buffer closed".to_string())
-            }
+            self.handle_close_and_retarget(current_id, false)
         } else {
             Ok("No buffer to close".to_string())
         }
@@ -424,19 +434,82 @@ impl Editor {
     /// Force close the current buffer (ignore unsaved changes)
     pub fn force_close_current_buffer(&mut self) -> Result<String> {
         if let Some(current_id) = self.current_buffer_id {
-            self.buffers.remove(&current_id);
-
-            // Switch to another buffer or create a new one if this was the last
-            if self.buffers.is_empty() {
-                self.create_buffer(None)?;
-                Ok("Closed buffer (discarded changes), created new empty buffer".to_string())
-            } else {
-                self.current_buffer_id = self.buffers.keys().next().copied();
-                Ok("Buffer closed (discarded changes)".to_string())
-            }
+            self.handle_close_and_retarget(current_id, true)
         } else {
             Ok("No buffer to close".to_string())
         }
+    }
+
+    /// Internal: close a buffer and retarget any windows showing it using MRU fallback
+    fn handle_close_and_retarget(&mut self, closed_id: usize, force: bool) -> Result<String> {
+        // Respect modification unless forced
+        if !force
+            && let Some(buffer) = self.buffers.get(&closed_id)
+            && buffer.modified
+        {
+            return Ok("Buffer has unsaved changes! Use :bd! to force close".to_string());
+        }
+
+        // Actually remove the buffer
+        self.buffers.remove(&closed_id);
+
+        // Choose fallback buffer: MRU if present and valid; else lowest id; else create new
+        let mut fallback: Option<usize> = None;
+        if let Some(mru) = self.last_buffer_id
+            && mru != closed_id
+            && self.buffers.contains_key(&mru)
+        {
+            fallback = Some(mru);
+        }
+        if fallback.is_none() {
+            fallback = self.buffers.keys().min().copied();
+        }
+        let created_new = if fallback.is_none() {
+            let new_id = self.create_buffer(None)?;
+            fallback = Some(new_id);
+            true
+        } else {
+            false
+        };
+        let fallback_id = fallback.expect("fallback selected");
+
+        // If the closed buffer was current, switch and update MRU
+        if self.current_buffer_id == Some(closed_id) {
+            if self.current_buffer_id != Some(fallback_id) {
+                self.last_buffer_id = self.current_buffer_id;
+            }
+            self.current_buffer_id = Some(fallback_id);
+        }
+
+        // Retarget any windows that displayed the closed buffer
+        let window_ids: Vec<usize> = self.window_manager.all_windows().keys().copied().collect();
+        for wid in window_ids {
+            if let Some(win) = self.window_manager.get_window_mut(wid)
+                && win.buffer_id == Some(closed_id)
+            {
+                win.set_buffer(fallback_id);
+                if let Some(buf) = self.buffers.get(&fallback_id) {
+                    win.save_cursor_position(buf.cursor.row, buf.cursor.col);
+                }
+            }
+        }
+
+        // Ensure visible highlighting and redraw are requested
+        self.request_visible_line_highlighting();
+        self.request_redraw();
+
+        let msg = if created_new {
+            if force {
+                "Closed buffer (discarded changes), created new empty buffer".to_string()
+            } else {
+                "Closed buffer, created new empty buffer".to_string()
+            }
+        } else if force {
+            "Buffer closed (discarded changes)".to_string()
+        } else {
+            "Buffer closed".to_string()
+        };
+        Ok(msg)
     }
 
     /// Switch to buffer by name (partial matching)
@@ -446,7 +519,19 @@ impl Editor {
                 && let Some(filename) = file_path.file_name()
                 && filename.to_string_lossy().contains(name)
             {
+                if self.current_buffer_id != Some(*id) {
+                    self.last_buffer_id = self.current_buffer_id;
+                }
                 self.current_buffer_id = Some(*id);
+                // Apply to current window and preserve cursor position
+                if let Some(win) = self.window_manager.current_window_mut()
+                    && let Some(buf) = self.buffers.get(id)
+                {
+                    win.set_buffer(*id);
+                    win.save_cursor_position(buf.cursor.row, buf.cursor.col);
+                }
+                self.request_visible_line_highlighting();
+                self.request_redraw();
                 return true;
             }
         }
