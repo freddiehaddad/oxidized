@@ -308,11 +308,15 @@ Keep tests descriptive, minimal, and colocated with similar behavior. Fast feedb
   - UI::render drives terminal drawing and status/command lines based on that
     state. Terminal size is refreshed each draw to adapt to late resizes.
 
+  See also: [RenderState diff and redraw decision](#renderstate-diff-and-redraw-decision-hybrid-strategy).
+
 - Viewport, wrap, and horizontal scroll
   - Window.viewport_top and Window.horiz_offset control what’s shown. Editor
     updates these on cursor moves and scroll commands respecting scrolloff and
     sidescrolloff from the config. Wrap mode switches the renderer into a
     grapheme-aware multi-row algorithm.
+
+  See diagram: [Viewport motions (zz / zt / zb)](#viewport-motions-zz--zt--zb).
 
 - Status line content
   - Left: mode, filename, modified flag. Middle: status message. Right: cursor
@@ -322,6 +326,8 @@ Keep tests descriptive, minimal, and colocated with similar behavior. Fast feedb
 - Ex commands and settings
   - utils/command.rs implements :w, :q, :bd, :e, :ls, split/vsplit/close, etc.
 
+  See diagram: [Ex command pipeline with completion](#ex-command-pipeline-with-completion).
+
 ## Buffer Lifecycle and MRU Fallback
 
 - Editor tracks last_buffer_id as a simple MRU hint. When closing the current buffer via :bd (or :bd!), Editor:
@@ -330,6 +336,11 @@ Keep tests descriptive, minimal, and colocated with similar behavior. Fast feedb
   - Chooses a fallback buffer: most-recently-used if available; otherwise the lowest-id remaining; if none remain, creates an empty buffer.
   - Retargets all windows that were showing the closed buffer to the fallback, synchronizing window cursors from buffer state.
   - Requests visible-lines highlighting and a redraw, so the UI updates immediately.
+
+See diagrams:
+
+- [Buffer close (MRU fallback) sequence](#buffer-close-mru-fallback-sequence)
+- [Buffer switch/bind flow](#buffer-switchbind-flow)
 
   - :set toggles and queries are ephemeral (session-only). :setp persists to
     editor.toml. Both feed into Editor’s config and update UI and behavior at
@@ -359,6 +370,20 @@ Keep tests descriptive, minimal, and colocated with similar behavior. Fast feedb
     work after big changes (theme switch, large scrolls).
 
 ## ASCII diagrams (visual overview)
+
+### Diagrams index
+
+- [Event-driven threads and event bus](#event-driven-threads-and-event-bus)
+- [Async syntax highlighting pipeline (with versioning and cache)](#async-syntax-highlighting-pipeline-with-versioning-and-cache)
+- [Window layout and splits (example)](#window-layout-and-splits-example)
+- [Rendering: gutter, wrapping, and highlights](#rendering-gutter-wrapping-and-highlights)
+- [LRU cache behavior (per-line highlights)](#lru-cache-behavior-per-line-highlights)
+- [Buffer close (MRU fallback) sequence](#buffer-close-mru-fallback-sequence)
+- [RenderState diff and redraw decision (hybrid strategy)](#renderstate-diff-and-redraw-decision-hybrid-strategy)
+- [Buffer switch/bind flow](#buffer-switchbind-flow)
+- [Viewport motions (zz / zt / zb)](#viewport-motions-zz--zt--zb)
+- [Ex command pipeline with completion](#ex-command-pipeline-with-completion)
+- [Config hot-reload path](#config-hot-reload-path)
 
 ### Event-driven threads and event bus
 
@@ -498,6 +523,99 @@ put(k,v):  if k exists, replace and move to newest
      then insert (k,v) at newest
 
 Theme update -> clear() -> drop all entries; visible lines re-enqueued
+```
+
+### Buffer close (MRU fallback) sequence
+
+```text
+:bd / :bd!  -->  [Editor]
+  |             |
+  |             +-- if modified && !force -> abort with status
+  |             |
+  |             +-- choose_fallback(closed_id):
+  |                   MRU (last_buffer_id) if exists
+  |                   else lowest-id remaining
+  |                   else create empty buffer
+  |             |
+  |             +-- WindowManager.retarget_all(closed_id -> fallback_id)
+  |             +-- sync window cursors from fallback buffer
+  |             +-- request_visible_line_highlighting(fallback_id)
+  v             +-- send RedrawRequest
+[UI redraws]
+```
+
+### RenderState diff and redraw decision (hybrid strategy)
+
+```text
+[Prev RS]
+  (mode, window_id, viewport_top, horiz_offset,
+  needs_syntax_refresh, completion_popup, status)
+    |
+    | xdiff
+    v
+[New RS]
+  (mode, window_id, viewport_top, horiz_offset,
+  needs_syntax_refresh, completion_popup, status)
+    |
+    | any_delta?
+  +-- yes --> RedrawRequest --> UI::render
+  +--  no --> idle (await events)
+
+Notes:
+- Explicit redraws still occur for operations with side-effects (e.g., z-motions),
+  while RS fields catch viewport-only changes safely.
+```
+
+### Buffer switch/bind flow
+
+```text
+switch_to_buffer(id) --> [Editor]
+  |  +-- bind current_window.buffer_id = id
+  |  +-- window.cursor = buffer.cursor (sync)
+  |  +-- request_visible_line_highlighting(id)
+  v  +-- RedrawRequest
+[UI redraws]
+```
+
+### Viewport motions (zz / zt / zb)
+
+```text
+Before: viewport_top = T, cursor_row = C, height = H
+
+zz -> viewport_top = C - floor((H - reserved_rows) / 2)
+zt -> viewport_top = C
+zb -> viewport_top = C - (H - reserved_rows - 1)
+
+Then: request_visible_line_highlighting() + RedrawRequest (immediate update)
+```
+
+### Ex command pipeline with completion
+
+```text
+":" input --> Completion engine
+  |            - canonical + alias columns
+  |            - values/lists (numbers, booleans, themes, paths)
+  v
+selection --> utils/command.rs execute --> [Editor mutate]
+  |            - :set (session) / :setp (persist)
+  |            - :e/:w/:bd/:bn/:bp/:reg ...
+  +--> statusline update, maybe RedrawRequest --> UI
+```
+
+### Config hot-reload path
+
+```text
+FS change (editor.toml/keymaps.toml/themes.toml)
+  |
+  v
+[Config watcher] --> ConfigEvent --> [EventDrivenEditor]
+  |                                        |
+  |                              apply to Editor.config
+  |                                        |
+  |                          if theme -> clear highlight cache,
+  |                                      re-enqueue visible lines
+  v                                        |
+RedrawRequest -----------------------------+
 ```
 
 ## FAQs
