@@ -1,8 +1,8 @@
-use oxidized::features::completion::{BufferSummary, CommandCompletion, CompletionContext};
+use oxidized::features::completion::{BufferSummary, CompletionContext};
 
 #[test]
 fn completes_directories_with_trailing_separator_and_parent() {
-    let mut cc = CommandCompletion::new();
+    let mut cc = oxidized::features::completion::CommandCompletionBuilder::new().build();
     let cwd = std::env::current_dir().unwrap();
     cc.set_context(CompletionContext {
         cwd: cwd.clone(),
@@ -47,7 +47,7 @@ fn completes_directories_with_trailing_separator_and_parent() {
 
 #[test]
 fn supports_percent_root_for_current_buffer_dir() {
-    let mut cc = CommandCompletion::new();
+    let mut cc = oxidized::features::completion::CommandCompletionBuilder::new().build();
     let cwd = std::env::current_dir().unwrap();
     let tmp_dir = tempfile::tempdir().unwrap();
     cc.set_context(CompletionContext {
@@ -82,7 +82,7 @@ fn supports_percent_root_for_current_buffer_dir() {
 
 #[test]
 fn buffer_and_numeric_hints_present() {
-    let mut cc = CommandCompletion::new();
+    let mut cc = oxidized::features::completion::CommandCompletionBuilder::new().build();
     let cwd = std::env::current_dir().unwrap();
     cc.set_context(CompletionContext {
         cwd,
@@ -127,7 +127,7 @@ fn buffer_and_numeric_hints_present() {
 
 #[test]
 fn setp_completes_like_set_with_proper_prefix() {
-    let mut cc = CommandCompletion::new();
+    let mut cc = oxidized::features::completion::CommandCompletionBuilder::new().build();
     // No special context needed for set completions
     cc.start_completion("setp ");
     assert!(cc.should_show());
@@ -143,7 +143,7 @@ fn setp_completes_like_set_with_proper_prefix() {
 
 #[test]
 fn setp_dynamic_numeric_suggestions_present() {
-    let mut cc = CommandCompletion::new();
+    let mut cc = oxidized::features::completion::CommandCompletionBuilder::new().build();
     cc.start_completion("setp ts ");
     assert!(cc.should_show());
     // Should suggest common numbers with setp prefix
@@ -162,7 +162,7 @@ fn setp_dynamic_numeric_suggestions_present() {
 
 #[test]
 fn no_duplicate_set_alias_entries() {
-    let mut cc = CommandCompletion::new();
+    let mut cc = oxidized::features::completion::CommandCompletionBuilder::new().build();
     cc.start_completion("set sh"); // e.g. should not show both showmarks and smk duplicates
     assert!(cc.should_show());
     let positives: Vec<&String> = cc
@@ -199,8 +199,8 @@ fn no_duplicate_set_alias_entries() {
 
 #[test]
 fn accept_toggles_boolean_for_set_and_setp() {
-    use oxidized::features::completion::CommandCompletion;
-    let mut cc = CommandCompletion::new();
+    // no type import needed; using builder directly
+    let mut cc = oxidized::features::completion::CommandCompletionBuilder::new().build();
     // Context with wrap currently true
     cc.set_context(CompletionContext {
         cwd: std::env::current_dir().unwrap(),
@@ -305,7 +305,7 @@ fn accept_toggles_boolean_for_set_and_setp() {
 
 #[test]
 fn negative_forms_visibility_rules() {
-    let mut cc = CommandCompletion::new();
+    let mut cc = oxidized::features::completion::CommandCompletionBuilder::new().build();
     cc.start_completion("set w");
     assert!(cc.should_show());
     // Negative forms should not appear unless the user typed 'set no'
@@ -326,7 +326,7 @@ fn negative_forms_visibility_rules() {
 
 #[test]
 fn positional_boolean_values_are_suggested() {
-    let mut cc = CommandCompletion::new();
+    let mut cc = oxidized::features::completion::CommandCompletionBuilder::new().build();
     // set percentpathroot
     cc.start_completion("set percentpathroot ");
     assert!(cc.should_show());

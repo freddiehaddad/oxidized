@@ -38,7 +38,7 @@ See also: [Architecture Quickstart (At a Glance)](./ARCHITECTURE_QUICKSTART.md) 
 - [features/syntax.rs](../src/features/syntax.rs)
   - Tree-sitter based synchronous highlighter and an AsyncSyntaxHighlighter worker pipeline.
   - Small per-line LRU cache for highlight results.
-- [features/search.rs](../src/features/search.rs), [features/macros.rs](../src/features/macros.rs), [features/text_objects.rs](../src/features/text_objects.rs), [features/completion.rs](../src/features/completion.rs)
+- [features/search.rs](../src/features/search.rs), [features/macros.rs](../src/features/macros.rs), [features/text_objects.rs](../src/features/text_objects.rs), completion: [engine](../src/features/completion/engine.rs) · [presenter](../src/features/completion/presenter.rs) · [providers](../src/features/completion/providers.rs)
   - Focused subsystems used by Editor and keymaps.
 - [utils/command.rs](../src/utils/command.rs)
   - Ex-style command parser and executor, centralized :set handler (ephemeral vs persistent via :setp).
@@ -602,6 +602,39 @@ selection --> utils/command.rs execute --> [Editor mutate]
   +--> statusline update, maybe RedrawRequest --> UI
 ```
 
+Notes:
+
+- The completion engine is modular (engine + presenter + providers). Providers gather items; the presenter normalizes/filters/sorts; the engine maintains UI state and accept behavior.
+- See docs/COMPLETION.md for the detailed rules and a sequence diagram of the flow.
+
+#### Component overview (completion)
+
+```text
+":" input
+  |
+  v
++--------------------+       +-------------------+
+|  CommandCompletion | ----> |  ProviderRegistry |
+|  (Engine: state &  |       +-------------------+
+|   accept behavior) |                |
++--------------------+                v
+       |                         [Providers]
+       |                    (ExCmds, SetOptions,
+       |                      Buffers, Files,
+       |                      Themes, Hints)
+       v                                
++--------------------+  normalized/filtered/sorted  
+|   Presenter        | <---------------------------+
+| (DefaultPresenter) |
++--------------------+
+       |
+       v
+ Multi-column popup (UI)
+       |
+       v
+   Accept -> toggle-aware insertion (set vs setp preserved)
+```
+
 ### Config hot-reload path
 
 ```text
@@ -660,7 +693,7 @@ RedrawRequest -----------------------------+
 - Gutter: Left column for line numbers and/or marks; width computed per buffer length and settings.
 - Wrap: Grapheme-aware wrapping of logical lines into multiple rows within a window’s content width.
 - ThemeConfig/UITheme/SyntaxTheme: Theme system loaded from themes.toml; UI colors and syntax mappings.
-- CommandCompletion: Command line completion engine for : commands and paths (features/completion.rs).
+- CommandCompletion: Command-line completion engine for : commands and paths (features/completion::engine). See docs/COMPLETION.md for behavior and architecture details.
 - SearchEngine: Text search subsystem with case sensitivity and smartcase (features/search.rs).
 - MacroRecorder: Records/plays macros via registers (features/macros.rs).
 - TextObjectFinder: Finds text object ranges for operators (features/text_objects.rs).

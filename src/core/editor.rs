@@ -217,7 +217,8 @@ impl Editor {
             needs_syntax_refresh: Arc::new(AtomicBool::new(false)),
             needs_redraw: Arc::new(AtomicBool::new(false)),
             highlight_version: Arc::new(AtomicU64::new(1)),
-            command_completion: CommandCompletion::new(),
+            command_completion: crate::features::completion::CommandCompletionBuilder::new()
+                .build(),
             pending_operator: None,
             text_object_finder: crate::features::text_objects::TextObjectFinder::new(),
             macro_recorder: crate::features::macros::MacroRecorder::new(),

@@ -19,7 +19,7 @@ fn make_editor_state(_total_lines: usize, width: u16) -> EditorRenderState {
         current_window_id: None,
         window_manager,
         syntax_highlights: Default::default(),
-        command_completion: oxidized::features::completion::CommandCompletion::new(),
+        command_completion: oxidized::features::completion::CommandCompletionBuilder::new().build(),
         config,
         filetype: None,
         macro_recording: None,
