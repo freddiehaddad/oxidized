@@ -276,7 +276,8 @@ impl EventDrivenEditor {
                             .load(std::sync::atomic::Ordering::Relaxed);
 
                     if needs_redraw {
-                        if let Err(e) = editor.render() {
+                        let full_redraw = last_state.needs_full_redraw;
+                        if let Err(e) = editor.render_with_flag(full_redraw) {
                             error!("Render failed: {}", e);
                         } else {
                             // Update our cached state
@@ -635,22 +636,37 @@ impl EventDrivenEditor {
             };
 
             while let Ok(result) = result_rx.recv() {
-                // Forward as a buffer event; cache will be updated on handle
-                // Update cache immediately and request UI redraw via event
+                // Apply the first result
                 if let Ok(mut ed) = editor.lock() {
-                    // Drop stale results (older version than editor's current)
                     let current_version = ed
                         .highlight_version
                         .load(std::sync::atomic::Ordering::Relaxed);
-                    if result.version < current_version {
-                        continue;
+                    if result.version >= current_version {
+                        ed.apply_syntax_highlight_result(
+                            result.buffer_id,
+                            result.line_index,
+                            result.highlights,
+                        );
                     }
-                    ed.apply_syntax_highlight_result(
-                        result.buffer_id,
-                        result.line_index,
-                        result.highlights,
-                    );
                 }
+
+                // Drain any immediately-available results to coalesce redraws
+                while let Ok(next) = result_rx.try_recv() {
+                    if let Ok(mut ed) = editor.lock() {
+                        let current_version = ed
+                            .highlight_version
+                            .load(std::sync::atomic::Ordering::Relaxed);
+                        if next.version >= current_version {
+                            ed.apply_syntax_highlight_result(
+                                next.buffer_id,
+                                next.line_index,
+                                next.highlights,
+                            );
+                        }
+                    }
+                }
+
+                // Single redraw for the batch
                 let _ = sender.send(EditorEvent::UI(UIEvent::RedrawRequest));
             }
 

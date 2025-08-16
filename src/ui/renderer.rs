@@ -393,6 +393,7 @@ impl UI {
         &mut self,
         terminal: &mut Terminal,
         editor_state: &EditorRenderState,
+        full_redraw: bool,
     ) -> io::Result<()> {
         // Refresh terminal size to reflect any recent resize events
         terminal.update_size()?;
@@ -401,9 +402,11 @@ impl UI {
         // Start double buffering - queue all operations without immediate display
         terminal.queue_hide_cursor()?;
 
-        // Set the background color for the entire screen
-        terminal.queue_set_bg_color(self.theme.background)?;
-        terminal.queue_clear_screen()?;
+        // Only clear the whole screen on a full redraw; otherwise redraw in-place
+        if full_redraw {
+            terminal.queue_set_bg_color(self.theme.background)?;
+            terminal.queue_clear_screen()?;
+        }
 
         // Determine reserved rows from config flags
         let reserved_rows: u16 = (editor_state.config.interface.show_status_line as u16)

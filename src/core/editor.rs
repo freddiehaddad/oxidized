@@ -632,7 +632,13 @@ impl Editor {
         }
     }
 
+    /// Backward-compatible render (forces full redraw). Used by tests and simple callers.
     pub fn render(&mut self) -> Result<()> {
+        self.render_with_flag(true)
+    }
+
+    /// Render with explicit full_redraw flag (event loop passes this to optimize flicker).
+    pub fn render_with_flag(&mut self, full_redraw: bool) -> Result<()> {
         // Collect all needed data first
         let mode = self.mode;
         let current_buffer = self.current_buffer().cloned();
@@ -737,7 +743,8 @@ impl Editor {
         };
 
         // Use the existing UI render method but with optimized state
-        self.ui.render(&mut self.terminal, &editor_state)?;
+        self.ui
+            .render(&mut self.terminal, &editor_state, full_redraw)?;
         Ok(())
     }
 
