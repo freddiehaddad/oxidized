@@ -2127,9 +2127,9 @@ impl UI {
 
                 // Set colors based on selection
                 if is_selected {
-                    terminal.queue_set_bg_color(self.theme.selection_bg)?;
+                    terminal.queue_set_bg_color(self.theme.completion_selected_bg)?;
                 } else {
-                    terminal.queue_set_bg_color(self.theme.command_line_bg)?;
+                    terminal.queue_set_bg_color(self.theme.completion_menu_bg)?;
                 }
                 if cols.is_columnar {
                     // Compose aligned columns with colors
@@ -2163,7 +2163,7 @@ impl UI {
                         1 + key_w_used + gap + alias_w_used + gap + value_w_used;
                     if include_desc {
                         terminal.queue_print(&" ".repeat(gap))?;
-                        terminal.queue_set_fg_color(self.theme.command_line_fg)?;
+                        terminal.queue_set_fg_color(self.theme.completion_desc_fg)?;
                         terminal.queue_print(&desc_text)?;
                         printed_width += gap + UnicodeWidthStr::width(desc_text.as_str());
                     }

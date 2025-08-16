@@ -370,13 +370,18 @@ Behavior & rules:
 
 Theme integration:
 
-Three dedicated UI colors control the completion popup columns (defined per theme in `themes.toml`):
+The completion popup is fully themeable via five dedicated UI colors (defined per theme in `themes.toml`):
 
 ```toml
-completion_key_fg   = "#deb887"  # Canonical option name
-completion_alias_fg = "#cccccc"  # Alias column
-completion_value_fg = "#ffe6c7"  # Value column
+completion_key_fg       = "#deb887"  # Key/action column (canonical option or toggle)
+completion_alias_fg     = "#cccccc"  # Alias/opposite column
+completion_value_fg     = "#ffe6c7"  # Current value column (e.g., [true], [4])
+completion_desc_fg      = "#c8b39a"  # Description column text
+completion_menu_bg      = "#2a1e17"  # Popup background for unselected rows (distinct from main UI bg)
+completion_selected_bg  = "#3a2a20"  # Popup background for the selected row
 ```
+
+Note: These keys are required for themes; menu background is intentionally different from the main UI background to improve legibility.
 
 Adjust `interface.completion_menu_height` in `editor.toml` to control how many rows are shown (default: 8). The popup width is computed dynamically from content.
 
@@ -841,7 +846,7 @@ Note: z-commands update the viewport immediately and re-highlight visible lines;
 
 ### Theme Configuration (`themes.toml`)
 
-The `plain_text` key controls the default color for text that has no specific syntax highlight.
+The `plain_text` key controls the default color for text that has no specific syntax highlight. The snippet below mirrors the repository’s `themes.toml` defaults and includes all required UI keys, including the completion popup colors.
 
 ```toml
 # ###############################################################################
@@ -879,13 +884,18 @@ cursor_line_bg = "#2d2318"      # Current cursor line background
 empty_line = "#4a3728"          # Filler for lines past end-of-file
 command_line_bg = "#1f1611"     # ':' command-line background
 command_line_fg = "#deb887"     # ':' command-line text color
-completion_key_fg = "#deb887"   # Completion popup: canonical key column (defaults to command_line_fg if omitted)
-completion_alias_fg = "#cccccc" # Completion popup: alias column (defaults to command_line_fg if omitted)
-completion_value_fg = "#ffe6c7" # Completion popup: value column (defaults to command_line_fg if omitted)
+completion_key_fg = "#deb887"   # Completion popup: key/action column
+completion_alias_fg = "#cccccc" # Completion popup: alias/opposite column
+completion_value_fg = "#ffe6c7" # Completion popup: value column
+completion_desc_fg = "#c8b39a"  # Completion popup: description column
+completion_menu_bg = "#2a1e17"  # Completion popup background (unselected rows); distinct from main background
+completion_selected_bg = "#3a2a20" # Completion popup background for selected row
 selection_bg = "#8c4a2b"        # Generic selection background (fallback)
 visual_line_bg = "#8c4a2b"      # Line-wise visual selection background
 visual_char_bg = "#7a3f28"      # Character-wise visual selection background  
 visual_block_bg = "#9a5235"     # Block-wise visual selection background (future)
+select_char_bg = "#7d4a30"      # Character-wise select mode background (rusty clay)
+select_line_bg = "#8a5236"      # Line-wise select mode background (warm terracotta)
 warning = "#ff8c00"             # Warning text/accent color
 error = "#dc322f"               # Error text/accent color
 
@@ -908,6 +918,10 @@ visual_line_bg = "#ce422b"  # Statusline mode badge background (Visual Line)
 visual_line_fg = "#ffedd5"  # Statusline mode badge text (Visual Line)
 visual_block_bg = "#ce422b" # Statusline mode badge background (Visual Block)
 visual_block_fg = "#fffbeb" # Statusline mode badge text (Visual Block)
+select_bg = "#ce422b"       # Statusline mode badge background (Select)
+select_fg = "#ffd7af"       # Statusline mode badge text (Select - soft amber)
+select_line_bg = "#ce422b"  # Statusline mode badge background (Select Line)
+select_line_fg = "#ffcf9f"  # Statusline mode badge text (Select Line - warm sand)
 replace_bg = "#ce422b"      # Statusline mode badge background (Replace)
 replace_fg = "#ffd1c1"      # Statusline mode badge text (Replace)
 command_bg = "#ce422b"      # Statusline mode badge background (Command)
