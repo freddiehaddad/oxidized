@@ -31,6 +31,10 @@ struct RenderState {
     mode: crate::core::mode::Mode,
     cursor_position: Option<(usize, usize)>,
     buffer_id: Option<usize>,
+    // Track which window is active and its viewport/hscroll for redraw decisions
+    window_id: Option<usize>,
+    window_viewport_top: Option<usize>,
+    window_horiz_offset: Option<usize>,
     command_line: String,
     status_message: String,
     // Whether a macro is currently recording (used to trigger redraw for statusline REC indicator)
@@ -78,6 +82,9 @@ impl EventDrivenEditor {
                 mode: crate::core::mode::Mode::Normal,
                 cursor_position: None,
                 buffer_id: None,
+                window_id: None,
+                window_viewport_top: None,
+                window_horiz_offset: None,
                 command_line: String::new(),
                 status_message: String::new(),
                 macro_recording_active: false,
@@ -118,12 +125,21 @@ impl EventDrivenEditor {
 
     /// Capture a condensed render state snapshot from the editor for change detection
     fn snapshot(editor: &Editor) -> RenderState {
+        let (window_id, window_viewport_top, window_horiz_offset) =
+            match editor.window_manager.current_window() {
+                Some(w) => (Some(w.id), Some(w.viewport_top), Some(w.horiz_offset)),
+                None => (None, None, None),
+            };
+
         RenderState {
             mode: editor.mode(),
             cursor_position: editor
                 .current_buffer()
                 .map(|b| (b.cursor.row, b.cursor.col)),
             buffer_id: editor.current_buffer_id,
+            window_id,
+            window_viewport_top,
+            window_horiz_offset,
             command_line: editor.command_line().to_string(),
             status_message: editor.status_message().to_string(),
             macro_recording_active: editor.is_macro_recording(),
