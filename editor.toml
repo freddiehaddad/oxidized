@@ -38,7 +38,6 @@ show_command = true        # Show pending keys in statusline
 scroll_off = 0             # Context lines above/below cursor
 side_scroll_off = 0        # Horizontal context columns
 window_resize_amount = 1   # Amount for :resize commands
-completion_menu_width = 36 # Popup completion width (chars)
 completion_menu_height = 8 # Popup completion height (rows)
 percent_path_root = true   # % prefix roots paths at current buffer dir
 

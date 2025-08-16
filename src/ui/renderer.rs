@@ -1613,16 +1613,8 @@ impl UI {
             return Ok(());
         }
 
-        // Get completion menu dimensions from config
-        // Enforce a sensible minimum width so 3 columns fit reasonably
-        const MIN_MENU_WIDTH: u16 = 28;
+        // Compute completion menu dimensions dynamically based on content
         const MIN_MENU_HEIGHT: usize = 3;
-        let menu_width = editor_state
-            .config
-            .interface
-            .completion_menu_width
-            .min(width - 2)
-            .max(MIN_MENU_WIDTH);
         let max_menu_height = editor_state
             .config
             .interface
@@ -1649,12 +1641,13 @@ impl UI {
             .command_completion
             .visible_selected_index(menu_height);
 
-        // Precompute aligned columns for visible items; use 3-column layout for 'set' and recognized Ex commands
+        // Precompute aligned columns for visible items; include a description column for all items
         #[derive(Default, Clone)]
         struct RowColumns {
             key: String,
             alias: String,
-            value: String, // for set: [value]; for Ex: description
+            value: String, // for set: [value]
+            desc: String,  // human-friendly description for all items
             is_columnar: bool,
         }
 
@@ -1677,6 +1670,8 @@ impl UI {
             if let Some(k) = key.strip_prefix("no") {
                 key = k;
             }
+            // Trim any trailing/leading whitespace from the key (positional forms end with a space)
+            let key = key.trim();
 
             let canonical: String = match key {
                 "nu" => "number".to_string(),
@@ -1814,26 +1809,214 @@ impl UI {
         let mut rows: Vec<RowColumns> = Vec::with_capacity(visible_items.len());
         let mut key_w_max = 0usize;
         let mut alias_w_max = 0usize;
+        let mut value_w_max = 0usize;
+        let mut desc_w_max = 0usize;
         for item in visible_items {
             if item.category == "set" {
                 let (canonical, aliases, current) = parse_set_item(&item.text);
-                let alias_str = if aliases.is_empty() {
-                    String::new()
+                // Preserve negative form display if the suggestion itself is negative (e.g., 'set nowrap')
+                let is_neg_form = if let Some(rest) = item
+                    .text
+                    .strip_prefix("setp ")
+                    .or_else(|| item.text.strip_prefix("set "))
+                {
+                    rest.trim().starts_with("no")
                 } else {
-                    aliases.join(", ")
+                    false
                 };
-                let value_str = current.map(|v| format!("[{}]", v)).unwrap_or_default();
-                let key_str = canonical;
+                // Build alias display, and for booleans show the opposite form (toggle hint)
+                let is_boolean_key = matches!(
+                    canonical.as_str(),
+                    "number"
+                        | "relativenumber"
+                        | "cursorline"
+                        | "showmarks"
+                        | "expandtab"
+                        | "autoindent"
+                        | "ignorecase"
+                        | "smartcase"
+                        | "hlsearch"
+                        | "incsearch"
+                        | "wrap"
+                        | "linebreak"
+                        | "undofile"
+                        | "backup"
+                        | "swapfile"
+                        | "autosave"
+                        | "laststatus"
+                        | "showcmd"
+                        | "syntax"
+                        | "percentpathroot"
+                );
+                let mut alias_parts: Vec<String> = if aliases.is_empty() {
+                    Vec::new()
+                } else {
+                    aliases.iter().map(|s| s.to_string()).collect()
+                };
+                if is_boolean_key {
+                    // Determine current boolean value directly from config
+                    let cur_true = match canonical.as_str() {
+                        "number" => editor_state.config.display.show_line_numbers,
+                        "relativenumber" => editor_state.config.display.show_relative_numbers,
+                        "cursorline" => editor_state.config.display.show_cursor_line,
+                        "showmarks" => editor_state.config.display.show_marks,
+                        "expandtab" => editor_state.config.behavior.expand_tabs,
+                        "autoindent" => editor_state.config.behavior.auto_indent,
+                        "ignorecase" => editor_state.config.behavior.ignore_case,
+                        "smartcase" => editor_state.config.behavior.smart_case,
+                        "hlsearch" => editor_state.config.behavior.highlight_search,
+                        "incsearch" => editor_state.config.behavior.incremental_search,
+                        "wrap" => editor_state.config.behavior.wrap_lines,
+                        "linebreak" => editor_state.config.behavior.line_break,
+                        "undofile" => editor_state.config.editing.persistent_undo,
+                        "backup" => editor_state.config.editing.backup,
+                        "swapfile" => editor_state.config.editing.swap_file,
+                        "autosave" => editor_state.config.editing.auto_save,
+                        "laststatus" => editor_state.config.interface.show_status_line,
+                        "showcmd" => editor_state.config.interface.show_command,
+                        "syntax" => editor_state.config.display.syntax_highlighting,
+                        "percentpathroot" => editor_state.config.interface.percent_path_root,
+                        _ => false,
+                    };
+                    // In the alias column, show the opposite of what we'll display as the key
+                    if cur_true {
+                        // key will display "no<key>", so alias hints the positive form
+                        alias_parts.push(canonical.clone());
+                    } else {
+                        // key will display "<key>", so alias hints the negative form
+                        alias_parts.push(format!("no{}", canonical));
+                    }
+                }
+                let alias_str = alias_parts.join(", ");
+                let value_str = current
+                    .as_ref()
+                    .map(|v| format!("[{}]", v))
+                    .unwrap_or_default();
+                // Display the action that would toggle the current state: if true, show negative, else positive
+                let key_str = if is_boolean_key {
+                    let cur_true = match canonical.as_str() {
+                        "number" => editor_state.config.display.show_line_numbers,
+                        "relativenumber" => editor_state.config.display.show_relative_numbers,
+                        "cursorline" => editor_state.config.display.show_cursor_line,
+                        "showmarks" => editor_state.config.display.show_marks,
+                        "expandtab" => editor_state.config.behavior.expand_tabs,
+                        "autoindent" => editor_state.config.behavior.auto_indent,
+                        "ignorecase" => editor_state.config.behavior.ignore_case,
+                        "smartcase" => editor_state.config.behavior.smart_case,
+                        "hlsearch" => editor_state.config.behavior.highlight_search,
+                        "incsearch" => editor_state.config.behavior.incremental_search,
+                        "wrap" => editor_state.config.behavior.wrap_lines,
+                        "linebreak" => editor_state.config.behavior.line_break,
+                        "undofile" => editor_state.config.editing.persistent_undo,
+                        "backup" => editor_state.config.editing.backup,
+                        "swapfile" => editor_state.config.editing.swap_file,
+                        "autosave" => editor_state.config.editing.auto_save,
+                        "laststatus" => editor_state.config.interface.show_status_line,
+                        "showcmd" => editor_state.config.interface.show_command,
+                        "syntax" => editor_state.config.display.syntax_highlighting,
+                        "percentpathroot" => editor_state.config.interface.percent_path_root,
+                        _ => false,
+                    };
+                    if cur_true {
+                        format!("no{}", canonical)
+                    } else {
+                        canonical.clone()
+                    }
+                } else if is_neg_form {
+                    format!("no{}", canonical)
+                } else {
+                    canonical.clone()
+                };
+                // Choose description matching the action shown in key column for booleans
+                let desc_str = if is_boolean_key {
+                    let (pos_desc, neg_desc) = match canonical.as_str() {
+                        // Display
+                        "number" => ("Show line numbers", "Hide line numbers"),
+                        "relativenumber" => {
+                            ("Show relative line numbers", "Hide relative line numbers")
+                        }
+                        "cursorline" => ("Highlight cursor line", "Disable cursor line highlight"),
+                        "showmarks" => (
+                            "Show marks in gutter/number column",
+                            "Hide marks in gutter/number column",
+                        ),
+                        // Behavior
+                        "expandtab" => ("Insert spaces for tabs", "Use hard tab characters"),
+                        "autoindent" => (
+                            "Enable automatic indentation",
+                            "Disable automatic indentation",
+                        ),
+                        "ignorecase" => ("Case-insensitive search", "Case-sensitive search"),
+                        "smartcase" => ("Smart case matching", "Disable smart case"),
+                        "hlsearch" => ("Highlight search results", "Disable search highlighting"),
+                        "incsearch" => ("Incremental search", "Disable incremental search"),
+                        "wrap" => ("Enable soft line wrapping", "Disable soft line wrapping"),
+                        "linebreak" => (
+                            "Prefer breaking at word boundaries when wrapping",
+                            "Disable word-boundary preference",
+                        ),
+                        // Editing
+                        "undofile" => ("Enable persistent undo", "Disable persistent undo"),
+                        "backup" => ("Enable backup files", "Disable backup files"),
+                        "swapfile" => ("Enable swap file", "Disable swap file"),
+                        "autosave" => ("Enable auto save", "Disable auto save"),
+                        // Interface
+                        "laststatus" => ("Show status line", "Hide status line"),
+                        "showcmd" => ("Show command in status area", "Hide command in status area"),
+                        // Syntax/UI
+                        "syntax" => ("Enable syntax highlighting", "Disable syntax highlighting"),
+                        // Path behavior
+                        "percentpathroot" => (
+                            "Enable '%' root in path completion",
+                            "Disable '%' root in path completion",
+                        ),
+                        _ => (item.description.as_str(), item.description.as_str()),
+                    };
+                    let cur_true = match canonical.as_str() {
+                        "number" => editor_state.config.display.show_line_numbers,
+                        "relativenumber" => editor_state.config.display.show_relative_numbers,
+                        "cursorline" => editor_state.config.display.show_cursor_line,
+                        "showmarks" => editor_state.config.display.show_marks,
+                        "expandtab" => editor_state.config.behavior.expand_tabs,
+                        "autoindent" => editor_state.config.behavior.auto_indent,
+                        "ignorecase" => editor_state.config.behavior.ignore_case,
+                        "smartcase" => editor_state.config.behavior.smart_case,
+                        "hlsearch" => editor_state.config.behavior.highlight_search,
+                        "incsearch" => editor_state.config.behavior.incremental_search,
+                        "wrap" => editor_state.config.behavior.wrap_lines,
+                        "linebreak" => editor_state.config.behavior.line_break,
+                        "undofile" => editor_state.config.editing.persistent_undo,
+                        "backup" => editor_state.config.editing.backup,
+                        "swapfile" => editor_state.config.editing.swap_file,
+                        "autosave" => editor_state.config.editing.auto_save,
+                        "laststatus" => editor_state.config.interface.show_status_line,
+                        "showcmd" => editor_state.config.interface.show_command,
+                        "syntax" => editor_state.config.display.syntax_highlighting,
+                        "percentpathroot" => editor_state.config.interface.percent_path_root,
+                        _ => false,
+                    };
+                    if cur_true {
+                        neg_desc.to_string()
+                    } else {
+                        pos_desc.to_string()
+                    }
+                } else {
+                    item.description.clone()
+                };
                 let key_w = UnicodeWidthStr::width(key_str.as_str());
                 let alias_w = UnicodeWidthStr::width(alias_str.as_str());
                 key_w_max = key_w_max.max(key_w);
                 alias_w_max = alias_w_max.max(alias_w);
-                rows.push(RowColumns {
+                let row = RowColumns {
                     key: key_str,
                     alias: alias_str,
                     value: value_str,
+                    desc: desc_str,
                     is_columnar: true,
-                });
+                };
+                value_w_max = value_w_max.max(UnicodeWidthStr::width(row.value.as_str()));
+                desc_w_max = desc_w_max.max(UnicodeWidthStr::width(row.desc.as_str()));
+                rows.push(row);
             } else if !item.text.contains(' ') {
                 // Ex command without arguments: show canonical, aliases, description
                 let (canonical, aliases) = parse_ex_item(&item.text);
@@ -1842,72 +2025,78 @@ impl UI {
                 } else {
                     aliases.join(", ")
                 };
-                let value_str = item.description.clone();
+                let value_str = String::new();
                 let key_str = canonical;
                 let key_w = UnicodeWidthStr::width(key_str.as_str());
                 let alias_w = UnicodeWidthStr::width(alias_str.as_str());
                 key_w_max = key_w_max.max(key_w);
                 alias_w_max = alias_w_max.max(alias_w);
-                rows.push(RowColumns {
+                let row = RowColumns {
                     key: key_str,
                     alias: alias_str,
                     value: value_str,
+                    desc: item.description.clone(),
                     is_columnar: true,
-                });
+                };
+                value_w_max = value_w_max.max(UnicodeWidthStr::width(row.value.as_str()));
+                desc_w_max = desc_w_max.max(UnicodeWidthStr::width(row.desc.as_str()));
+                rows.push(row);
             } else {
-                // Items with arguments (paths, buffer refs, etc.) stay simple
-                rows.push(RowColumns {
+                // Items with arguments (paths, buffer refs, etc.) also include description
+                let row = RowColumns {
                     key: item.text.clone(),
                     alias: String::new(),
                     value: String::new(),
-                    is_columnar: false,
-                });
+                    desc: item.description.clone(),
+                    is_columnar: true,
+                };
+                value_w_max = value_w_max.max(UnicodeWidthStr::width(row.value.as_str()));
+                desc_w_max = desc_w_max.max(UnicodeWidthStr::width(row.desc.as_str()));
+                rows.push(row);
             }
         }
 
         // Spacing between columns
         let gap = 2usize;
-        // Account for a single leading space before key column for aesthetics
-        let mut remaining_for_value: isize = menu_width as isize
-            - 1
-            - (key_w_max as isize)
-            - (gap as isize)
-            - (alias_w_max as isize)
-            - (gap as isize);
-        // If negative, shrink alias, then key to fit and leave at least 0 for value
-        if remaining_for_value < 0 {
-            // shrink alias first
-            let take_from_alias = (-(remaining_for_value)) as usize;
-            if take_from_alias >= alias_w_max {
-                alias_w_max = 0;
-            } else {
-                alias_w_max -= take_from_alias;
+        // Choose column width caps to keep desc readable and columns aligned
+        const KEY_CAP: usize = 24;
+        const ALIAS_CAP: usize = 16;
+        const VALUE_CAP: usize = 12; // [true], [1000], etc.
+        const MIN_DESC: usize = 16;
+
+        let mut key_w_used = key_w_max.min(KEY_CAP);
+        let mut alias_w_used = alias_w_max.min(ALIAS_CAP);
+        let value_w_used = value_w_max.min(VALUE_CAP);
+
+        // Compute menu width based on used widths and desired desc width
+        let term_cap = (width.saturating_sub(2)) as usize; // keep a small margin
+        let mut menu_width =
+            1 + key_w_used + gap + alias_w_used + gap + value_w_used + gap + desc_w_max;
+        if menu_width > term_cap {
+            menu_width = term_cap;
+        }
+
+        // Assign descriptor width from remaining space
+        let fixed = 1 + key_w_used + gap + alias_w_used + gap + value_w_used;
+        let mut desc_w_used = menu_width.saturating_sub(fixed + gap);
+        // Ensure a minimum description width by trimming alias, then key if needed
+        if desc_w_used < MIN_DESC && fixed + gap + MIN_DESC <= term_cap {
+            let needed = MIN_DESC - desc_w_used;
+            // First take from alias
+            let take_alias = needed.min(alias_w_used);
+            alias_w_used -= take_alias;
+            let fixed_now = 1 + key_w_used + gap + alias_w_used + gap + value_w_used;
+            desc_w_used = menu_width.saturating_sub(fixed_now + gap);
+            if desc_w_used < MIN_DESC {
+                let needed2 = MIN_DESC - desc_w_used;
+                let take_key = needed2.min(key_w_used);
+                key_w_used -= take_key;
+                let fixed_now2 = 1 + key_w_used + gap + alias_w_used + gap + value_w_used;
+                desc_w_used = menu_width.saturating_sub(fixed_now2 + gap);
             }
-            remaining_for_value = menu_width as isize
-                - 1
-                - (key_w_max as isize)
-                - (gap as isize)
-                - (alias_w_max as isize)
-                - (gap as isize);
         }
-        if remaining_for_value < 0 {
-            // shrink key if still negative
-            let take_from_key = (-(remaining_for_value)) as usize;
-            if take_from_key >= key_w_max {
-                key_w_max = 0;
-            } else {
-                key_w_max -= take_from_key;
-            }
-            remaining_for_value = menu_width as isize
-                - 1
-                - (key_w_max as isize)
-                - (gap as isize)
-                - (alias_w_max as isize)
-                - (gap as isize);
-        }
-        if remaining_for_value < 0 {
-            remaining_for_value = 0;
-        }
+        // If there's effectively no desc, drop the gap
+        let include_desc = desc_w_used > 0;
 
         // Helper to truncate a string to a maximum display width (columns)
         let truncate_to_width = |s: &str, max_cols: usize| -> String {
@@ -1933,7 +2122,6 @@ impl UI {
             terminal.queue_move_cursor(Position::new(row as usize, popup_col as usize))?;
 
             if i < rows.len() {
-                let item = &visible_items[i];
                 let cols = &rows[i];
                 let is_selected = i == selected_index;
 
@@ -1946,49 +2134,51 @@ impl UI {
                 if cols.is_columnar {
                     // Compose aligned columns with colors
                     // Leading space + key
-                    let key_text = truncate_to_width(&cols.key, key_w_max);
-                    let alias_text = truncate_to_width(&cols.alias, alias_w_max);
-                    let value_max = remaining_for_value as usize;
-                    let value_text = truncate_to_width(&cols.value, value_max);
+                    let key_text = truncate_to_width(&cols.key, key_w_used);
+                    let alias_text = truncate_to_width(&cols.alias, alias_w_used);
+                    let value_text = truncate_to_width(&cols.value, value_w_used);
+                    let desc_text = truncate_to_width(&cols.desc, desc_w_used);
 
                     // 1) leading space
                     terminal.queue_set_fg_color(self.theme.completion_key_fg)?;
                     terminal.queue_print(" ")?;
                     // 2) key padded
-                    let key_padded = format!("{:<w$}", key_text, w = key_w_max);
+                    let key_padded = format!("{:<w$}", key_text, w = key_w_used);
                     terminal.queue_print(&key_padded)?;
                     // 3) gap
                     terminal.queue_print(&" ".repeat(gap))?;
                     // 4) alias padded
                     terminal.queue_set_fg_color(self.theme.completion_alias_fg)?;
-                    let alias_padded = format!("{:<w$}", alias_text, w = alias_w_max);
+                    let alias_padded = format!("{:<w$}", alias_text, w = alias_w_used);
                     terminal.queue_print(&alias_padded)?;
                     // 5) gap
                     terminal.queue_print(&" ".repeat(gap))?;
-                    // 6) value (uses remaining space)
+                    // 6) value (fixed width)
                     terminal.queue_set_fg_color(self.theme.completion_value_fg)?;
-                    terminal.queue_print(&value_text)?;
+                    let value_padded = format!("{:<w$}", value_text, w = value_w_used);
+                    terminal.queue_print(&value_padded)?;
+
+                    // 7) optional gap and description (fixed start column)
+                    let mut printed_width =
+                        1 + key_w_used + gap + alias_w_used + gap + value_w_used;
+                    if include_desc {
+                        terminal.queue_print(&" ".repeat(gap))?;
+                        terminal.queue_set_fg_color(self.theme.command_line_fg)?;
+                        terminal.queue_print(&desc_text)?;
+                        printed_width += gap + UnicodeWidthStr::width(desc_text.as_str());
+                    }
 
                     // Pad any remaining to full width
-                    let printed_width = 1
-                        + key_w_max
-                        + gap
-                        + alias_w_max
-                        + gap
-                        + UnicodeWidthStr::width(value_text.as_str());
-                    if printed_width < menu_width as usize {
-                        let pad = menu_width as usize - printed_width;
+                    if printed_width < menu_width {
+                        let pad = menu_width - printed_width;
                         terminal.queue_print(&" ".repeat(pad))?;
                     }
                 } else {
-                    // Non-set item: simple left text
+                    // Fallback: clear row (should not be hit in normal flow)
+                    terminal.queue_set_bg_color(self.theme.command_line_bg)?;
                     terminal.queue_set_fg_color(self.theme.command_line_fg)?;
-                    let text = truncate_to_width(&format!(" {}", item.text), menu_width as usize);
-                    let pad = menu_width as usize - UnicodeWidthStr::width(text.as_str());
-                    terminal.queue_print(&text)?;
-                    if pad > 0 {
-                        terminal.queue_print(&" ".repeat(pad))?;
-                    }
+                    let empty_line = " ".repeat(menu_width);
+                    terminal.queue_print(&empty_line)?;
                 }
 
                 // Reset colors immediately after printing each line
@@ -1997,7 +2187,7 @@ impl UI {
                 // Empty row - set background color and fill with spaces
                 terminal.queue_set_bg_color(self.theme.command_line_bg)?;
                 terminal.queue_set_fg_color(self.theme.command_line_fg)?;
-                let empty_line = " ".repeat(menu_width as usize);
+                let empty_line = " ".repeat(menu_width);
                 terminal.queue_print(&empty_line)?;
 
                 // Reset colors immediately after printing each line

@@ -704,44 +704,8 @@ impl CommandCompletion {
             },
         ]);
 
-        // Set queries for booleans and values
-        let query_items = vec![
-            "number",
-            "relativenumber",
-            "cursorline",
-            "showmarks",
-            "smk",
-            "tabstop",
-            "expandtab",
-            "autoindent",
-            "ignorecase",
-            "smartcase",
-            "hlsearch",
-            "incsearch",
-            "wrap",
-            "linebreak",
-            "undolevels",
-            "undofile",
-            "backup",
-            "swapfile",
-            "autosave",
-            "laststatus",
-            "showcmd",
-            "scrolloff",
-            "sidescrolloff",
-            "timeoutlen",
-            "percentpathroot",
-            "ppr",
-            "colorscheme",
-            "syntax",
-        ];
-        for key in query_items {
-            commands.push(CompletionItem {
-                text: format!("set {}?", key),
-                description: format!("Query '{}' value", key),
-                category: "set".to_string(),
-            });
-        }
+        // Note: we intentionally omit query-style suggestions like `set <opt>?` because the
+        // completion popup already shows the current value inline for each option.
 
         commands
     }
@@ -851,6 +815,102 @@ impl CommandCompletion {
         let mut combined: Vec<CompletionItem> = others;
         combined.extend(ex_map.into_values());
 
+        // Build a map of canonical ':set' texts to their non-alias descriptions for reuse
+        let mut set_canonical_desc: HashMap<String, String> = HashMap::new();
+        for c in &self.commands {
+            if c.category == "set" && !c.description.to_lowercase().contains("(short)") {
+                // Normalize to use 'set ' prefix for keys
+                let key = if let Some(rest) = c.text.strip_prefix("setp ") {
+                    format!("set {}", rest)
+                } else {
+                    c.text.clone()
+                };
+                set_canonical_desc
+                    .entry(key)
+                    .or_insert_with(|| c.description.clone());
+            }
+        }
+
+        // Normalize ':set' items so aliases (e.g., ts, ppr) are presented as canonical names
+        // Preserve the user's typed prefix: if they started with 'setp' (with or without
+        // a trailing space), we should emit suggestions with the 'setp ' prefix.
+        let prefer_setp = input_lower.starts_with("setp");
+        let desired_set_prefix: &str = if prefer_setp { "setp " } else { "set " };
+        fn map_set_alias(key: &str) -> &str {
+            match key {
+                "nu" => "number",
+                "rnu" => "relativenumber",
+                "cul" => "cursorline",
+                "smk" => "showmarks",
+                "et" => "expandtab",
+                "ai" => "autoindent",
+                "ic" => "ignorecase",
+                "scs" => "smartcase",
+                "hls" => "hlsearch",
+                "is" => "incsearch",
+                "lbr" => "linebreak",
+                "udf" => "undofile",
+                "bk" => "backup",
+                "swf" => "swapfile",
+                "aw" => "autosave",
+                "ls" => "laststatus",
+                "sc" => "showcmd",
+                "ppr" => "percentpathroot",
+                "syn" => "syntax",
+                "ts" => "tabstop",
+                "ul" => "undolevels",
+                "so" => "scrolloff",
+                "siso" => "sidescrolloff",
+                "tm" => "timeoutlen",
+                "colo" => "colorscheme",
+                other => other,
+            }
+        }
+        let mut transformed: Vec<CompletionItem> = Vec::with_capacity(combined.len());
+        for mut item in combined.into_iter() {
+            if item.category != "set" {
+                transformed.push(item);
+                continue;
+            }
+            let after_prefix = item
+                .text
+                .strip_prefix("setp ")
+                .or_else(|| item.text.strip_prefix("set "))
+                .unwrap_or(&item.text);
+            let mut key = after_prefix;
+            let mut tail = "";
+            if let Some((k, t)) = after_prefix.split_once(' ') {
+                key = k;
+                tail = t;
+            }
+            let is_neg = key.starts_with("no");
+            let base = if is_neg { &key[2..] } else { key };
+            let canonical = map_set_alias(base);
+            let new_key = if is_neg {
+                format!("no{}", canonical)
+            } else {
+                canonical.to_string()
+            };
+            let new_text = if tail.is_empty() {
+                format!("{}{}", desired_set_prefix, new_key)
+            } else {
+                format!("{}{} {}", desired_set_prefix, new_key, tail)
+            };
+            // Prefer canonical description if available
+            let desc_lookup_key = if tail.is_empty() {
+                format!("set {}", new_key)
+            } else {
+                // For value/positional forms, try the base with trailing space
+                format!("set {} ", new_key)
+            };
+            if let Some(desc) = set_canonical_desc.get(&desc_lookup_key) {
+                item.description = desc.clone();
+            }
+            item.text = new_text;
+            transformed.push(item);
+        }
+        let mut combined: Vec<CompletionItem> = transformed;
+
         // Deduplicate by text while preferring shorter description (or first seen)
         combined.sort_by(|a, b| a.text.cmp(&b.text));
         combined.dedup_by(|a, b| a.text == b.text);
@@ -872,12 +932,23 @@ impl CommandCompletion {
                 if item.text.contains('=') || item.text.ends_with('?') {
                     return true;
                 }
+                // If the user didn't start with 'set no', hide negative forms entirely
+                let is_negative_item = item
+                    .text
+                    .strip_prefix("setp ")
+                    .or_else(|| item.text.strip_prefix("set "))
+                    .map(|s| s.trim_start().starts_with("no"))
+                    .unwrap_or(false);
+                if !input_is_negative && is_negative_item {
+                    return false;
+                }
                 // Extract the raw key portion after set/setp
                 let raw_key = item
                     .text
                     .strip_prefix("setp ")
                     .or_else(|| item.text.strip_prefix("set "))
                     .unwrap_or(&item.text);
+                let raw_key = raw_key.trim();
                 // Determine negation
                 let (is_neg, remainder) = if let Some(rest) = raw_key.strip_prefix("no") {
                     (true, rest)
@@ -1003,7 +1074,7 @@ impl CommandCompletion {
                         .strip_prefix("setp ")
                         .or_else(|| c.text.strip_prefix("set "))
                     {
-                        let raw = raw.trim_end_matches('?');
+                        let raw = raw.trim_end_matches('?').trim();
                         let is_neg = raw.starts_with("no");
                         let mut key_part = if is_neg { &raw[2..] } else { raw };
                         if let Some((k, _)) = key_part.split_once('=') {
@@ -1434,7 +1505,90 @@ impl CommandCompletion {
     /// Accept current completion and return the completed text
     pub fn accept(&mut self) -> Option<String> {
         if let Some(selected) = self.selected() {
-            let completed = selected.text.clone();
+            let mut completed = selected.text.clone();
+            // Smart toggle for ':set' booleans: if the selected is a boolean key without an
+            // explicit value, emit the form that switches the current setting.
+            if (selected.text.starts_with("set ") || selected.text.starts_with("setp "))
+                && let Some(ctx) = &self.context
+            {
+                let after = selected
+                    .text
+                    .strip_prefix("setp ")
+                    .or_else(|| selected.text.strip_prefix("set "))
+                    .unwrap_or(&selected.text);
+                let key = after.trim();
+                // Only handle plain boolean keys (no spaces/values)
+                if !key.contains(' ') && !key.contains('=') {
+                    // Normalize negative prefix
+                    let base = if let Some(rest) = key.strip_prefix("no") {
+                        rest
+                    } else {
+                        key
+                    };
+                    // Determine if base is a known boolean and current value
+                    let cur_true = match base {
+                        "number" => ctx.number,
+                        "relativenumber" => ctx.relativenumber,
+                        "cursorline" => ctx.cursorline,
+                        "showmarks" => ctx.showmarks,
+                        "expandtab" => ctx.expandtab,
+                        "autoindent" => ctx.autoindent,
+                        "ignorecase" => ctx.ignorecase,
+                        "smartcase" => ctx.smartcase,
+                        "hlsearch" => ctx.hlsearch,
+                        "incsearch" => ctx.incsearch,
+                        "wrap" => ctx.wrap,
+                        "linebreak" => ctx.linebreak,
+                        "undofile" => ctx.undofile,
+                        "backup" => ctx.backup,
+                        "swapfile" => ctx.swapfile,
+                        "autosave" => ctx.autosave,
+                        "laststatus" => ctx.laststatus,
+                        "showcmd" => ctx.showcmd,
+                        "syntax" => ctx.syntax,
+                        "percentpathroot" => ctx.percentpathroot,
+                        _ => false,
+                    };
+                    // If it's a known boolean, emit the opposite of current regardless of the
+                    // form displayed in the row (keeps action consistent)
+                    if base != key { /* no-op, handled below */ }
+                    if [
+                        "number",
+                        "relativenumber",
+                        "cursorline",
+                        "showmarks",
+                        "expandtab",
+                        "autoindent",
+                        "ignorecase",
+                        "smartcase",
+                        "hlsearch",
+                        "incsearch",
+                        "wrap",
+                        "linebreak",
+                        "undofile",
+                        "backup",
+                        "swapfile",
+                        "autosave",
+                        "laststatus",
+                        "showcmd",
+                        "syntax",
+                        "percentpathroot",
+                    ]
+                    .contains(&base)
+                    {
+                        let prefix = if selected.text.starts_with("setp ") {
+                            "setp"
+                        } else {
+                            "set"
+                        };
+                        if cur_true {
+                            completed = format!("{} no{}", prefix, base);
+                        } else {
+                            completed = format!("{} {}", prefix, base);
+                        }
+                    }
+                }
+            }
             self.cancel();
             Some(completed)
         } else {
@@ -1506,6 +1660,27 @@ pub struct CompletionContext {
     pub current_buffer_dir: Option<PathBuf>,
     /// Whether '%' path rooting is enabled by config
     pub allow_percent_path_root: bool,
+    // Current boolean option values for ':set' toggles
+    pub number: bool,
+    pub relativenumber: bool,
+    pub cursorline: bool,
+    pub showmarks: bool,
+    pub expandtab: bool,
+    pub autoindent: bool,
+    pub ignorecase: bool,
+    pub smartcase: bool,
+    pub hlsearch: bool,
+    pub incsearch: bool,
+    pub wrap: bool,
+    pub linebreak: bool,
+    pub undofile: bool,
+    pub backup: bool,
+    pub swapfile: bool,
+    pub autosave: bool,
+    pub laststatus: bool,
+    pub showcmd: bool,
+    pub syntax: bool,
+    pub percentpathroot: bool,
 }
 
 #[derive(Debug, Clone)]

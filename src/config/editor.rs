@@ -59,7 +59,6 @@ pub struct InterfaceConfig {
     pub scroll_off: usize,
     pub side_scroll_off: usize,
     pub window_resize_amount: u16,
-    pub completion_menu_width: u16,
     pub completion_menu_height: u16,
     /// Enable '%' prefix in file path completion to root at current buffer directory
     #[serde(default = "default_true")]
@@ -208,7 +207,6 @@ impl Default for EditorConfig {
                 scroll_off: 0,
                 side_scroll_off: 0,
                 window_resize_amount: 1,
-                completion_menu_width: 36,
                 completion_menu_height: 8,
                 percent_path_root: true,
             },

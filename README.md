@@ -313,7 +313,6 @@ show_command = true        # Show pending keys in statusline
 scroll_off = 0             # Context lines above/below cursor
 side_scroll_off = 0        # Horizontal context columns
 window_resize_amount = 1   # Amount for :resize commands
-completion_menu_width = 36 # Popup completion width (chars)
 completion_menu_height = 8 # Popup completion height (rows)
 percent_path_root = true   # % prefix roots paths at current buffer dir
 
@@ -351,20 +350,22 @@ You can toggle marks at runtime with:
 
 ### Command-line Completion System
 
-The command-line (":" prompt) features an aligned, multi-column popup for `:set` / `:setp` options:
+The command-line (":" prompt) features an aligned, multi-column popup for `:set` / `:setp` and other commands:
 
-- Column 1: Canonical option name (aliases collapsed; e.g. only `showmarks` not `smk`)
-- Column 2: Known short alias(es) (e.g. `smk`)
-- Column 3: Current value in brackets (e.g. `[true]`, numeric values, or active colorscheme name)
+- Column 1: Action/key. For booleans this shows the action you’d take now based on the current state (e.g., shows `nowrap` when wrapping is currently enabled so accepting will disable it). For non-booleans, this is the canonical option or command.
+- Column 2: Alias/opposite. Shows the common short alias (e.g., `smk`) or, for booleans, the opposite form for quick discoverability (e.g., `wrap` next to `nowrap`).
+- Column 3: Current value. Bracketed state/value for the option (e.g., `[true]`, `[4]`, or the current `colorscheme`).
+- Column 4: Description. Concise explanation of what the action/option does.
 
 Behavior & rules:
 
-- `:setp` provides the same suggestions as `:set`; suggestions are rewritten to use the exact prefix you typed (`set` vs `setp`).
-- Aliases are suppressed when their canonical form is also present; the popup shows each setting once for clarity.
-- Query forms (`:set option?`) are hidden unless you actually type the trailing `?`.
-- Negative forms (`nooption`) only appear when you begin your input with `:set no…` (to reduce clutter).
+- `:setp` provides the same suggestions as `:set`; suggestions are always rewritten to the exact prefix you typed (`set` vs `setp`).
+- Aliases are collapsed behind their canonical names; you’ll see a single row per setting instead of duplicates.
+- Query forms (`:set option?`) are not suggested unless you explicitly type the trailing `?`.
+- Negative forms (`no…`) are hidden unless your input begins with `:set no…` (reduces visual noise while keeping them discoverable).
+- Boolean rows are action-oriented: the first column shows the toggle you’ll perform now based on the current state, and accepting a suggestion inserts that toggle (`set wrap` vs `set nowrap`, or `setp …` if you started with `setp`).
 - Settings that take a value use positional arguments (no `=`). Examples: `:set tabstop 2`, `:set scrolloff 3`, `:set timeoutlen 750`, `:set undolevels 200`, `:set percentpathroot true`, `:set colorscheme default`.
-- Value suggestions appear after a space for numeric/boolean options (`tabstop`, `scrolloff`, `timeoutlen`, `undolevels`, `percentpathroot`) and for enumerated/dynamic lists like `colorscheme` (populated from `themes.toml`).
+- Value suggestions appear after a space for numeric/boolean options (`tabstop`, `scrolloff`, `timeoutlen`, `undolevels`, `percentpathroot`) and for dynamic lists like `colorscheme` (populated from `themes.toml`).
 - File path completion honors `%` as the current buffer directory when `percent_path_root` (alias: `ppr`) is enabled.
 
 Theme integration:
@@ -377,7 +378,18 @@ completion_alias_fg = "#cccccc"  # Alias column
 completion_value_fg = "#ffe6c7"  # Value column
 ```
 
-Adjust `interface.completion_menu_width` / `interface.completion_menu_height` in `editor.toml` to size the popup (defaults: width 36, height 8). A sensible minimum width is enforced to keep three columns readable.
+Adjust `interface.completion_menu_height` in `editor.toml` to control how many rows are shown (default: 8). The popup width is computed dynamically from content.
+
+How it differs from Vim:
+
+- Persistent updates: `:setp` is Oxidized-specific. It mirrors `:set` completions but writes changes back to your TOML config.
+- Action-oriented toggles: Boolean suggestions reflect the action you’ll take now and accepting a row inserts the toggling form automatically. Traditional Vim completion does not perform this context-aware toggle.
+- Canonicalization: Aliases are deduplicated and shown once with canonical names; Vim typically exposes both.
+- Cleaner surface: Negative (`no…`) and query (`?`) forms aren’t suggested unless you steer toward them, keeping the list focused.
+- Positional values: We guide you toward space-separated values (e.g., `set ts 4`) rather than `=` assignments; both parse, but suggestions prefer the positional style.
+- Rich, multi-column UI: Oxidized shows key/alias/current/description with themeable colors and dynamic width.
+
+For a deeper dive and examples, see [docs/COMPLETION.md](./docs/COMPLETION.md).
 
 #### Search behavior
 

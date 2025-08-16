@@ -9,6 +9,26 @@ fn completes_directories_with_trailing_separator_and_parent() {
         buffers: vec![],
         current_buffer_dir: None,
         allow_percent_path_root: true,
+        number: false,
+        relativenumber: false,
+        cursorline: false,
+        showmarks: false,
+        expandtab: false,
+        autoindent: false,
+        ignorecase: false,
+        smartcase: false,
+        hlsearch: false,
+        incsearch: false,
+        wrap: false,
+        linebreak: false,
+        undofile: false,
+        backup: false,
+        swapfile: false,
+        autosave: false,
+        laststatus: false,
+        showcmd: false,
+        syntax: false,
+        percentpathroot: true,
     });
     cc.start_completion("e ");
     assert!(cc.should_show());
@@ -35,6 +55,26 @@ fn supports_percent_root_for_current_buffer_dir() {
         buffers: vec![],
         current_buffer_dir: Some(tmp_dir.path().to_path_buf()),
         allow_percent_path_root: true,
+        number: false,
+        relativenumber: false,
+        cursorline: false,
+        showmarks: false,
+        expandtab: false,
+        autoindent: false,
+        ignorecase: false,
+        smartcase: false,
+        hlsearch: false,
+        incsearch: false,
+        wrap: false,
+        linebreak: false,
+        undofile: false,
+        backup: false,
+        swapfile: false,
+        autosave: false,
+        laststatus: false,
+        showcmd: false,
+        syntax: false,
+        percentpathroot: true,
     });
     cc.start_completion("e %/");
     assert!(cc.should_show());
@@ -53,6 +93,26 @@ fn buffer_and_numeric_hints_present() {
         }],
         current_buffer_dir: None,
         allow_percent_path_root: true,
+        number: false,
+        relativenumber: false,
+        cursorline: false,
+        showmarks: false,
+        expandtab: false,
+        autoindent: false,
+        ignorecase: false,
+        smartcase: false,
+        hlsearch: false,
+        incsearch: false,
+        wrap: false,
+        linebreak: false,
+        undofile: false,
+        backup: false,
+        swapfile: false,
+        autosave: false,
+        laststatus: false,
+        showcmd: false,
+        syntax: false,
+        percentpathroot: true,
     });
     cc.start_completion("b ");
     // buffers completion may produce items; then check numeric hints (positional form)
@@ -134,5 +194,156 @@ fn no_duplicate_set_alias_entries() {
     assert!(
         !(has_noshowmarks && has_nosmk),
         "duplicate negative alias entries present"
+    );
+}
+
+#[test]
+fn accept_toggles_boolean_for_set_and_setp() {
+    use oxidized::features::completion::CommandCompletion;
+    let mut cc = CommandCompletion::new();
+    // Context with wrap currently true
+    cc.set_context(CompletionContext {
+        cwd: std::env::current_dir().unwrap(),
+        buffers: vec![],
+        current_buffer_dir: None,
+        allow_percent_path_root: true,
+        number: false,
+        relativenumber: false,
+        cursorline: false,
+        showmarks: false,
+        expandtab: false,
+        autoindent: false,
+        ignorecase: false,
+        smartcase: false,
+        hlsearch: false,
+        incsearch: false,
+        wrap: true,
+        linebreak: false,
+        undofile: false,
+        backup: false,
+        swapfile: false,
+        autosave: false,
+        laststatus: false,
+        showcmd: false,
+        syntax: false,
+        percentpathroot: true,
+    });
+
+    // set: when wrap is true, accepting any wrap row should emit 'set nowrap'
+    cc.start_completion("set wrap");
+    assert!(cc.should_show());
+    let idx = cc
+        .matches
+        .iter()
+        .position(|i| i.category == "set" && i.text.starts_with("set "))
+        .unwrap();
+    cc.selected_index = idx;
+    let out = cc.accept().unwrap();
+    assert_eq!(out, "set nowrap");
+
+    // setp: same logic, but with persistent prefix
+    cc.start_completion("setp wrap");
+    assert!(cc.should_show());
+    let idx = cc
+        .matches
+        .iter()
+        .position(|i| i.category == "set" && i.text.starts_with("setp "))
+        .unwrap();
+    cc.selected_index = idx;
+    let out = cc.accept().unwrap();
+    assert_eq!(out, "setp nowrap");
+
+    // Now with wrap currently false, accepting should emit the positive form
+    cc.set_context(CompletionContext {
+        cwd: std::env::current_dir().unwrap(),
+        buffers: vec![],
+        current_buffer_dir: None,
+        allow_percent_path_root: true,
+        number: false,
+        relativenumber: false,
+        cursorline: false,
+        showmarks: false,
+        expandtab: false,
+        autoindent: false,
+        ignorecase: false,
+        smartcase: false,
+        hlsearch: false,
+        incsearch: false,
+        wrap: false,
+        linebreak: false,
+        undofile: false,
+        backup: false,
+        swapfile: false,
+        autosave: false,
+        laststatus: false,
+        showcmd: false,
+        syntax: false,
+        percentpathroot: true,
+    });
+    cc.start_completion("set wrap");
+    assert!(cc.should_show());
+    let idx = cc
+        .matches
+        .iter()
+        .position(|i| i.category == "set" && i.text.starts_with("set "))
+        .unwrap();
+    cc.selected_index = idx;
+    let out = cc.accept().unwrap();
+    assert_eq!(out, "set wrap");
+
+    cc.start_completion("setp wrap");
+    assert!(cc.should_show());
+    let idx = cc
+        .matches
+        .iter()
+        .position(|i| i.category == "set" && i.text.starts_with("setp "))
+        .unwrap();
+    cc.selected_index = idx;
+    let out = cc.accept().unwrap();
+    assert_eq!(out, "setp wrap");
+}
+
+#[test]
+fn negative_forms_visibility_rules() {
+    let mut cc = CommandCompletion::new();
+    cc.start_completion("set w");
+    assert!(cc.should_show());
+    // Negative forms should not appear unless the user typed 'set no'
+    assert!(
+        !cc.matches
+            .iter()
+            .any(|i| i.category == "set" && i.text.starts_with("set nowrap"))
+    );
+
+    cc.start_completion("set no");
+    assert!(cc.should_show());
+    assert!(
+        cc.matches
+            .iter()
+            .any(|i| i.category == "set" && i.text.starts_with("set no"))
+    );
+}
+
+#[test]
+fn positional_boolean_values_are_suggested() {
+    let mut cc = CommandCompletion::new();
+    // set percentpathroot
+    cc.start_completion("set percentpathroot ");
+    assert!(cc.should_show());
+    let items: Vec<String> = cc.matches.iter().map(|i| i.text.clone()).collect();
+    assert!(items.contains(&"set percentpathroot true".to_string()));
+    assert!(items.contains(&"set percentpathroot false".to_string()));
+
+    // setp ppr
+    cc.start_completion("setp ppr ");
+    assert!(cc.should_show());
+    let items: Vec<String> = cc.matches.iter().map(|i| i.text.clone()).collect();
+    assert!(
+        items.contains(&"setp percentpathroot true".to_string())
+            || items.contains(&"setp ppr true".to_string())
+    );
+    assert!(
+        items.contains(&"setp percentpathroot false".to_string())
+            || items.contains(&"setp ppr false".to_string())
     );
 }
