@@ -321,6 +321,16 @@ Keep tests descriptive, minimal, and colocated with similar behavior. Fast feedb
 
 - Ex commands and settings
   - utils/command.rs implements :w, :q, :bd, :e, :ls, split/vsplit/close, etc.
+
+## Buffer Lifecycle and MRU Fallback
+
+- Editor tracks last_buffer_id as a simple MRU hint. When closing the current buffer via :bd (or :bd!), Editor:
+  - Validates modified state unless forced.
+  - Removes the buffer from the collection.
+  - Chooses a fallback buffer: most-recently-used if available; otherwise the lowest-id remaining; if none remain, creates an empty buffer.
+  - Retargets all windows that were showing the closed buffer to the fallback, synchronizing window cursors from buffer state.
+  - Requests visible-lines highlighting and a redraw, so the UI updates immediately.
+
   - :set toggles and queries are ephemeral (session-only). :setp persists to
     editor.toml. Both feed into Editor’s config and update UI and behavior at
     runtime.
@@ -528,6 +538,7 @@ Theme update -> clear() -> drop all entries; visible lines re-enqueued
 - Mode: Editor mode (Normal, Insert, Replace, Visual, VisualLine, VisualBlock, Command, Search, OperatorPending).
 - Selection: Visual selections or operator ranges tracked with line/column positions.
 - Viewport/horiz_offset: Vertical top row and horizontal column offset used for rendering visible slices.
+  - RenderState includes the current window id, viewport_top, and horiz_offset so viewport-only changes (e.g., zz/zt/zb, horizontal scroll) trigger redraws even when the cursor doesn’t move.
 - Gutter: Left column for line numbers and/or marks; width computed per buffer length and settings.
 - Wrap: Grapheme-aware wrapping of logical lines into multiple rows within a window’s content width.
 - ThemeConfig/UITheme/SyntaxTheme: Theme system loaded from themes.toml; UI colors and syntax mappings.

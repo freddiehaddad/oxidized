@@ -230,6 +230,21 @@ Notes:
   - "_ dd deletes line without touching your clipboard/registers.
   - "A yw appends word to existing contents of register a.
   - p/P paste from the selected register if one-shot is set, otherwise from unnamed.
+  - :registers (alias: :reg) opens a read-only scratch buffer named [Registers] showing current register contents.
+
+### Buffer Management
+
+Oxidized supports multiple buffers with fast Ex navigation and safe deletion:
+
+- Navigate buffers:
+  - :bnext or :bn — switch to the next buffer
+  - :bprevious, :bp, or :bprev — switch to the previous buffer
+  - Keymaps: Ctrl+n (next), Ctrl+p (previous)
+- Delete current buffer:
+  - :bdelete or :bd — close the current buffer (refuses if modified)
+  - :bdelete! or :bd! — force close even if modified
+  - After close, the editor switches to your most-recently-used buffer (MRU) if available; otherwise the lowest‑id remaining buffer; if none remain, an empty buffer is created.
+  - All windows showing the closed buffer are retargeted to the fallback buffer, and the UI is redrawn immediately.
 
 ### Advanced Window Management
 
@@ -553,6 +568,8 @@ Below is the current authoritative default `keymaps.toml` (kept in sync with the
 "z." = "center_cursor"      # Center current line (alternative)
 "z-" = "cursor_to_bottom"   # Move current line to bottom (alternative)
 "z Enter" = "cursor_to_top" # Move current line to top (alternative)
+
+Note: z-commands update the viewport immediately and re-highlight visible lines; no extra input is needed for the screen to refresh.
 
 # Window/Split navigation
 "Ctrl+w h" = "window_left"      # Move to window left

@@ -157,4 +157,8 @@ Implemented:
 > - "\_ dw deletes a word and discards it.
 > - Works with counts and motions: e.g., "\_ 3dd, "\_ d$.
 
-Next phases: optional system clipboards (+, *), :registers view.
+Implemented extras:
+
+- :registers (alias :reg) opens a read-only [Registers] scratch buffer with current register contents.
+
+Next phases: optional system clipboards (+, *).

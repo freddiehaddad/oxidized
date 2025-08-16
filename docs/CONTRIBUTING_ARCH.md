@@ -44,6 +44,14 @@ Registers (Phase 1):
 - Code pointers: src/core/buffer.rs (registers HashMap, active_register, write_register_content, register_write, register_read_for_put); src/input/keymap.rs (register_prefix state and consumption).
 - Tests: tests/registers_tests.rs covers unnamed default, named, append with A, and black-hole semantics; keymaps embed '"' = register_prefix.
 
+Registers UI:
+
+- :registers (alias :reg) opens a read-only [Registers] scratch buffer listing current register contents for quick inspection.
+
+Buffers & MRU close behavior:
+
+- :bd / :bd! closes the current buffer (forced with !). After close, Editor selects the most-recently-used buffer when available; otherwise the lowest-id remaining; if none, an empty buffer is created. All windows that showed the closed buffer are retargeted, cursors synced, and a redraw is requested.
+
 ## Quick triage flow
 
 When iterating locally, prefer this tight loop:
