@@ -112,6 +112,13 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
                 editor.set_status_message("No next buffer".to_string());
             }
         }
+        "bp" | "bprev" | "bprevious" => {
+            if editor.switch_to_previous_buffer() {
+                editor.set_status_message("Switched to previous buffer".to_string());
+            } else {
+                editor.set_status_message("No previous buffer".to_string());
+            }
+        }
         "bd" | "bdelete" => match editor.close_current_buffer() {
             Ok(msg) => {
                 info!("Closed current buffer");

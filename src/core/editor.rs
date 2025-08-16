@@ -352,7 +352,18 @@ impl Editor {
             .unwrap_or(0);
 
         let next_index = (current_index + 1) % buffer_ids.len();
-        self.current_buffer_id = Some(buffer_ids[next_index]);
+        let new_id = buffer_ids[next_index];
+        self.current_buffer_id = Some(new_id);
+        // Apply to current window and preserve cursor position
+        if let Some(win) = self.window_manager.current_window_mut()
+            && let Some(buf) = self.buffers.get(&new_id)
+        {
+            win.set_buffer(new_id);
+            win.save_cursor_position(buf.cursor.row, buf.cursor.col);
+        }
+        // Queue highlighting and redraw for the newly shown buffer
+        self.request_visible_line_highlighting();
+        self.request_redraw();
         true
     }
 
@@ -373,7 +384,16 @@ impl Editor {
         } else {
             current_index - 1
         };
-        self.current_buffer_id = Some(buffer_ids[prev_index]);
+        let new_id = buffer_ids[prev_index];
+        self.current_buffer_id = Some(new_id);
+        if let Some(win) = self.window_manager.current_window_mut()
+            && let Some(buf) = self.buffers.get(&new_id)
+        {
+            win.set_buffer(new_id);
+            win.save_cursor_position(buf.cursor.row, buf.cursor.col);
+        }
+        self.request_visible_line_highlighting();
+        self.request_redraw();
         true
     }
 
