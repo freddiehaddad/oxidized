@@ -202,6 +202,20 @@ impl CommandCompletion {
             },
         ]);
 
+        // Information and utility commands
+        commands.extend(vec![
+            CompletionItem {
+                text: "registers".to_string(),
+                description: "Show registers view".to_string(),
+                category: "info".to_string(),
+            },
+            CompletionItem {
+                text: "reg".to_string(),
+                description: "Show registers view (short)".to_string(),
+                category: "info".to_string(),
+            },
+        ]);
+
         // Set commands - display settings
         commands.extend(vec![
             CompletionItem {
@@ -779,6 +793,63 @@ impl CommandCompletion {
         // Dynamic matches based on current input (e.g., values after '=')
         let dynamic = self.dynamic_matches(input);
         combined.extend(dynamic);
+
+        // Deduplicate Ex command aliases (e.g., quit/q, registers/reg) for no-arg items.
+        // Keep the canonical long form and use its richer description when available.
+        fn canonical_ex_name(s: &str) -> (String, bool) {
+            match s {
+                // file/quit
+                "w" | "write" => ("write".to_string(), true),
+                "q" | "quit" => ("quit".to_string(), true),
+                "q!" | "quit!" => ("quit!".to_string(), true),
+                "x" | "wq" => ("wq".to_string(), true),
+                "e" | "edit" => ("edit".to_string(), true),
+                // buffer family
+                "b" | "buffer" => ("buffer".to_string(), true),
+                "bn" | "bnext" => ("bnext".to_string(), true),
+                "bp" | "bprev" | "bprevious" => ("bprevious".to_string(), true),
+                "bd" | "bdelete" => ("bdelete".to_string(), true),
+                "bd!" | "bdelete!" => ("bdelete!".to_string(), true),
+                "ls" | "buffers" => ("buffers".to_string(), true),
+                // window/split
+                "sp" | "split" => ("split".to_string(), true),
+                "vsp" | "vsplit" => ("vsplit".to_string(), true),
+                "close" => ("close".to_string(), true),
+                // info/tools
+                "reg" | "registers" => ("registers".to_string(), true),
+                _ => (s.to_string(), false),
+            }
+        }
+
+        // Partition: collapse duplicates among non-set commands that have no args (no spaces)
+        use std::collections::HashMap;
+        let mut ex_map: HashMap<String, CompletionItem> = HashMap::new();
+        let mut others: Vec<CompletionItem> = Vec::new();
+        for item in combined.into_iter() {
+            let has_space = item.text.contains(' ');
+            if item.category != "set" && !has_space {
+                let (canon, is_known) = canonical_ex_name(&item.text);
+                if is_known {
+                    let entry = ex_map.entry(canon.clone()).or_insert_with(|| item.clone());
+                    // Prefer canonical long text and non-short description
+                    let entry_is_alias = entry.text != canon;
+                    let item_is_canon = item.text == canon;
+                    let entry_short = entry.description.to_lowercase().contains("(short)");
+                    let item_short = item.description.to_lowercase().contains("(short)");
+                    if item_is_canon || (entry_is_alias && !item_short && entry_short) {
+                        entry.text = canon;
+                        entry.description = item.description.clone();
+                        entry.category = item.category.clone();
+                    }
+                } else {
+                    others.push(item);
+                }
+            } else {
+                others.push(item);
+            }
+        }
+        let mut combined: Vec<CompletionItem> = others;
+        combined.extend(ex_map.into_values());
 
         // Deduplicate by text while preferring shorter description (or first seen)
         combined.sort_by(|a, b| a.text.cmp(&b.text));

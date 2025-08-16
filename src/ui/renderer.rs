@@ -1614,13 +1614,13 @@ impl UI {
             .command_completion
             .visible_selected_index(menu_height);
 
-        // Precompute aligned columns for visible items when they are 'set' entries
+        // Precompute aligned columns for visible items; use 3-column layout for 'set' and recognized Ex commands
         #[derive(Default, Clone)]
         struct RowColumns {
             key: String,
             alias: String,
-            value: String, // include brackets if present, e.g., "[true]"
-            is_set: bool,
+            value: String, // for set: [value]; for Ex: description
+            is_columnar: bool,
         }
 
         // Helper: parse a set item into canonical, alias list, and current value
@@ -1748,6 +1748,33 @@ impl UI {
             (canonical, aliases.to_vec(), current)
         };
 
+        // Helper: parse an Ex command into canonical name and aliases
+        let parse_ex_item = |text: &str| -> (String, Vec<&'static str>) {
+            let t = text.trim_end();
+            match t {
+                // File/quit family
+                "write" | "w" => ("write".to_string(), vec!["w"]),
+                "quit" | "q" => ("quit".to_string(), vec!["q"]),
+                "quit!" | "q!" => ("quit!".to_string(), vec!["q!"]),
+                "wq" | "x" => ("wq".to_string(), vec!["x"]),
+                "edit" | "e" => ("edit".to_string(), vec!["e"]),
+                // Buffer commands
+                "buffer" | "b" => ("buffer".to_string(), vec!["b"]),
+                "bnext" | "bn" => ("bnext".to_string(), vec!["bn"]),
+                "bprevious" | "bp" | "bprev" => ("bprevious".to_string(), vec!["bp", "bprev"]),
+                "bdelete" | "bd" => ("bdelete".to_string(), vec!["bd"]),
+                "bdelete!" | "bd!" => ("bdelete!".to_string(), vec!["bd!"]),
+                "buffers" | "ls" => ("buffers".to_string(), vec!["ls"]),
+                // Window/split
+                "split" | "sp" => ("split".to_string(), vec!["sp"]),
+                "vsplit" | "vsp" => ("vsplit".to_string(), vec!["vsp"]),
+                "close" => ("close".to_string(), vec![]),
+                // Info/tools
+                "registers" | "reg" => ("registers".to_string(), vec!["reg"]),
+                other => (other.to_string(), vec![]),
+            }
+        };
+
         // Prepare rows and measure widths
         let mut rows: Vec<RowColumns> = Vec::with_capacity(visible_items.len());
         let mut key_w_max = 0usize;
@@ -1770,14 +1797,35 @@ impl UI {
                     key: key_str,
                     alias: alias_str,
                     value: value_str,
-                    is_set: true,
+                    is_columnar: true,
+                });
+            } else if !item.text.contains(' ') {
+                // Ex command without arguments: show canonical, aliases, description
+                let (canonical, aliases) = parse_ex_item(&item.text);
+                let alias_str = if aliases.is_empty() {
+                    String::new()
+                } else {
+                    aliases.join(", ")
+                };
+                let value_str = item.description.clone();
+                let key_str = canonical;
+                let key_w = UnicodeWidthStr::width(key_str.as_str());
+                let alias_w = UnicodeWidthStr::width(alias_str.as_str());
+                key_w_max = key_w_max.max(key_w);
+                alias_w_max = alias_w_max.max(alias_w);
+                rows.push(RowColumns {
+                    key: key_str,
+                    alias: alias_str,
+                    value: value_str,
+                    is_columnar: true,
                 });
             } else {
+                // Items with arguments (paths, buffer refs, etc.) stay simple
                 rows.push(RowColumns {
                     key: item.text.clone(),
                     alias: String::new(),
                     value: String::new(),
-                    is_set: false,
+                    is_columnar: false,
                 });
             }
         }
@@ -1860,7 +1908,7 @@ impl UI {
                 } else {
                     terminal.queue_set_bg_color(self.theme.command_line_bg)?;
                 }
-                if cols.is_set {
+                if cols.is_columnar {
                     // Compose aligned columns with colors
                     // Leading space + key
                     let key_text = truncate_to_width(&cols.key, key_w_max);

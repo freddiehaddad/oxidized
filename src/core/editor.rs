@@ -465,6 +465,68 @@ impl Editor {
         buffer_list.trim_end().to_string()
     }
 
+    /// Open a temporary view listing current registers in a new buffer.
+    /// Returns a status message summarizing the action.
+    pub fn open_registers_view(&mut self) -> String {
+        // Build lines mimicking Vim's :registers output for the active buffer.
+        let mut lines: Vec<String> = Vec::new();
+        lines.push("".to_string());
+        lines.push("--- Registers ---".to_string());
+        // Helper to push a line with name and value (escape newlines visibly)
+        let mut push_reg = |name: &str, content: Option<&crate::core::buffer::ClipboardContent>| {
+            if let Some(c) = content {
+                let mut val = c.text.replace('\n', "\u{21B5}"); // ↵
+                if val.len() > 200 {
+                    // avoid overly long lines
+                    val.truncate(200);
+                    val.push('…');
+                }
+                lines.push(format!("\"{}  {}", name, val));
+            }
+        };
+
+        if let Some(buf) = self.current_buffer() {
+            // Unnamed
+            push_reg("\"", buf.get_register('"'));
+            // 0 yank register
+            push_reg("0", buf.get_register('0'));
+            // Numbered 1..9
+            for ch in '1'..='9' {
+                let name = ch.to_string();
+                push_reg(&name, buf.get_register(ch));
+            }
+            // Small delete
+            push_reg("-", buf.get_register('-'));
+            // Named a..z
+            for ch in 'a'..='z' {
+                let name = ch.to_string();
+                push_reg(&name, buf.get_register(ch));
+            }
+            // System clipboards (future): + and * — show if present in map
+            push_reg("+", buf.get_register('+'));
+            push_reg("*", buf.get_register('*'));
+        }
+
+        // Create a new unnamed buffer to show the view
+        if let Ok(id) = self.create_buffer(None) {
+            if let Some(b) = self.buffers.get_mut(&id) {
+                b.lines = if lines.is_empty() {
+                    vec!["(no registers)".to_string()]
+                } else {
+                    lines
+                };
+                b.modified = false; // view buffer
+                b.file_path = Some(std::path::PathBuf::from("[Registers]"));
+                // Place cursor at top
+                b.cursor = crate::core::mode::Position::new(0, 0);
+            }
+            self.current_buffer_id = Some(id);
+            format!("Opened registers view in buffer {}", id)
+        } else {
+            "Failed to open registers view".to_string()
+        }
+    }
+
     pub fn render(&mut self) -> Result<()> {
         // Collect all needed data first
         let mode = self.mode;
