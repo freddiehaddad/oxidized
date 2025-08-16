@@ -2819,6 +2819,10 @@ impl Editor {
                 let max_viewport_top = buffer_lines_len.saturating_sub(content_height);
                 current_window.viewport_top = current_window.viewport_top.min(max_viewport_top);
             }
+
+            // Request highlighting for newly visible lines and trigger redraw
+            self.request_visible_line_highlighting();
+            self.request_redraw();
         }
     }
 
@@ -2829,6 +2833,10 @@ impl Editor {
             if let Some(current_window) = self.window_manager.current_window_mut() {
                 current_window.viewport_top = cursor_row;
             }
+
+            // Request highlighting for newly visible lines and trigger redraw
+            self.request_visible_line_highlighting();
+            self.request_redraw();
         }
     }
 
@@ -2843,6 +2851,10 @@ impl Editor {
                 current_window.viewport_top =
                     cursor_row.saturating_sub(content_height.saturating_sub(1));
             }
+
+            // Request highlighting for newly visible lines and trigger redraw
+            self.request_visible_line_highlighting();
+            self.request_redraw();
         }
     }
 
