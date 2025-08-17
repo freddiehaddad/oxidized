@@ -1,0 +1,86 @@
+# Configuration Guide
+
+Oxidized uses human-friendly TOML files with live reload and a clear split
+between session-only and persisted changes.
+
+- Session-only: use `:set` to apply a change until exit.
+- Persisted: use `:setp` to write the change back to your TOML config.
+
+## Files
+
+- `editor.toml` — global editor behavior and UI options
+- `keymaps.toml` — key bindings per mode
+- `themes.toml` — themes and syntax/UI colors
+
+You can keep these at the repo root or under `~/.config/oxidized/` (XDG). The
+editor searches the current directory first, then the config directory.
+
+## Editor settings (editor.toml)
+
+We recommend keeping only what you change from the defaults, rather than
+copying the full file. See the repo root `editor.toml` for the authoritative
+defaults. Common examples:
+
+```toml
+[display]
+show_line_numbers = true
+color_scheme = "default"
+
+[behavior]
+ignore_case = true
+smart_case = true
+
+[interface]
+completion_menu_height = 10
+percent_path_root = true
+```
+
+Notes:
+
+- Live reload applies on save.
+- Query/toggle at runtime: `:set wrap?`, `:set nowrap`, `:setp nowrap`.
+
+## Keymaps (keymaps.toml)
+
+Prefer small overrides vs full copies. Define only the keys you want to
+change; unspecified keys fall back to defaults.
+
+Example: remap save to Ctrl+S in Insert mode as well:
+
+```toml
+[insert_mode]
+"Ctrl+s" = "save_file"
+```
+
+See [KEYMAPS.md](./KEYMAPS.md) for mode names and tips.
+
+## Themes (themes.toml)
+
+Theme entries can be partial; unspecified values use built-in defaults. Start
+by copying the minimal skeleton and tweak colors gradually.
+
+```toml
+[theme]
+current = "my_theme"
+
+[themes.my_theme]
+name = "My Theme"
+
+[themes.my_theme.ui]
+background = "#1d1f21"
+plain_text = "#c5c8c6"
+
+[themes.my_theme.tree_sitter]
+keyword = "#b294bb"
+string = "#b5bd68"
+```
+
+Completion popup colors are themeable; see the defaults in the repo
+`themes.toml` and the README section on completion UI.
+
+## Tips
+
+- Use `%` rooted paths in `:e`/`:w` when `percent_path_root` is enabled.
+- Keep diffs readable: avoid committing full copies of defaults; store deltas.
+- For portability, check in a minimal `editor.toml` in your project and keep
+  personal tweaks under your home config.

@@ -3,7 +3,7 @@
 Thanks for your interest in contributing!
 
 Before you start, skim the developer docs under `docs/` for an overview and
-inline ASCII diagrams of the architecture:
+architecture diagrams:
 
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — high-level guide
 
@@ -55,9 +55,10 @@ You can set this globally with `--global` if you prefer.
 - Docs: Update README and/or docs/ when changing user-visible behavior
  (architecture notes live in docs/ARCHITECTURE.md). For async syntax or
  event-loop changes, ensure both README and ARCHITECTURE are updated.
-- Visual selection changes: preserve anchor semantics (`Selection.start` is anchor; not always <= end).
-  Use helpers (`highlight_span_for_line`, `get_selection_range`) for ordered spans and reflect any
-  semantic shifts in docs/ + tests.
+- Visual selection changes: preserve anchor semantics (`Selection.start` is
+  anchor; not always <= end). Use helpers (`highlight_span_for_line`,
+  `get_selection_range`) for ordered spans and reflect any semantic shifts in
+  docs/ + tests.
 
 ### Benchmarks
 
@@ -67,7 +68,8 @@ Current Criterion benches (run with `cargo bench`):
 - `wrap_bench` – wrapping & Unicode width
 - `viewport_hscroll_bench` – horizontal scrolling
 - `gutter_status_bench` – gutter + status layout
-- `visual_block_bench` – block selection highlight span computation (validates nanosecond-scale cost)
+- `visual_block_bench` – block selection highlight span computation (validates
+  nanosecond-scale cost)
 
 If adding a new bench:
 

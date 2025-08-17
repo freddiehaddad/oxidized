@@ -1,49 +1,74 @@
 # Oxidized Architecture Guide
 
-This document gives contributors a high-level and practical overview of how Oxidized works under the hood. It includes links to code, key flows, and inline ASCII diagrams to help you get oriented fast.
+This document gives contributors a high-level and practical overview of how
+Oxidized works under the hood. It includes links to code, key flows, and
+inline Mermaid diagrams to help you get oriented fast.
 
 - Target audience: developers/contributors
 - Prereqs: Rust, terminal UI basics
 
-See also: [Architecture Quickstart (At a Glance)](./ARCHITECTURE_QUICKSTART.md) for a one-page visual overview.
+See also: [Architecture Quickstart (At a Glance)](./ARCHITECTURE_QUICKSTART.md)
+for a one-page visual overview.
 
 ## Top-level Modules
 
-- src/core: [buffer](../src/core/buffer.rs), [editor](../src/core/editor.rs), [mode](../src/core/mode.rs), [window manager](../src/core/window.rs)
+- src/core: [buffer](../src/core/buffer.rs), [editor](../src/core/editor.rs),
+  [mode](../src/core/mode.rs), [window manager](../src/core/window.rs)
 - src/ui: [renderer](../src/ui/renderer.rs) + [terminal glue](../src/ui/terminal.rs)
-- src/input: [event loop](../src/input/event_driven.rs), [key handling](../src/input/keymap.rs), [event types](../src/input/events.rs)
-- src/features: [syntax highlighting](../src/features/syntax.rs), [search](../src/features/search.rs), [macros](../src/features/macros.rs), [text objects](../src/features/text_objects.rs), [LSP (stub)](../src/features/lsp.rs)
+- src/input: [event loop](../src/input/event_driven.rs),
+  [key handling](../src/input/keymap.rs), [event types](../src/input/events.rs)
+- src/features: [syntax highlighting](../src/features/syntax.rs),
+  [search](../src/features/search.rs), [macros](../src/features/macros.rs),
+  [text objects](../src/features/text_objects.rs), [LSP (stub)](../src/features/lsp.rs)
 - src/config: editor/theme/keymap config + [file watchers](../src/config/watcher.rs)
 
 ### Component responsibilities (quick map)
 
 - [core/buffer.rs](../src/core/buffer.rs)
-  - Text storage as Vec<String> lines, cursor Position, selection, marks, clipboard.
-  - Editing operations (insert/delete/indent/unindent/replace), undo/redo with delta tracking.
+  - Text storage as Vec<String> lines, cursor Position, selection, marks,
+    clipboard.
+  - Editing operations (insert/delete/indent/unindent/replace), undo/redo with
+    delta tracking.
   - File IO (load/save), line ending handling, modified flag.
 - [core/editor.rs](../src/core/editor.rs)
-  - Orchestrates buffers, window manager, UI, terminal, input handling, search, macros.
-  - Holds config and theme state, async syntax highlighter, completion engine, and flags for redraw.
+  - Orchestrates buffers, window manager, UI, terminal, input handling,
+    search, macros.
+  - Holds config and theme state, async syntax highlighter, completion engine,
+    and flags for redraw.
   - Produces EditorRenderState for the UI on each render.
 - [core/window.rs](../src/core/window.rs)
-  - WindowManager and Window data structures: splits, sizes, active window, viewport, horizontal offset.
+  - WindowManager and Window data structures: splits, sizes, active window,
+    viewport, horizontal offset.
   - Reserved rows for status line and command line.
 - [ui/renderer.rs](../src/ui/renderer.rs) + [ui/terminal.rs](../src/ui/terminal.rs)
   - Terminal abstraction with double-buffered queueing of draw commands.
-  - Renderer computes gutter, wrapping, statusline, and draws highlighted text (from Editor state).
+  - Renderer computes gutter, wrapping, statusline, and draws highlighted text
+    (from Editor state).
   - Grapheme-aware widths and safe UTF-8 slicing.
-- [input/event_driven.rs](../src/input/event_driven.rs) + [input/events.rs](../src/input/events.rs) + [input/keymap.rs](../src/input/keymap.rs)
-  - EventDrivenEditor: input thread, config watcher, syntax results dispatcher, (future) render thread.
+- [input/event_driven.rs](../src/input/event_driven.rs) +
+  [input/events.rs](../src/input/events.rs) + [input/keymap.rs](../src/input/keymap.rs)
+  - EventDrivenEditor: input thread, config watcher, syntax results
+    dispatcher, (future) render thread.
   - Key handling maps key sequences to editor actions and Ex commands.
 - [features/syntax.rs](../src/features/syntax.rs)
-  - Tree-sitter based synchronous highlighter and an AsyncSyntaxHighlighter worker pipeline.
+  - Tree-sitter based synchronous highlighter and an AsyncSyntaxHighlighter
+    worker pipeline.
   - Small per-line LRU cache for highlight results.
-- [features/search.rs](../src/features/search.rs), [features/macros.rs](../src/features/macros.rs), [features/text_objects.rs](../src/features/text_objects.rs), completion: [engine](../src/features/completion/engine.rs) · [presenter](../src/features/completion/presenter.rs) · [providers](../src/features/completion/providers.rs)
+- [features/search.rs](../src/features/search.rs),
+  [features/macros.rs](../src/features/macros.rs),
+  [features/text_objects.rs](../src/features/text_objects.rs), completion:
+  [engine](../src/features/completion/engine.rs) ·
+  [presenter](../src/features/completion/presenter.rs) ·
+  [providers](../src/features/completion/providers.rs)
   - Focused subsystems used by Editor and keymaps.
 - [utils/command.rs](../src/utils/command.rs)
-  - Ex-style command parser and executor, centralized :set handler (ephemeral vs persistent via :setp).
-- config/* (e.g. [config/editor.rs](../src/config/editor.rs), [config/theme.rs](../src/config/theme.rs), [config/keymap.rs](../src/input/keymap.rs))
-  - EditorConfig, ThemeConfig, Keymap config, file watcher, and hot reload hooks.
+  - Ex-style command parser and executor, centralized :set handler (ephemeral
+    vs persistent via :setp).
+- config/* (e.g. [config/editor.rs](../src/config/editor.rs),
+  [config/theme.rs](../src/config/theme.rs),
+  [config/keymap.rs](../src/input/keymap.rs))
+  - EditorConfig, ThemeConfig, Keymap config, file watcher, and hot reload
+    hooks.
 
 ## Key Runtime Flow
 
@@ -63,46 +88,59 @@ See also: [Architecture Quickstart (At a Glance)](./ARCHITECTURE_QUICKSTART.md) 
 
 1. Input thread reads terminal events and sends Input events.
 2. EventDrivenEditor processes events, mutates Editor as needed, and sends UI
-  RedrawRequest when state changes.
+   RedrawRequest when state changes.
 3. A syntax results dispatcher thread listens for background highlight results,
-  updates caches, drops stale versions, and triggers redraws.
+   updates caches, drops stale versions, and triggers redraws.
 4. Editor::render() snapshots EditorRenderState and asks UI to draw via
-  Terminal.
+   Terminal.
 
 Sequence (input → state → render):
 
-```text
-  +-------------+     +--------------------+     +-----------+
-  |  Terminal   | --> | Input/Event Thread | --> |  Editor   |
-  +-------------+     +--------------------+     +-----------+
-                                             \              \
-                                              \ Redraw req.  \
-                                               v              v
-                                           +--------+   +-----------+
-                                           |  UI    |<- | Renderer  |
-                                           +--------+   +-----------+
+Mermaid (rendered):
+
+```mermaid
+sequenceDiagram
+  participant T as Terminal
+  participant I as Input/Event Thread
+  participant E as Editor
+  participant R as Renderer
+  participant U as UI
+  T->>I: key/mouse events
+  I->>E: EditorEvent::Input
+  Note right of E: May mutate state and request redraw
+  E-->>R: RedrawRequest
+  R->>U: draw commands
+  U-->>T: render to terminal
 ```
 
 ## Data Model
 
 - Buffer: lines, cursor, selection, undo/redo stacks, marks, clipboard.
-- Editor: buffer set, window manager, mode, status, config, themes, async syntax state.
-- UI: theme, syntax theme, flags; computes gutter/columns; renders status/command lines.
-- Events: strongly-typed enums for Input/UI/Config/Window/Search/Macro/System/LSP.
+- Editor: buffer set, window manager, mode, status, config, themes, async
+  syntax state.
+- UI: theme, syntax theme, flags; computes gutter/columns; renders
+  status/command lines.
+- Events: strongly-typed enums for
+  Input/UI/Config/Window/Search/Macro/System/LSP.
 
 Component overview (simplified):
 
-```text
-  +---------+    owns     +---------+     manages     +-----------+
-  | Editor  | ----------> | Buffers | <-------------  |  Windows  |
-  +---------+             +---------+                 +-----------+
-       |                         |                           |
-       | uses                    | contains                  | displays
-       v                         v                           v
-  +---------+             +------------+               +----------+
-  |  Modes  |             |   Marks    |               |   UI/    |
-  +---------+             +------------+               | Renderer |
-                                                       +----------+
+Mermaid (rendered):
+
+```mermaid
+classDiagram
+  class Editor
+  class Buffers
+  class Windows
+  class Modes
+  class Marks
+  class UI_Renderer
+  note for UI_Renderer "UI/Renderer"
+  Editor --> Buffers : owns
+  Editor --> Windows : manages
+  Editor --> Modes : uses
+  Buffers --> Marks : contains
+  Windows --> UI_Renderer : displays
 ```
 
 Core classes and relationships (high-level):
@@ -115,19 +153,30 @@ Core classes and relationships (high-level):
 ## Rendering and Cursor
 
 - UI::compute_gutter_width reserves space for numbers or marks.
-- Rendering is width-aware using unicode-width; grapheme navigation/deletion uses unicode-segmentation.
-- Cursor column (no-wrap) uses Unicode width between base offset and cursor byte index to keep visual and logical positions in sync.
-- Visual selection semantics: `Selection.start` is always the anchor (original point where selection began) and is not reordered with `end` for character/block selections. Helpers like `highlight_span_for_line` and `Buffer::get_selection_range` derive ordered spans as needed. This preserves direction for motions and anchor-sensitive operations.
+- Rendering is width-aware using unicode-width; grapheme navigation/deletion
+  uses unicode-segmentation.
+- Cursor column (no-wrap) uses Unicode width between base offset and cursor
+  byte index to keep visual and logical positions in sync.
+- Visual selection semantics: `Selection.start` is always the anchor (original
+  point where selection began) and is not reordered with `end` for
+  character/block selections. Helpers like `highlight_span_for_line` and
+  `Buffer::get_selection_range` derive ordered spans as needed. This preserves
+  direction for motions and anchor-sensitive operations.
 
 ## Undo/Redo and Redraws
 
-- Buffer implements delta-based undo/redo; Editor actions call buffer.undo()/redo().
-- To ensure immediate UI feedback even when the cursor doesn’t move, key handlers request redraw after successful delete/undo/redo operations.
+- Buffer implements delta-based undo/redo; Editor actions call
+  buffer.undo()/redo().
+- To ensure immediate UI feedback even when the cursor doesn’t move, key
+  handlers request redraw after successful delete/undo/redo operations.
 
 ## Config & Hot Reload
 
-- ConfigWatcher blocks on filesystem events (notify) and sends typed change events; no periodic polling. EventDrivenEditor translates them to Config events and forces a full redraw when applied.
-- ThemeConfig load_with_default_theme applies color scheme; UI reads it on init and reload.
+- ConfigWatcher blocks on filesystem events (notify) and sends typed change
+  events; no periodic polling. EventDrivenEditor translates them to Config
+  events and forces a full redraw when applied.
+- ThemeConfig load_with_default_theme applies color scheme; UI reads it on
+  init and reload.
 
 ## Syntax Highlighting (async pipeline)
 
@@ -171,27 +220,29 @@ Caching
     full buffer content and returns empty highlights for now.
   - Sets needs_syntax_refresh so the UI redraws when results arrive.
 - features/syntax.rs: AsyncSyntaxHighlighter
-  - Bounded work queue (256) prevents unbounded growth. Each WorkItem contains
-    buffer_id, line_index, full_content, language, priority, version.
+  - Bounded work queue (256) prevents unbounded growth. Each WorkItem
+    contains buffer_id, line_index, full_content, language, priority, version.
   - Worker loop coalesces a small backlog by (buffer,line), prefers higher
     priority, then highlights that single line using a per-thread
     SyntaxHighlighter and Tree-sitter parser.
-  - Results are sent as HighlightResult { buffer_id, line_index, version, highlights }.
+  - Results are sent as HighlightResult { buffer_id, line_index, version,
+    highlights }.
 - input/event_driven.rs: spawn_syntax_results_thread
   - Receives results, compares result.version with editor.highlight_version,
-    drops stale results, then calls Editor::apply_syntax_highlight_result which
-    writes to the AsyncSyntaxHighlighter cache and flips needs_syntax_refresh.
+    drops stale results, then calls Editor::apply_syntax_highlight_result
+    which writes to the AsyncSyntaxHighlighter cache and flips
+    needs_syntax_refresh.
   - Emits a UI RedrawRequest event.
 - ui/renderer.rs
-  - Uses EditorRenderState.syntax_highlights map (collected by Editor::render)
-    to render colored segments. Highlight ranges are shifted for wrap and
-    horizontal scrolling.
+  - Uses EditorRenderState.syntax_highlights map (collected by
+    Editor::render) to render colored segments. Highlight ranges are shifted
+    for wrap and horizontal scrolling.
 
 ### Why Tree-sitter per-line?
 
 - We parse the full buffer text in the worker but compute highlights for the
-  requested line only. This preserves correctness with language constructs that
-  span lines while keeping rendering incremental and responsive.
+  requested line only. This preserves correctness with language constructs
+  that span lines while keeping rendering incremental and responsive.
 
 ### LRU cache purpose and behavior
 
@@ -202,56 +253,100 @@ Caching
   - Provide instant highlights on repeated renders while worker catches up.
 - Capacity is fixed (currently 2048 entries). Least-recently-used entries are
   evicted when capacity is reached.
-- Cache is cleared on theme updates to prevent color/style mismatches. There is
-  also support to invalidate entries for specific buffers when needed.
+- Cache is cleared on theme updates to prevent color/style mismatches. There
+  is also support to invalidate entries for specific buffers when needed.
 
 ## Windows and Viewports
 
 - WindowManager manages splits, sizing, and viewport for each window.
-- EditorRenderState contains per-buffer highlight cache keyed by (buffer_id, line_index).
+- EditorRenderState contains per-buffer highlight cache keyed by
+  (buffer_id, line_index).
 
 ## Testing
 
-Oxidized uses a broad, fast test suite emphasizing small, deterministic unit tests with a few higher-level integration/regression cases. The goals are: (1) protect core editing invariants (buffer text, cursor/selection semantics, undo/redo), (2) lock in motion/text-object behavior (including tricky Unicode + punctuation edges), and (3) ensure peripheral subsystems (config reload, search, macros, completion, syntax enqueue logic) remain stable.
+Oxidized uses a broad, fast test suite emphasizing small, deterministic unit
+tests with a few higher-level integration/regression cases. The goals are: (1)
+protect core editing invariants (buffer text, cursor/selection semantics,
+undo/redo), (2) lock in motion/text-object behavior (including tricky Unicode
+and punctuation edges), and (3) ensure peripheral subsystems (config reload,
+search, macros, completion, syntax enqueue logic) remain stable.
 
 ### Layout & Categories
 
-tests/ contains almost all tests (crate-level integration style) organized by concern:
+tests/ contains almost all tests (crate-level integration style) organized by
+concern:
 
-- Buffer & Editing: `buffer_integration.rs`, `buffer_range_tests.rs`, `buffer_yank_put_tests.rs`, deletion / paste corner cases.
-- Cursor & Grapheme Safety: `grapheme_cursor_tests.rs` (emoji, multi‑grapheme clusters) plus selection span tests.
+- Buffer & Editing: `buffer_integration.rs`, `buffer_range_tests.rs`,
+  `buffer_yank_put_tests.rs`, deletion / paste corner cases.
+- Cursor & Grapheme Safety: `grapheme_cursor_tests.rs` (emoji, multi‑grapheme
+  clusters) plus selection span tests.
 - Motions & Modes:
-  - Classic motions: covered across `g_motion_tests.rs`, `g_caret_motion_tests.rs`, `mode_tests.rs`.
-  - New extended motions: `g_motion_tests.rs` houses `gE` (WORD backward end) and `ge` (small word backward end) regression cases including punctuation (hyphen, ellipsis) and cross-line behavior.
-  - Visual / VisualLine / VisualBlock / Select / SelectLine: `visual_*`, `select_mode_tests.rs`, and `wrapped_visual_selection_tests.rs` for selection growth, wrapped line invariants, exit behavior, and typed char replacement semantics in Select modes.
-- Text Objects: `text_objects_tests.rs` (parser + finder; word/WORD, quotes, brackets, sentences, paragraphs, inner/around variants).
-- Search: `search_integration.rs` (case sensitivity, regex toggle, multiple matches, empty pattern guard).
-- Macros: `macro_tests.rs` (record/playback, register management, filtering of control keys).
-- Keymaps & Events: `keymap_tests.rs`, `events_tests.rs` (ensures dispatcher stability and no panics on representative sequences).
-- Commands & Ex Layer: `command_tests.rs`, `ex_*_tests.rs` (write, saveas, force write, buffer edge cases, :set persistence vs ephemeral).
-- Config & Persistence: `config_tests.rs`, `config_persistence_tests.rs` (hot reload, theme propagation, persisted vs session settings).
-- Window/Layout/UI: `window_tests.rs`, `resize_tests.rs`, `statusline_tests.rs`, `ui_tests.rs`, `ui_wrap_tests.rs` (viewport math, status segments, wrapping correctness, horizontal offset behavior).
+  - Classic motions: covered across `g_motion_tests.rs`,
+    `g_caret_motion_tests.rs`, `mode_tests.rs`.
+  - New extended motions: `g_motion_tests.rs` houses `gE` (WORD backward end)
+    and `ge` (small word backward end) regression cases including punctuation
+    (hyphen, ellipsis) and cross-line behavior.
+  - Visual / VisualLine / VisualBlock / Select / SelectLine: `visual_*`,
+    `select_mode_tests.rs`, and `wrapped_visual_selection_tests.rs` for
+    selection growth, wrapped line invariants, exit behavior, and typed char
+    replacement semantics in Select modes.
+- Text Objects: `text_objects_tests.rs` (parser + finder; word/WORD, quotes,
+  brackets, sentences, paragraphs, inner/around variants).
+- Search: `search_integration.rs` (case sensitivity, regex toggle, multiple
+  matches, empty pattern guard).
+- Macros: `macro_tests.rs` (record/playback, register management, filtering of
+  control keys).
+- Keymaps & Events: `keymap_tests.rs`, `events_tests.rs` (ensures dispatcher
+  stability and no panics on representative sequences).
+- Commands & Ex Layer: `command_tests.rs`, `ex_*_tests.rs` (write, saveas,
+  force write, buffer edge cases, :set persistence vs ephemeral).
+- Config & Persistence: `config_tests.rs`, `config_persistence_tests.rs` (hot
+  reload, theme propagation, persisted vs session settings).
+- Window/Layout/UI: `window_tests.rs`, `resize_tests.rs`, `statusline_tests.rs`,
+  `ui_tests.rs`, `ui_wrap_tests.rs` (viewport math, status segments, wrapping
+  correctness, horizontal offset behavior).
 - Completion: `completion_tests.rs` (basic acceptance & cycling semantics).
-- Replace / Insert Edge Cases: `replace_tests.rs`, paste & empty line handling tests.
-- Text Objects & Selection Interop: `selection_span_tests.rs`, `visual_*` variants, and Select mode tests (character/line replacement path).
+- Replace / Insert Edge Cases: `replace_tests.rs`, paste & empty line
+  handling tests.
+- Text Objects & Selection Interop: `selection_span_tests.rs`, `visual_*`
+  variants, and Select mode tests (character/line replacement path).
 
-Some focused regression files carry a short doc comment (`//!`) at top describing the bug they lock in (e.g., visual mode exit, wrapped selection growth). When adding a regression, prefer appending to the most related existing file instead of creating a new one, unless the scenario is substantial and orthogonal.
+Some focused regression files carry a short doc comment (`//!`) at top
+describing the bug they lock in (e.g., visual mode exit, wrapped selection
+growth). When adding a regression, prefer appending to the most related
+existing file instead of creating a new one, unless the scenario is
+substantial and orthogonal.
 
 ### Style & Conventions
 
-- Favor constructing minimal Buffers (helper constructors inside test files) instead of spinning a full `EventDrivenEditor` unless validating event threading / rendering interactions.
-- Tests treat positions as byte indices but rely on helper methods (e.g., grapheme boundary utilities) indirectly through Buffer APIs; avoid manual slicing of potentially multi-byte graphemes.
-- For motions that depend on classification (word vs WORD vs punctuation), each new motion gets: baseline behavior test, punctuation boundary test, whitespace/line-boundary test, buffer-start stability test, and (if relevant) multi-step repetition test.
-- Visual selection tests assert both existence and span correctness without assuming selection ordering (direction preserved internally).
-- Avoid sleeping or timing assertions; async syntax highlighting is validated structurally (enqueues & cache mechanics) elsewhere, not via timing-sensitive tests (worker thread currently lightly exercised – deeper integration tests can be introduced when LSP matures).
+- Favor constructing minimal Buffers (helper constructors inside test files)
+  instead of spinning a full `EventDrivenEditor` unless validating event
+  threading / rendering interactions.
+- Tests treat positions as byte indices but rely on helper methods (e.g.,
+  grapheme boundary utilities) indirectly through Buffer APIs; avoid manual
+  slicing of potentially multi-byte graphemes.
+- For motions that depend on classification (word vs WORD vs punctuation),
+  each new motion gets: baseline behavior test, punctuation boundary test,
+  whitespace/line-boundary test, buffer-start stability test, and (if
+  relevant) multi-step repetition test.
+- Visual selection tests assert both existence and span correctness without
+  assuming selection ordering (direction preserved internally).
+- Avoid sleeping or timing assertions; async syntax highlighting is validated
+  structurally (enqueues & cache mechanics) elsewhere, not via
+  timing-sensitive tests (worker thread currently lightly exercised – deeper
+  integration tests can be introduced when LSP matures).
 
 ### Adding New Tests
 
 1. Pick the closest existing file by domain; append tests near similar cases.
-2. Name with clear intent: `feature_condition_expectedOutcome` or `regression_issueDescription`.
-3. For regressions, add a short comment referencing the scenario (“Regression: previously panic when …”).
-4. Prefer explicit indices / cursor setup over derived logic to keep failures obvious.
-5. If introducing a new motion/operator: mirror the existing gE/ge pattern (baseline, punctuation, cross-line, start-of-buffer, repetition).
+2. Name with clear intent: `feature_condition_expectedOutcome` or
+   `regression_issueDescription`.
+3. For regressions, add a short comment referencing the scenario (“Regression:
+   previously panic when …”).
+4. Prefer explicit indices / cursor setup over derived logic to keep failures
+   obvious.
+5. If introducing a new motion/operator: mirror the existing gE/ge pattern
+   (baseline, punctuation, cross-line, start-of-buffer, repetition).
 
 ### Running Tests
 
@@ -262,7 +357,8 @@ Some focused regression files carry a short doc comment (`//!`) at top describin
 - Single test (exact):
   - `cargo test --test g_motion_tests ge_hyphen_treated_as_separate_word`
 
-Clippy (lint gate) should stay clean before committing motion or buffer changes:
+Clippy (lint gate) should stay clean before committing motion or buffer
+changes:
 
 ```console
 cargo clippy -- -D warnings
@@ -270,13 +366,18 @@ cargo clippy -- -D warnings
 
 ### Future Enhancements
 
-- Add targeted async syntax pipeline tests exercising version invalidation & LRU eviction ordering (currently validated indirectly via rendering path assumptions).
-- Introduce property tests (e.g., shrinking random edit sequences ensure undo stack invariants) using `proptest` once core APIs stabilize.
+- Add targeted async syntax pipeline tests exercising version invalidation &
+  LRU eviction ordering (currently validated indirectly via rendering path
+  assumptions).
+- Introduce property tests (e.g., shrinking random edit sequences ensure undo
+  stack invariants) using `proptest` once core APIs stabilize.
 - LSP client integration tests (scaffold only today).
 
 ### Guiding Principle
 
-Keep tests descriptive, minimal, and colocated with similar behavior. Fast feedback (sub‑second `cargo test`) is a priority; defer heavier end‑to‑end benchmarks to `benches/` or future integration harnesses.
+Keep tests descriptive, minimal, and colocated with similar behavior. Fast
+feedback (sub‑second `cargo test`) is a priority; defer heavier end‑to‑end
+benchmarks to `benches/` or future integration harnesses.
 
 ## Alternatives and trade-offs
 
@@ -302,9 +403,9 @@ Keep tests descriptive, minimal, and colocated with similar behavior. Fast feedb
 
 - Render lifecycle
   - Editor::render clones only buffers currently visible in windows (reduces
-    work on large projects). It assembles EditorRenderState that includes mode,
-    status, command line, current window layout, visible syntax highlights,
-    completion state, and the current config snapshot.
+    work on large projects). It assembles EditorRenderState that includes
+    mode, status, command line, current window layout, visible syntax
+    highlights, completion state, and the current config snapshot.
   - UI::render drives terminal drawing and status/command lines based on that
     state. Terminal size is refreshed each draw to adapt to late resizes.
 
@@ -319,9 +420,9 @@ Keep tests descriptive, minimal, and colocated with similar behavior. Fast feedb
   See diagram: [Viewport motions (zz / zt / zb)](#viewport-motions-zz--zt--zb).
 
 - Status line content
-  - Left: mode, filename, modified flag. Middle: status message. Right: cursor
-    pos, indent style/width, encoding, EOL, filetype, macro REC, search index,
-    and progress. Each segment can be toggled via config.
+  - Left: mode, filename, modified flag. Middle: status message. Right:
+    cursor pos, indent style/width, encoding, EOL, filetype, macro REC,
+    search index, and progress. Each segment can be toggled via config.
 
 - Ex commands and settings
   - utils/command.rs implements :w, :q, :bd, :e, :ls, split/vsplit/close, etc.
@@ -330,12 +431,16 @@ Keep tests descriptive, minimal, and colocated with similar behavior. Fast feedb
 
 ## Buffer Lifecycle and MRU Fallback
 
-- Editor tracks last_buffer_id as a simple MRU hint. When closing the current buffer via :bd (or :bd!), Editor:
+- Editor tracks last_buffer_id as a simple MRU hint. When closing the current
+  buffer via :bd (or :bd!), Editor:
   - Validates modified state unless forced.
   - Removes the buffer from the collection.
-  - Chooses a fallback buffer: most-recently-used if available; otherwise the lowest-id remaining; if none remain, creates an empty buffer.
-  - Retargets all windows that were showing the closed buffer to the fallback, synchronizing window cursors from buffer state.
-  - Requests visible-lines highlighting and a redraw, so the UI updates immediately.
+  - Chooses a fallback buffer: most-recently-used if available; otherwise the
+    lowest-id remaining; if none remain, creates an empty buffer.
+  - Retargets all windows that were showing the closed buffer to the fallback,
+    synchronizing window cursors from buffer state.
+  - Requests visible-lines highlighting and a redraw, so the UI updates
+    immediately.
 
 See diagrams:
 
@@ -349,13 +454,14 @@ See diagrams:
 - Search, text objects, and macros
   - SearchEngine supports case sensitivity and smartcase behavior. Results are
     integrated into statusline and navigation commands.
-  - Text objects parse motions like iw, aw, i(, a", paragraphs, sentences, etc.
+  - Text objects parse motions like iw, aw, i(, a", paragraphs, sentences,
+    etc.
   - MacroRecorder handles q/<register> recording, @ and @@ playback.
 
 - LSP (current state)
   - features/lsp.rs is a scaffold for future JSON-RPC client integration
-    (completions, diagnostics). The architecture leaves a dedicated EditorEvent
-    branch for LSP to plug into the event loop without blocking.
+    (completions, diagnostics). The architecture leaves a dedicated
+    EditorEvent branch for LSP to plug into the event loop without blocking.
 
 ## Operational tips
 
@@ -369,7 +475,7 @@ See diagrams:
   - Bumping highlight_version is cheap and a good way to invalidate in-flight
     work after big changes (theme switch, large scrolls).
 
-## ASCII diagrams (visual overview)
+## Diagrams (visual overview)
 
 ### Diagrams index
 
@@ -394,31 +500,18 @@ Legend:
 - crossbeam channels: work_tx (bounded) and result_rx (unbounded) for syntax.
 - RedrawRequest triggers Editor::render and UI drawing.
 
-```text
-+---------------------+                    +--------------------+
-| Input thread (poll) |------------------->|  Event bus (mpsc)  |
-+---------------------+                    | (EditorEvent chan) |
-  ^                                        +--------------------+
-  |                                                  ^
- crossterm::event                                    |
-                                                     |
-+------------------------+                           |
-| Config watcher thread  |---------------------------+
-+------------------------+
+Mermaid (rendered):
 
-+------------------------+        result_rx        +--------------------+
-| Syntax dispatcher thr. |<------------------------|    Async worker    |
-+------------------------+                         |    (Tree-sitter)   |
-  | apply results                                  +--------------------+
-  v
-+-----------------+         work_tx (bounded)
-|     Editor      |--------------------------------------+
-+-----------------+                                      |
-  | render()                                             |
-  v                                                      v
-+-----------------+        draw commands           +--------------------+
-|       UI        |------------------------------->|      Terminal      |
-+-----------------+                                +--------------------+
+```mermaid
+graph LR
+  Input[Input thread - poll] --> Bus[Event bus - mpsc]
+  Config[Config watcher thread] --> Bus
+  Bus -->|EditorEvent| Editor
+  Editor -->|work_tx bounded| Worker[Async worker - Tree-sitter]
+  Worker -->|result_rx unbounded| Dispatcher[Syntax dispatcher thread]
+  Dispatcher -->|apply results| Editor
+  Editor -->|render draw| UI[UI]
+  UI --> Terminal[Terminal]
 ```
 
 ### Async syntax highlighting pipeline (with versioning and cache)
@@ -429,34 +522,37 @@ Legend:
 - version is monotonic; results with result.version < highlight_version are dropped.
 - Priority order: Critical > High > Medium > Low.
 
-```text
-[Editor] --request_visible_line_highlighting--> (work_tx, bounded 256)
-  |                                                 |
-  | enqueues WorkItem { buffer_id, line_index, full_content,
-  |                     language, priority, version }
-  v                                                 v
-          +----------------------------+
-          | Worker thread              |
-          | - coalesce by (buf,line)   |
-          | - prefer higher priority   |
-          | - parse with Tree-sitter   |
-          +-------------+--------------+
-               |
-          HighlightResult
-               v  (result_tx, unbounded)
-          +-------------+--------------+
-          | Syntax dispatcher thread   |
-          | - drop if result.version < |
-          |   editor.highlight_version |
-          | - editor.apply_* (cache)   |
-          | - send UI RedrawRequest    |
-          +-------------+--------------+
-               |
-               v
-        [AsyncSyntaxHighlighter cache (LRU)]
+Mermaid (rendered):
+
+```mermaid
+flowchart LR
+  Editor[Editor] -->|enqueue WorkItem| Work[(work_tx\\nbounded 256)]
+  Work --> Worker[Worker thread]
+  Worker --> Result[(result_tx\\nunbounded)]
+  Result --> Dispatcher[Syntax dispatcher]
+  Dispatcher -->|drop stale; cache;\\nsend RedrawRequest| Editor
+  Dispatcher --> Cache[[AsyncSyntaxHighlighter LRU cache]]
 ```
 
 ### Window layout and splits (example)
+
+Mermaid (rendered):
+
+```mermaid
+flowchart TB
+  subgraph Terminal - width x height
+    subgraph Window_1 - id 1
+    end
+    subgraph Window_2 - id 2
+    end
+    subgraph Window_3
+      direction TB
+      VTop[viewport_top=...]
+    end
+    Status[[Status line]]
+    Cmd[[Command line - optional]]
+  end
+```
 
 Legend:
 
@@ -464,39 +560,22 @@ Legend:
 - Each window tracks viewport_top and horiz_offset independently.
 - Active window id controls cursor-line highlight.
 
-```text
-+---------------- Terminal (width x height) ----------------+
-| +----------+ +----------------------------+               |
-| | Window 1 | |          Window 2          |               |
-| | (id=1)   | | (id=2)                     |               |
-| | buf=...  | | buf=...                    |               |
-| +----------+ +----------------------------+               |
-| +--------------------------+ +-------------+              |
-| |        Window 3          | |  Status     |              |
-| | viewport_top=...         | |  line       |              |
-| +--------------------------+ +-------------+              |
-| Command line (optional)                                   |
-+-----------------------------------------------------------+
-```
-
 ### Rendering: gutter, wrapping, and highlights
 
-```text
-Legend: '#' = gutter (numbers/marks), '|' = column boundary
+Mermaid (rendered):
 
-Row view (no wrap):
-####|This is a line of text...              |
-####|Next line ...                          |
-
-Wrap enabled (width=12):
-####|fn main() {       |
-    |    println!("hi");
-    |}                  |
-
-Highlight shifting:
-- Base line bytes [0..N), slice by horiz_offset/wrap to display_slice.
-- Each HighlightRange {start,end} is shifted by slice.start before draw.
+```mermaid
+flowchart TB
+  A[Row view] --> B{Wrap enabled?}
+  B -- No --> C[Compute gutter width]
+  B -- Yes --> D[Wrap by display columns - unicode-width]
+  C --> E[Slice by horiz_offset]
+  D --> E
+  E --> F[Shift HighlightRange by slice.start]
+  F --> G[Draw]
 ```
+
+Legend: '#' = gutter (numbers/marks), '|' = column boundary
 
 Notes:
 
@@ -511,144 +590,136 @@ Legend:
 - Current capacity: 2048 entries; theme update clears all entries.
 - Buffer-specific invalidation is supported (drop all K where K.buffer_id == X).
 
-```text
-Keys: (buffer_id, line_index)
+Mermaid (rendered):
 
-Map<K,V>  <---->  Order (VecDeque<K>)
-           [oldest]  k1  k2  ...  kn  [newest]
-
-get(k):   return map[k]; move k to newest end in Order
-put(k,v):  if k exists, replace and move to newest
-     else if len == cap, evict oldest: pop_front -> remove from map
-     then insert (k,v) at newest
-
-Theme update -> clear() -> drop all entries; visible lines re-enqueued
+```mermaid
+flowchart TB
+  Start[Start] --> Get{get key?}
+  Get -- yes --> Move[return value and move key to newest]
+  Get -- no --> Put{put key-value?}
+  Put -- no --> End[End]
+  Put -- yes --> Exists{key exists?}
+  Exists -- yes --> Replace[replace and move to newest]
+  Exists -- no --> Full{is full?}
+  Full -- yes --> Evict[evict oldest then remove]
+  Full -- no --> Insert[insert at newest]
+  Evict --> Insert
+  Replace --> End
+  Insert --> End
 ```
 
 ### Buffer close (MRU fallback) sequence
 
-```text
-:bd / :bd!  -->  [Editor]
-  |             |
-  |             +-- if modified && !force -> abort with status
-  |             |
-  |             +-- choose_fallback(closed_id):
-  |                   MRU (last_buffer_id) if exists
-  |                   else lowest-id remaining
-  |                   else create empty buffer
-  |             |
-  |             +-- WindowManager.retarget_all(closed_id -> fallback_id)
-  |             +-- sync window cursors from fallback buffer
-  |             +-- request_visible_line_highlighting(fallback_id)
-  v             +-- send RedrawRequest
-[UI redraws]
+Mermaid (rendered):
+
+```mermaid
+flowchart TB
+  A[:bd / :bd!] --> B{modified and not force?}
+  B -- yes --> Abort[Abort with status]
+  B -- no --> C[choose fallback - closed id; MRU else lowest id else empty]
+  C --> D[retarget windows to fallback]
+  D --> E[sync window cursors]
+  E --> F[request visible line highlighting]
+  F --> G[send RedrawRequest]
+  G --> UI[[UI redraws]]
 ```
 
 ### RenderState diff and redraw decision (hybrid strategy)
 
-```text
-[Prev RS]
-  (mode, window_id, viewport_top, horiz_offset,
-  needs_syntax_refresh, completion_popup, status)
-    |
-    | xdiff
-    v
-[New RS]
-  (mode, window_id, viewport_top, horiz_offset,
-  needs_syntax_refresh, completion_popup, status)
-    |
-    | any_delta?
-  +-- yes --> RedrawRequest --> UI::render
-  +--  no --> idle (await events)
+Mermaid (rendered):
 
-Notes:
-- Explicit redraws still occur for operations with side-effects (e.g., z-motions),
-  while RS fields catch viewport-only changes safely.
+```mermaid
+flowchart TB
+  P[Prev RS - mode, window id, viewport top, horiz offset, needs syntax refresh, completion popup, status] --> Diff[xdiff]
+  Diff --> N[New RS - mode, window id, viewport top, horiz offset, needs syntax refresh, completion popup, status]
+  N --> Delta{any delta?}
+  Delta -- yes --> Redraw[RedrawRequest to UI render]
+  Delta -- no --> Idle[[idle]]
 ```
 
 ### Buffer switch/bind flow
 
-```text
-switch_to_buffer(id) --> [Editor]
-  |  +-- bind current_window.buffer_id = id
-  |  +-- window.cursor = buffer.cursor (sync)
-  |  +-- request_visible_line_highlighting(id)
-  v  +-- RedrawRequest
-[UI redraws]
+Mermaid (rendered):
+
+```mermaid
+flowchart TB
+  S[switch to buffer - id] --> Bind[bind current_window.buffer_id = id]
+  Bind --> Sync[window.cursor = buffer.cursor]
+  Sync --> HL[request visible line highlighting - id]
+  HL --> Redraw[RedrawRequest]
+  Redraw --> UI[[UI redraws]]
 ```
 
 ### Viewport motions (zz / zt / zb)
 
-```text
-Before: viewport_top = T, cursor_row = C, height = H
+Mermaid (rendered):
 
-zz -> viewport_top = C - floor((H - reserved_rows) / 2)
-zt -> viewport_top = C
-zb -> viewport_top = C - (H - reserved_rows - 1)
-
-Then: request_visible_line_highlighting() + RedrawRequest (immediate update)
+```mermaid
+flowchart TB
+  Start[Before - viewport top T, cursor row C, height H] --> Choice{Motion}
+  Choice -- zz --> ZZ[set viewport top to center on cursor]
+  Choice -- zt --> ZT[set viewport top to cursor row]
+  Choice -- zb --> ZB[set viewport top to bottom align cursor]
+  ZZ --> After[request visible line highlighting and RedrawRequest]
+  ZT --> After
+  ZB --> After
 ```
 
 ### Ex command pipeline with completion
 
-```text
-":" input --> Completion engine
-  |            - canonical + alias columns
-  |            - values/lists (numbers, booleans, themes, paths)
-  v
-selection --> utils/command.rs execute --> [Editor mutate]
-  |            - :set (session) / :setp (persist)
-  |            - :e/:w/:bd/:bn/:bp/:reg ...
-  +--> statusline update, maybe RedrawRequest --> UI
+Mermaid (rendered):
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant CE as Completion engine
+  participant CMD as utils/command.rs
+  participant E as Editor
+  participant UI as UI
+  U->>CE: colon input
+  Note right of CE: canonical and alias columns, values and lists
+  CE-->>U: selection
+  U->>CMD: execute
+  CMD->>E: mutate - set or setp, e w bd, etc
+  E-->>UI: status line update and maybe RedrawRequest
 ```
 
 Notes:
 
-- The completion engine is modular (engine + presenter + providers). Providers gather items; the presenter normalizes/filters/sorts; the engine maintains UI state and accept behavior.
-- See docs/COMPLETION.md for the detailed rules and a sequence diagram of the flow.
+- The completion engine is modular (engine + presenter + providers).
+  Providers gather items; the presenter normalizes/filters/sorts; the engine
+  maintains UI state and accept behavior.
+- See docs/COMPLETION.md for the detailed rules and a sequence diagram of the
+  flow.
 
 #### Component overview (completion)
 
-```text
-":" input
-  |
-  v
-+--------------------+       +-------------------+
-|  CommandCompletion | ----> |  ProviderRegistry |
-|  (Engine: state &  |       +-------------------+
-|   accept behavior) |                |
-+--------------------+                v
-       |                         [Providers]
-       |                    (ExCmds, SetOptions,
-       |                      Buffers, Files,
-       |                      Themes, Hints)
-       v                                
-+--------------------+  normalized/filtered/sorted  
-|   Presenter        | <---------------------------+
-| (DefaultPresenter) |
-+--------------------+
-       |
-       v
- Multi-column popup (UI)
-       |
-       v
-   Accept -> toggle-aware insertion (set vs setp preserved)
+Mermaid (rendered):
+
+```mermaid
+graph LR
+  Engine[CommandCompletion - engine state and accept behavior] --> Registry[ProviderRegistry]
+  Registry --> Providers[[Providers - ExCmds, SetOptions, Buffers, Files, Themes, Hints]]
+  Engine --> Presenter[Presenter - default presenter]
+  Presenter --> UI[Multi-column popup - UI]
+  UI --> Accept[Accept - toggle aware insertion - set vs setp preserved]
 ```
 
 ### Config hot-reload path
 
-```text
-FS change (editor.toml/keymaps.toml/themes.toml)
-  |
-  v
-[Config watcher] --> ConfigEvent --> [EventDrivenEditor]
-  |                                        |
-  |                              apply to Editor.config
-  |                                        |
-  |                          if theme -> clear highlight cache,
-  |                                      re-enqueue visible lines
-  v                                        |
-RedrawRequest -----------------------------+
+Mermaid (rendered):
+
+```mermaid
+flowchart TB
+  FS[FS change - editor.toml, keymaps.toml, themes.toml] --> Watcher[Config watcher]
+  Watcher --> EDE[EventDrivenEditor]
+  EDE --> Apply[apply to Editor config]
+  Apply --> Theme{theme change?}
+  Theme -- yes --> Clear[clear highlight cache]
+  Clear --> Reenqueue[re enqueue visible lines]
+  Theme -- no --> Skip[[skip]]
+  Reenqueue --> Redraw[RedrawRequest]
+  Skip --> Redraw
 ```
 
 ## FAQs
@@ -667,37 +738,70 @@ RedrawRequest -----------------------------+
 
 ## Glossary
 
-- Editor: Central orchestrator (core/editor.rs) managing buffers, windows, UI, input, search, macros, and async syntax.
-- Buffer: In-memory file/text model (core/buffer.rs) with lines, cursor, selection, undo/redo, marks, clipboard.
-- Window/WindowManager: Split layout and per-window viewport/horizontal offset control (core/window.rs).
-- UI/Renderer: Drawing logic over the Terminal; renders buffers, status/command lines, highlights (ui/renderer.rs).
-- Terminal: Thin wrapper over crossterm for buffered terminal IO (ui/terminal.rs).
-- EventDrivenEditor: Runtime that spawns input, config watcher, syntax dispatcher threads and processes EditorEvents (input/event_driven.rs).
-- Event bus: mpsc::Sender/Receiver channel that carries typed EditorEvent enums among threads.
-- Input thread: Polls crossterm events at EVENT_TICK_MS, converts to InputEvent, sends to the bus.
-- Config watcher: Watches editor/keymap/theme files, emits ConfigEvent; blocks on filesystem notifications (config/watcher.rs).
-- AsyncSyntaxHighlighter: Background worker + cache managing per-line highlights using Tree-sitter (features/syntax.rs).
-- SyntaxHighlighter: Per-thread parser/theme that computes HighlightRange values from text (features/syntax.rs).
-- HighlightRange: Byte range [start,end) with a HighlightStyle applied by the renderer.
-- Priority: Scheduling hint for syntax requests: Critical (cursor), High (visible), Medium/Low (nearby/background).
-- highlight_version: Atomic counter on Editor; bumps invalidate in-flight syntax results to avoid stale flashes.
-- LRU cache: Small per-line highlight cache in AsyncSyntaxHighlighter keyed by (buffer_id, line_index) with fixed capacity.
-- WorkItem: A syntax job: buffer_id, line_index, full_content, language, priority, version.
-- HighlightResult: Output of the worker for a single line; validated by dispatcher then cached.
-- RenderState: Compact snapshot in EventDrivenEditor for change detection between redraws.
-- EditorRenderState: Full state passed to UI::render (buffers shown, layout, highlights, status, config).
-- Mode: Editor mode (Normal, Insert, Replace, Visual, VisualLine, VisualBlock, Command, Search, OperatorPending).
-- Selection: Visual selections or operator ranges tracked with line/column positions.
-- Viewport/horiz_offset: Vertical top row and horizontal column offset used for rendering visible slices.
-  - RenderState includes the current window id, viewport_top, and horiz_offset so viewport-only changes (e.g., zz/zt/zb, horizontal scroll) trigger redraws even when the cursor doesn’t move.
-- Gutter: Left column for line numbers and/or marks; width computed per buffer length and settings.
-- Wrap: Grapheme-aware wrapping of logical lines into multiple rows within a window’s content width.
-- ThemeConfig/UITheme/SyntaxTheme: Theme system loaded from themes.toml; UI colors and syntax mappings.
-- CommandCompletion: Command-line completion engine for : commands and paths (features/completion::engine). See docs/COMPLETION.md for behavior and architecture details.
-- SearchEngine: Text search subsystem with case sensitivity and smartcase (features/search.rs).
+- Editor: Central orchestrator (core/editor.rs) managing buffers, windows,
+  UI, input, search, macros, and async syntax.
+- Buffer: In-memory file/text model (core/buffer.rs) with lines, cursor,
+  selection, undo/redo, marks, clipboard.
+- Window/WindowManager: Split layout and per-window viewport/horizontal
+  offset control (core/window.rs).
+- UI/Renderer: Drawing logic over the Terminal; renders buffers,
+  status/command lines, highlights (ui/renderer.rs).
+- Terminal: Thin wrapper over crossterm for buffered terminal IO
+  (ui/terminal.rs).
+- EventDrivenEditor: Runtime that spawns input, config watcher, syntax
+  dispatcher threads and processes EditorEvents (input/event_driven.rs).
+- Event bus: mpsc::Sender/Receiver channel that carries typed EditorEvent
+  enums among threads.
+- Input thread: Polls crossterm events at EVENT_TICK_MS, converts to
+  InputEvent, sends to the bus.
+- Config watcher: Watches editor/keymap/theme files, emits ConfigEvent;
+  blocks on filesystem notifications (config/watcher.rs).
+- AsyncSyntaxHighlighter: Background worker + cache managing per-line
+  highlights using Tree-sitter (features/syntax.rs).
+- SyntaxHighlighter: Per-thread parser/theme that computes HighlightRange
+  values from text (features/syntax.rs).
+- HighlightRange: Byte range [start,end) with a HighlightStyle applied by the
+  renderer.
+- Priority: Scheduling hint for syntax requests: Critical (cursor), High
+  (visible), Medium/Low (nearby/background).
+- highlight_version: Atomic counter on Editor; bumps invalidate in-flight
+  syntax results to avoid stale flashes.
+- LRU cache: Small per-line highlight cache in AsyncSyntaxHighlighter keyed by
+  (buffer_id, line_index) with fixed capacity.
+- WorkItem: A syntax job: buffer_id, line_index, full_content, language,
+  priority, version.
+- HighlightResult: Output of the worker for a single line; validated by
+  dispatcher then cached.
+- RenderState: Compact snapshot in EventDrivenEditor for change detection
+  between redraws.
+- EditorRenderState: Full state passed to UI::render (buffers shown, layout,
+  highlights, status, config).
+- Mode: Editor mode (Normal, Insert, Replace, Visual, VisualLine,
+  VisualBlock, Command, Search, OperatorPending).
+- Selection: Visual selections or operator ranges tracked with line/column
+  positions.
+- Viewport/horiz_offset: Vertical top row and horizontal column offset used
+  for rendering visible slices.
+  - RenderState includes the current window id, viewport_top, and
+    horiz_offset so viewport-only changes (e.g., zz/zt/zb, horizontal
+    scroll) trigger redraws even when the cursor doesn’t move.
+- Gutter: Left column for line numbers and/or marks; width computed per
+  buffer length and settings.
+- Wrap: Grapheme-aware wrapping of logical lines into multiple rows within a
+  window’s content width.
+- ThemeConfig/UITheme/SyntaxTheme: Theme system loaded from themes.toml; UI
+  colors and syntax mappings.
+- CommandCompletion: Command-line completion engine for : commands and paths
+  (features/completion::engine). See docs/COMPLETION.md for behavior and
+  architecture details.
+- SearchEngine: Text search subsystem with case sensitivity and smartcase
+  (features/search.rs).
 - MacroRecorder: Records/plays macros via registers (features/macros.rs).
-- TextObjectFinder: Finds text object ranges for operators (features/text_objects.rs).
-- LSP (stub): Scaffold for Language Server Protocol client integration (features/lsp.rs).
+- TextObjectFinder: Finds text object ranges for operators
+  (features/text_objects.rs).
+- LSP (stub): Scaffold for Language Server Protocol client integration
+  (features/lsp.rs).
 - crossterm: Terminal input/output library used for events and rendering.
 - tree-sitter: Incremental parsing library used to power syntax highlighting.
-- crossbeam-channel/std::mpsc: Channels used for async pipelines and event bus communication.
+- crossbeam-channel/std::mpsc: Channels used for async pipelines and event
+  bus communication.
