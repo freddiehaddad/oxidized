@@ -7,99 +7,88 @@ use std::fs;
 /// Complete theme configuration with UI and syntax colors
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThemeConfig {
-    pub theme: ThemeSelection,
-    pub themes: HashMap<String, Theme>,
+    pub theme: ThemeSelection,          // Active theme selection
+    pub themes: HashMap<String, Theme>, // All available themes by name
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThemeSelection {
-    pub current: String,
+    pub current: String, // Name of the current active theme
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Theme {
-    pub name: String,
-    pub description: String,
-    pub ui: UIColors,
-    pub tree_sitter: HashMap<String, String>, // Direct node type -> color mappings (now required)
+    pub name: String,                         // Human-friendly theme name
+    pub description: String,                  // Short description for the theme
+    pub ui: UIColors,                         // UI color palette
+    pub tree_sitter: HashMap<String, String>, // Tree-sitter node type -> color hex mappings
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StatusLineColors {
-    pub left_bg: String,
-    pub left_fg: String,
-    pub mid_bg: String,
-    pub mid_fg: String,
-    pub right_bg: String,
-    pub right_fg: String,
+    pub left_bg: String,  // Left segment background color
+    pub left_fg: String,  // Left segment foreground (text) color
+    pub mid_bg: String,   // Middle segment background color
+    pub mid_fg: String,   // Middle segment foreground (text) color
+    pub right_bg: String, // Right segment background color
+    pub right_fg: String, // Right segment foreground (text) color
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModeColors {
-    pub normal_bg: String,
-    pub normal_fg: String,
-    pub insert_bg: String,
-    pub insert_fg: String,
-    pub visual_bg: String,
-    pub visual_fg: String,
-    pub visual_line_bg: String,
-    pub visual_line_fg: String,
-    pub visual_block_bg: String,
-    pub visual_block_fg: String,
-    pub select_bg: String,
-    pub select_fg: String,
-    pub select_line_bg: String,
-    pub select_line_fg: String,
-    pub replace_bg: String,
-    pub replace_fg: String,
-    pub command_bg: String,
-    pub command_fg: String,
+    pub normal_bg: String,       // Statusline mode badge background (Normal)
+    pub normal_fg: String,       // Statusline mode badge text (Normal)
+    pub insert_bg: String,       // Statusline mode badge background (Insert)
+    pub insert_fg: String,       // Statusline mode badge text (Insert)
+    pub visual_bg: String,       // Statusline mode badge background (Visual)
+    pub visual_fg: String,       // Statusline mode badge text (Visual)
+    pub visual_line_bg: String,  // Statusline mode badge background (Visual Line)
+    pub visual_line_fg: String,  // Statusline mode badge text (Visual Line)
+    pub visual_block_bg: String, // Statusline mode badge background (Visual Block)
+    pub visual_block_fg: String, // Statusline mode badge text (Visual Block)
+    pub select_bg: String,       // Statusline mode badge background (Select)
+    pub select_fg: String,       // Statusline mode badge text (Select)
+    pub select_line_bg: String,  // Statusline mode badge background (Select Line)
+    pub select_line_fg: String,  // Statusline mode badge text (Select Line)
+    pub replace_bg: String,      // Statusline mode badge background (Replace)
+    pub replace_fg: String,      // Statusline mode badge text (Replace)
+    pub command_bg: String,      // Statusline mode badge background (Command)
+    pub command_fg: String,      // Statusline mode badge text (Command)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UIColors {
-    pub background: String,
-    pub status_bg: String,
-    pub status_fg: String,
-    pub status_modified: String,
-    pub line_number: String,
-    pub line_number_current: String,
-    /// Color of the mark indicator rendered in the number column
-    #[serde(default = "default_mark_color")]
-    pub mark_indicator: String,
-    pub cursor_line_bg: String,
-    pub empty_line: String,
-    pub command_line_bg: String,
-    pub command_line_fg: String,
-    /// Completion popup key column foreground
-    #[serde(default = "default_completion_key_fg")]
-    pub completion_key_fg: String,
-    /// Completion popup alias column foreground
-    #[serde(default = "default_completion_alias_fg")]
-    pub completion_alias_fg: String,
-    /// Completion popup value column foreground
-    #[serde(default = "default_completion_value_fg")]
-    pub completion_value_fg: String,
-    /// Completion popup description column foreground
-    pub completion_desc_fg: String,
-    /// Completion popup background for unselected rows
-    pub completion_menu_bg: String,
-    /// Completion popup background for the selected row
-    pub completion_selected_bg: String,
-    pub selection_bg: String,
-    pub visual_line_bg: String,  // Line-wise visual selection background
-    pub visual_char_bg: String,  // Character-wise visual selection background
-    pub visual_block_bg: String, // Block-wise visual selection background (future)
-    pub select_char_bg: String,  // Character-wise select mode background
-    pub select_line_bg: String,  // Line-wise select mode background
-    pub warning: String,
-    pub error: String,
+    pub background: String,             // Editor background
+    pub status_bg: String,              // Statusline background
+    pub status_fg: String,              // Statusline foreground text
+    pub status_modified: String,        // Statusline accent when buffer is modified
+    pub line_number: String,            // Gutter line numbers
+    pub line_number_current: String,    // Current line number highlight
+    pub mark_indicator: String,         // Mark indicator color in number column
+    pub cursor_line_bg: String,         // Current cursor line background
+    pub empty_line: String,             // Filler for lines past end-of-file
+    pub command_line_bg: String,        // ':' command-line background
+    pub command_line_fg: String,        // ':' command-line text color
+    pub completion_key_fg: String,      // Completion popup key/action column
+    pub completion_alias_fg: String,    // Completion popup alias/opposite column
+    pub completion_value_fg: String,    // Completion popup current value column
+    pub completion_desc_fg: String,     // Completion popup description column
+    pub completion_menu_bg: String,     // Completion popup background (unselected rows)
+    pub completion_selected_bg: String, // Completion popup background (selected row)
+    pub selection_bg: String,           // Generic selection background (fallback)
+    pub visual_line_bg: String,         // Line-wise visual selection background
+    pub visual_char_bg: String,         // Character-wise visual selection background
+    pub visual_block_bg: String,        // Block-wise visual selection background (future)
+    pub select_char_bg: String,         // Character-wise select mode background
+    pub select_line_bg: String,         // Line-wise select mode background
+    pub warning: String,                // Warning text/accent color
+    pub error: String,                  // Error text/accent color
     /// Optional: granular status line colors per segment
     #[serde(default)]
-    pub statusline: Option<StatusLineColors>,
+    pub statusline: Option<StatusLineColors>, // Optional: granular status line colors per segment
     /// Optional: per-mode colors for mode indicator in status line
     #[serde(default)]
-    pub mode: Option<ModeColors>,
+    pub mode: Option<ModeColors>, // Optional: per-mode colors for status line badges
 }
 
 // Removed SyntaxColors and RustSpecificColors - using only tree_sitter node mappings now
@@ -107,56 +96,54 @@ pub struct UIColors {
 /// UI theme that uses colors from themes.toml
 #[derive(Debug, Clone)]
 pub struct UITheme {
-    pub background: Color,
-    pub status_bg: Color,
-    pub status_fg: Color,
-    pub status_modified: Color,
-    // Optional per-segment status line colors
-    pub status_left_bg: Color,
-    pub status_left_fg: Color,
-    pub status_mid_bg: Color,
-    pub status_mid_fg: Color,
-    pub status_right_bg: Color,
-    pub status_right_fg: Color,
-    pub line_number: Color,
-    pub line_number_current: Color,
-    /// Color used for the mark indicator rendered in the number column
-    pub mark_indicator: Color,
-    pub cursor_line_bg: Color,
-    pub empty_line: Color,
-    pub command_line_bg: Color,
-    pub command_line_fg: Color,
-    pub completion_key_fg: Color,
-    pub completion_alias_fg: Color,
-    pub completion_value_fg: Color,
-    pub completion_desc_fg: Color,
-    pub completion_menu_bg: Color,
-    pub completion_selected_bg: Color,
-    pub selection_bg: Color,
-    pub visual_line_bg: Color,  // Line-wise visual selection background
-    pub visual_char_bg: Color,  // Character-wise visual selection background
-    pub visual_block_bg: Color, // Block-wise visual selection background (future)
-    pub select_char_bg: Color,  // Character-wise select mode background
-    pub select_line_bg: Color,  // Line-wise select mode background
-    pub warning: Color,
-    pub error: Color,
-    pub mode_colors: ModeThemeColors,
+    pub background: Color,             // Editor background color
+    pub status_bg: Color,              // Statusline background color
+    pub status_fg: Color,              // Statusline text color
+    pub status_modified: Color,        // Statusline modified/accent color
+    pub status_left_bg: Color,         // Left segment background
+    pub status_left_fg: Color,         // Left segment text
+    pub status_mid_bg: Color,          // Middle segment background
+    pub status_mid_fg: Color,          // Middle segment text
+    pub status_right_bg: Color,        // Right segment background
+    pub status_right_fg: Color,        // Right segment text
+    pub line_number: Color,            // Gutter line numbers
+    pub line_number_current: Color,    // Current line number highlight
+    pub mark_indicator: Color,         // Mark indicator in number column
+    pub cursor_line_bg: Color,         // Current cursor line background
+    pub empty_line: Color,             // Filler for lines past end-of-file
+    pub command_line_bg: Color,        // ':' command-line background color
+    pub command_line_fg: Color,        // ':' command-line text color
+    pub completion_key_fg: Color,      // Completion key/action column
+    pub completion_alias_fg: Color,    // Completion alias/opposite column
+    pub completion_value_fg: Color,    // Completion current value column
+    pub completion_desc_fg: Color,     // Completion description column
+    pub completion_menu_bg: Color,     // Completion background (unselected rows)
+    pub completion_selected_bg: Color, // Completion background (selected row)
+    pub selection_bg: Color,           // Generic selection background (fallback)
+    pub visual_line_bg: Color,         // Line-wise visual selection background
+    pub visual_char_bg: Color,         // Character-wise visual selection background
+    pub visual_block_bg: Color,        // Block-wise visual selection background (future)
+    pub select_char_bg: Color,         // Character-wise select mode background
+    pub select_line_bg: Color,         // Line-wise select mode background
+    pub warning: Color,                // Warning text/accent color
+    pub error: Color,                  // Error text/accent color
+    pub mode_colors: ModeThemeColors,  // Precomputed per-mode statusline colors
 }
 
 /// Syntax theme that uses only tree-sitter node type mappings
 #[derive(Debug, Clone)]
 pub struct SyntaxTheme {
     // Tree-sitter node type mappings - the only source of syntax colors
-    pub tree_sitter_mappings: HashMap<String, Color>,
+    pub tree_sitter_mappings: HashMap<String, Color>, // Node type -> color mapping
 }
 
 /// Combined theme with both UI and syntax colors
 #[derive(Debug, Clone)]
 pub struct CompleteTheme {
-    pub name: String,
-    pub description: String,
-    pub ui: UITheme,
-    pub syntax: SyntaxTheme,
+    pub name: String,        // Theme name
+    pub description: String, // Theme description
+    pub ui: UITheme,         // UI theme (colors for editor chrome)
+    pub syntax: SyntaxTheme, // Syntax theme (tree-sitter mappings)
 }
 
 impl ThemeConfig {
@@ -502,44 +489,28 @@ impl UITheme {
     }
 }
 
-fn default_mark_color() -> String {
-    "#e6b422".to_string()
-}
-
-fn default_completion_key_fg() -> String {
-    "#deb887".to_string()
-}
-
-fn default_completion_alias_fg() -> String {
-    "#cccccc".to_string()
-}
-
-fn default_completion_value_fg() -> String {
-    "#ffe6c7".to_string()
-}
-
-// (No serde defaults for completion_desc_fg/completion_menu_bg/completion_selected_bg)
+// (No serde defaults for UIColors fields; all required by themes.toml)
 
 #[derive(Debug, Clone)]
 pub struct ModeThemeColors {
-    pub normal_fg: Color,
-    pub normal_bg: Color,
-    pub insert_fg: Color,
-    pub insert_bg: Color,
-    pub visual_fg: Color,
-    pub visual_bg: Color,
-    pub visual_line_fg: Color,
-    pub visual_line_bg: Color,
-    pub visual_block_fg: Color,
-    pub visual_block_bg: Color,
-    pub select_fg: Color,
-    pub select_bg: Color,
-    pub select_line_fg: Color,
-    pub select_line_bg: Color,
-    pub replace_fg: Color,
-    pub replace_bg: Color,
-    pub command_fg: Color,
-    pub command_bg: Color,
+    pub normal_fg: Color,       // Mode badge text (Normal)
+    pub normal_bg: Color,       // Mode badge background (Normal)
+    pub insert_fg: Color,       // Mode badge text (Insert)
+    pub insert_bg: Color,       // Mode badge background (Insert)
+    pub visual_fg: Color,       // Mode badge text (Visual)
+    pub visual_bg: Color,       // Mode badge background (Visual)
+    pub visual_line_fg: Color,  // Mode badge text (Visual Line)
+    pub visual_line_bg: Color,  // Mode badge background (Visual Line)
+    pub visual_block_fg: Color, // Mode badge text (Visual Block)
+    pub visual_block_bg: Color, // Mode badge background (Visual Block)
+    pub select_fg: Color,       // Mode badge text (Select)
+    pub select_bg: Color,       // Mode badge background (Select)
+    pub select_line_fg: Color,  // Mode badge text (Select Line)
+    pub select_line_bg: Color,  // Mode badge background (Select Line)
+    pub replace_fg: Color,      // Mode badge text (Replace)
+    pub replace_bg: Color,      // Mode badge background (Replace)
+    pub command_fg: Color,      // Mode badge text (Command)
+    pub command_bg: Color,      // Mode badge background (Command)
 }
 
 impl ModeThemeColors {
