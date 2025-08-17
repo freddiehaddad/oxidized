@@ -28,6 +28,7 @@ Quick docs:
 <!-- markdownlint-disable MD007 -->
 
 - [🚀 Key Features](#-key-features)
+- [✨ What makes Oxidized different](#-what-makes-oxidized-different)
 - [🔧 Installation & Setup](#-installation--setup)  
 - [📖 Quick Start Guide](#-quick-start-guide)
 - [⚙️ Configuration System](#️-configuration-system)
@@ -76,6 +77,41 @@ Quick docs:
 - **Unicode Support**: UTF-8 safe, grapheme/width-aware rendering (emoji, ZWJ,
 combining marks) with proper display width calculation
 - **Configurable Timeouts**: Customizable key sequence and mode transition timings
+
+## ✨ What makes Oxidized different
+
+Oxidized aims to feel instantly familiar to Vim/Neovim users while modernizing the experience in ways that reduce friction and increase discoverability—without breaking the core model.
+
+- Command-line completion, reimagined (compatibility-first):
+  - Multi-column popup with key/alias/value/description, dynamic width, and dedicated theming for text and backgrounds.
+  - Action-oriented booleans: suggestions reflect the toggle you’ll perform now; accepting actually toggles based on current state and preserves `set` vs `setp`.
+  - Canonicalization and deduping: common aliases collapse behind canonical names, with the opposite form surfaced for quick discovery.
+  - Cleaner surface: negative (`no…`) and query (`?`) forms are hidden unless you explicitly steer toward them.
+  - Positional values: suggestions guide space-separated values (e.g., `set ts 4`) for a clean, consistent command line.
+  - Path completion quality-of-life: optional `%` root at current buffer directory via `percent_path_root`.
+
+- TOML configuration with persistence built in:
+  - Structured, readable config files with live reloading.
+  - Session vs persisted changes are explicit: `:set` for the session, `:setp` to write back to your TOML.
+
+- Extensible, layered completion architecture:
+  - Providers (for Ex, :set, files, buffers, themes, and more) register via a simple builder/registry.
+  - A presenter normalizes, filters, dedupes, and sorts conservatively to preserve provider dynamism.
+  - The engine orchestrates inputs/acceptance and handles state-aware toggles.
+
+- Select modes that fit modern editing muscle memory:
+  - `gh` (Select), `gH` (Select Line) behave like GUI editors while staying true to Vim’s modal model. Printable characters replace the selection and transition into Insert.
+
+- Thoughtful theming and UI hygiene:
+  - Rich UI theme keys, including dedicated colors for completion columns and menu backgrounds (selected/unselected) to ensure legibility.
+  - Proactive cleanup of the completion popup region to avoid lingering artifacts as you accept/cancel.
+  - Grapheme/width-aware rendering with careful wrap and scroll behavior.
+
+- Compatibility-first core:
+  - Motions, operators, visual modes, registers, marks, yanking/putting, macros, counts—kept true to Vim’s expectations.
+  - Enhancements layer on top rather than redefine fundamentals.
+
+For concrete examples of the completion experience and theming knobs, see Command-line Completion System below.
 
 ## 🔧 Installation & Setup
 
