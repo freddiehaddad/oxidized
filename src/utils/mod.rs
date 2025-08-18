@@ -7,8 +7,10 @@
 
 pub mod command;
 pub mod file;
+pub mod markdown;
 pub mod plugin;
 
 pub use command::*;
 pub use file::*;
+pub use markdown::*;
 pub use plugin::*;

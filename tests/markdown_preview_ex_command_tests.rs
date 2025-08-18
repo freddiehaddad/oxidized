@@ -133,6 +133,5 @@ fn mdpreview_live_debounced_refresh_updates_preview() {
     // Move right and inspect preview content
     assert!(editor.move_to_window_right());
     let cur = editor.current_buffer().unwrap();
-    assert_eq!(cur.lines[0], "Markdown Preview (MVP)");
     assert!(cur.lines.iter().any(|l| l == "updated"));
 }

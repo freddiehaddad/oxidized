@@ -32,7 +32,10 @@ tracing-subscriber = { version = "0.3", features = [
     "std",
 ] }
 tracing-appender = "0.2"
-# Error handling
+# Markdown parsing
+pulldown-cmark = { version = "0.13", default-features = false, features = [
+    "simd",
+] }
 thiserror = "2.0.14"
 anyhow = "1.0.99"
 unicode-segmentation = "1.11"

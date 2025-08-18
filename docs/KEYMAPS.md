@@ -38,6 +38,13 @@ at the root.
 "Ctrl+s" = "save_file"
 ```
 
+- Toggle the Markdown preview with F8 (default binding):
+
+```toml
+[normal_mode]
+"F8" = "markdown_preview_toggle"
+```
+
 ## Tips
 
 - Keep overrides small; merging is by table, so only changed keys are needed.

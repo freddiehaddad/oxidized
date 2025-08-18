@@ -885,8 +885,8 @@ impl Editor {
             _ => return,
         };
 
-        // Account for the 2-line header in the preview buffer
-        let desired_top = src_top.saturating_add(2);
+        // With no header in the preview buffer, align directly to source
+        let desired_top = src_top;
 
         // Apply to the preview window, clamped to content
         if let Some(preview_win) = self.window_manager.get_window_mut(preview_wid) {
@@ -2736,12 +2736,13 @@ impl Editor {
             Err(_) => return "Failed to create preview buffer".to_string(),
         };
 
-        // Populate preview buffer with header + source lines (if available)
-        if let Some(mut collected) = src_lines {
-            let mut lines = Vec::with_capacity(collected.len() + 2);
-            lines.push("Markdown Preview (MVP)".to_string());
-            lines.push(String::new());
-            lines.append(&mut collected);
+        // Populate preview buffer with rendered markdown (if available)
+        if let Some(collected) = src_lines {
+            let lines = crate::utils::markdown::render_markdown_to_lines(
+                &collected,
+                &self.config.markdown_preview.math,
+                &self.config.markdown_preview.large_file_mode,
+            );
             if let Some(preview) = self.buffers.get_mut(&preview_buffer_id) {
                 preview.lines = lines;
                 preview.modified = false;
@@ -2859,12 +2860,13 @@ impl Editor {
             self.markdown_preview_buffer_id,
         );
 
-        if let (Some(mut src_lines), Some(preview_id)) = (src_lines_opt, preview_buffer_id_opt) {
-            // Keep a simple header for clarity
-            let mut lines = Vec::with_capacity(src_lines.len() + 2);
-            lines.push("Markdown Preview (MVP)".to_string());
-            lines.push(String::new());
-            lines.append(&mut src_lines);
+        if let (Some(src_lines), Some(preview_id)) = (src_lines_opt, preview_buffer_id_opt) {
+            // Render formatted markdown to preview lines
+            let lines = crate::utils::markdown::render_markdown_to_lines(
+                &src_lines,
+                &self.config.markdown_preview.math,
+                &self.config.markdown_preview.large_file_mode,
+            );
             if let Some(preview) = self.buffers.get_mut(&preview_id) {
                 preview.lines = lines;
                 preview.modified = false;

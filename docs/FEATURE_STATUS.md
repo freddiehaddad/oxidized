@@ -18,6 +18,11 @@ This page summarizes what Oxidized supports today. For the development roadmap, 
 - Syntax highlighting (Tree-sitter, async worker)
   - Markdown: block + inline grammars merged for accurate highlighting
 - Terminal integration (alt screen, cross-platform)
+- Markdown preview (split view)
+  - Open/Close/Toggle/Refresh commands and F8 toggle
+  - Update modes: manual, on_save, live with debounce
+  - One-way scroll sync (source → preview) when enabled
+  - Safe, width-clamped rendering via pulldown-cmark; no header banner
 
 ## In Progress
 
@@ -32,4 +37,3 @@ This page summarizes what Oxidized supports today. For the development roadmap, 
 - Plugin system and scripting
 - Git and project tools
 - Terminal emulator and sessions
-- Markdown live preview mode (VS Code–style split preview, terminal-safe)

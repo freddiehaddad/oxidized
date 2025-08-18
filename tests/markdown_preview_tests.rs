@@ -63,7 +63,6 @@ fn markdown_preview_opens_in_right_split_and_restores_left() {
     );
     let cur = editor.current_buffer().expect("current buffer on right");
     assert!(!cur.lines.is_empty());
-    assert_eq!(cur.lines[0], "Markdown Preview (MVP)");
 
     // Move back to left; buffer should be source again
     assert!(editor.move_to_window_left());
@@ -115,10 +114,9 @@ fn markdown_preview_refresh_updates_right_only() {
     let left_win = editor.window_manager.get_window(left_id).unwrap();
     assert_eq!(left_win.buffer_id, Some(src_id));
 
-    // Right window still points at preview buffer and begins with header
+    // Right window still points at preview buffer
     assert!(editor.move_to_window_right());
     let cur = editor.current_buffer().unwrap();
-    assert_eq!(cur.lines[0], "Markdown Preview (MVP)");
     assert!(cur.lines.iter().any(|l| l == "changed"));
 
     // Return to left and confirm it's still the source file

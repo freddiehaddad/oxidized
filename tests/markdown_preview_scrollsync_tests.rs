@@ -32,7 +32,7 @@ fn mdpreview_scrollsync_aligns_on_open() {
         .map(|w| w.viewport_top)
         .unwrap();
 
-    // Open preview; this should align the preview viewport to source_top + 2 (header offset)
+    // Open preview; this should align the preview viewport to source_top (no header offset)
     let _ = editor.open_markdown_preview();
     assert_eq!(editor.window_manager.all_windows().len(), 2);
 
@@ -55,7 +55,7 @@ fn mdpreview_scrollsync_aligns_on_open() {
     let preview_lines = editor.current_buffer().unwrap().lines.len();
     // Return focus to left/source window for further checks
     assert!(editor.move_to_window_left());
-    let expected_top = (source_top_before + 2).min(preview_lines.saturating_sub(preview_height));
+    let expected_top = (source_top_before).min(preview_lines.saturating_sub(preview_height));
     let actual_top = editor
         .window_manager
         .get_window(right_id)
@@ -106,13 +106,13 @@ fn mdpreview_scrollsync_tracks_on_scroll() {
     let preview_total = editor.current_buffer().unwrap().lines.len();
     assert!(editor.move_to_window_left());
 
-    // Scroll down a few lines and verify preview follows with +2 offset
+    // Scroll down a few lines and verify preview follows with 0 offset
     for _ in 0..5 {
         editor.scroll_down_line();
         left_top += 1;
         let preview_win = editor.window_manager.get_window(right_id).unwrap();
         let height = preview_win.content_height();
-        let expected = (left_top + 2).min(preview_total.saturating_sub(height));
+        let expected = (left_top).min(preview_total.saturating_sub(height));
         assert_eq!(preview_win.viewport_top, expected);
     }
 
@@ -122,7 +122,7 @@ fn mdpreview_scrollsync_tracks_on_scroll() {
         left_top = left_top.saturating_sub(1);
         let preview_win = editor.window_manager.get_window(right_id).unwrap();
         let height = preview_win.content_height();
-        let expected = (left_top + 2).min(preview_total.saturating_sub(height));
+        let expected = (left_top).min(preview_total.saturating_sub(height));
         assert_eq!(preview_win.viewport_top, expected);
     }
 }

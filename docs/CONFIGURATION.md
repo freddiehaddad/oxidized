@@ -84,3 +84,44 @@ Completion popup colors are themeable; see the defaults in the repo
 - Keep diffs readable: avoid committing full copies of defaults; store deltas.
 - For portability, check in a minimal `editor.toml` in your project and keep
   personal tweaks under your home config.
+
+## Markdown preview settings and commands
+
+You can control the built-in Markdown preview via config and Ex commands.
+
+Editor settings (in `editor.toml`, typically under a dedicated table):
+
+```toml
+[markdown_preview]
+# When to refresh the preview: "manual" | "on_save" | "live"
+update = "live"
+
+# Debounce (milliseconds) used when update = "live"
+debounce_ms = 150
+
+# Keep the preview viewport aligned with the source buffer
+scrollsync = true
+
+# Inline/block math passthrough in the preview: "off" | "inline" | "block"
+math = "off"
+
+# Large-file behavior: "truncate" (cap preview lines) | "disable" (render all)
+large_file_mode = "truncate"
+```
+
+Runtime commands:
+
+- `:MarkdownPreviewOpen` — open a right split with the preview
+- `:MarkdownPreviewClose` — close the preview split
+- `:MarkdownPreviewToggle` — toggle the preview on/off (also bound to F8)
+- `:MarkdownPreviewRefresh` — re-render the preview now
+
+Runtime tweaks (session-only) and persistence (write to config):
+
+- Session-only: `:set mdpreview.update live`, `:set mdpreview.scrollsync`
+- Persisted: `:setp mdpreview.update on_save`, `:setp nomdpreview.scrollsync`
+
+Notes:
+
+- Completions suggest valid values for `mdpreview.*` options.
+- The preview uses a terminal-safe renderer (pulldown-cmark) and no header banner.
