@@ -18,6 +18,10 @@ notify = "8.2.0"
 # Tree-sitter for syntax highlighting
 tree-sitter = "0.25.8"
 tree-sitter-rust = "0.24.0"
+# Use a newer markdown grammar to avoid pulling an older tree-sitter runtime (0.19)
+# and align with the 0.25 packaging used elsewhere.
+# Use an alternative Markdown grammar that aligns with newer tree-sitter packaging
+tree-sitter-md = "0.3.2"
 # Logging
 log = "0.4"
 # Logging infrastructure: tracing with EnvFilter and file appender

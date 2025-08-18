@@ -16,6 +16,7 @@ This page summarizes what Oxidized supports today. For the development roadmap, 
 - Ex-commands (`:w`, `:q`, `:set`, `:setp`, ...)
 - Config system (TOML, live reload)
 - Syntax highlighting (Tree-sitter, async worker)
+  - Markdown: block + inline grammars merged for accurate highlighting
 - Terminal integration (alt screen, cross-platform)
 
 ## In Progress
@@ -31,3 +32,4 @@ This page summarizes what Oxidized supports today. For the development roadmap, 
 - Plugin system and scripting
 - Git and project tools
 - Terminal emulator and sessions
+- Markdown live preview mode (VS Code–style split preview, terminal-safe)

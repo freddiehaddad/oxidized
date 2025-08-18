@@ -9,6 +9,9 @@ use std::thread;
 use std::time::Duration;
 use tree_sitter::{Language, Parser};
 
+// Markdown grammar is provided by tree-sitter-md which exposes a version-agnostic
+// LanguageFn constant we can convert into a tree_sitter::Language without unsafe.
+
 use crate::config::theme::{SyntaxTheme, ThemeConfig};
 
 /// Semantic highlighting categories for generic syntax highlighting
@@ -217,9 +220,48 @@ impl LanguageSupport {
         }
     }
 
-    /// Get all supported languages (for now just Rust, but extensible)
+    /// Create Markdown language support (basic mapping)
+    pub fn markdown() -> Self {
+        let mut node_mappings = HashMap::new();
+
+        // Core Markdown constructs mapped to existing semantic buckets
+        node_mappings.insert("atx_heading".to_string(), SemanticCategory::Type); // headings as type-like accent
+        node_mappings.insert("setext_heading".to_string(), SemanticCategory::Type);
+        node_mappings.insert("emphasis".to_string(), SemanticCategory::String); // italics -> string color for warmth
+        node_mappings.insert("strong_emphasis".to_string(), SemanticCategory::Constant); // bold -> stronger accent
+        // Code blocks: support common node names
+        node_mappings.insert("code_fence".to_string(), SemanticCategory::Macro);
+        node_mappings.insert("fenced_code_block".to_string(), SemanticCategory::Macro);
+        node_mappings.insert("code_block".to_string(), SemanticCategory::Macro);
+        node_mappings.insert("code_span".to_string(), SemanticCategory::Macro); // inline code
+        node_mappings.insert("link".to_string(), SemanticCategory::Attribute);
+        node_mappings.insert("image".to_string(), SemanticCategory::Attribute);
+        node_mappings.insert("list_marker".to_string(), SemanticCategory::Punctuation);
+        node_mappings.insert(
+            "task_list_marker_checked".to_string(),
+            SemanticCategory::Punctuation,
+        );
+        node_mappings.insert(
+            "task_list_marker_unchecked".to_string(),
+            SemanticCategory::Punctuation,
+        );
+        node_mappings.insert("block_quote".to_string(), SemanticCategory::Comment);
+        node_mappings.insert("thematic_break".to_string(), SemanticCategory::Delimiter);
+        node_mappings.insert("table".to_string(), SemanticCategory::Delimiter);
+        node_mappings.insert("table_row".to_string(), SemanticCategory::Delimiter);
+        node_mappings.insert("table_cell".to_string(), SemanticCategory::Delimiter);
+
+        LanguageSupport {
+            name: "markdown".to_string(),
+            extensions: vec!["md".to_string(), "markdown".to_string()],
+            tree_sitter_name: "markdown".to_string(),
+            node_mappings,
+        }
+    }
+
+    /// Get all supported languages (for now Rust and Markdown)
     pub fn get_all_languages() -> Vec<LanguageSupport> {
-        vec![LanguageSupport::rust()]
+        vec![LanguageSupport::rust(), LanguageSupport::markdown()]
     }
 }
 
@@ -227,6 +269,8 @@ impl LanguageSupport {
 fn get_tree_sitter_language(language_name: &str) -> Option<Language> {
     match language_name {
         "rust" => Some(tree_sitter_rust::LANGUAGE.into()),
+        // Use the block grammar for Markdown highlighting
+        "markdown" => Some(tree_sitter_md::LANGUAGE.into()),
         _ => None,
     }
 }
@@ -432,6 +476,15 @@ impl SyntaxHighlighter {
             return Some("rust".to_string());
         }
 
+        // Simple Markdown heuristics
+        if content.contains("# ")
+            || content.contains("\n- ")
+            || content.contains("\n* ")
+            || content.contains("```")
+        {
+            return Some("markdown".to_string());
+        }
+
         // Fall back to editor config
         let config = crate::config::EditorConfig::load();
         config.languages.detect_language_from_content(content)
@@ -477,54 +530,125 @@ impl SyntaxHighlighter {
             language
         );
 
-        let parser = self
-            .parsers
-            .get_mut(language)
-            .ok_or_else(|| anyhow!("No parser for language: {}", language))?;
-
         let language_support = self
             .language_support
             .get(language)
             .ok_or_else(|| anyhow!("No language support for: {}", language))?;
 
-        let tree = parser
-            .parse(text, None)
-            .ok_or_else(|| anyhow!("Failed to parse text"))?;
-
         let mut highlights = Vec::new();
 
-        // Simple approach - just add all matching nodes without complex conflict resolution
-        let mut stack = vec![tree.root_node()];
+        // Markdown requires two grammars (block + inline). For better results,
+        // parse with both and merge.
+        if language == "markdown" {
+            // Ensure a trailing newline to satisfy some block rules (e.g. headings)
+            let needs_nl = !text.ends_with('\n');
+            let mut owned;
+            let parse_text = if needs_nl {
+                owned = String::with_capacity(text.len() + 1);
+                owned.push_str(text);
+                owned.push('\n');
+                &owned
+            } else {
+                text
+            };
+            let orig_len = text.len();
 
-        while let Some(node) = stack.pop() {
-            let node_kind = node.kind();
+            // Block parse via cached parser
+            let parser = self
+                .parsers
+                .get_mut(language)
+                .ok_or_else(|| anyhow!("No parser for language: {}", language))?;
+            let tree = parser
+                .parse(parse_text, None)
+                .ok_or_else(|| anyhow!("Failed to parse text"))?;
 
-            // Debug: Log node kinds for development
-            if log::log_enabled!(log::Level::Trace)
-                && let Ok(node_text) = node.utf8_text(text.as_bytes())
-                && node_text.len() < 20
-                && !node_text.contains('\n')
-            {
-                trace!("Node type: '{}' -> text: '{}'", node_kind, node_text);
+            // Walk block tree
+            let mut stack = vec![tree.root_node()];
+            while let Some(node) = stack.pop() {
+                let node_kind = node.kind();
+
+                if let Some(semantic_category) = language_support.node_mappings.get(node_kind)
+                    && let Some(color) = self.get_color_for_category(semantic_category)
+                {
+                    let start = node.start_byte();
+                    let mut end = node.end_byte();
+                    if end > orig_len {
+                        end = orig_len;
+                    }
+                    if start < end {
+                        highlights.push(HighlightRange {
+                            start,
+                            end,
+                            style: HighlightStyle::from_color(color),
+                        });
+                    }
+                }
+
+                for i in 0..node.child_count() {
+                    if let Some(child) = node.child(i) {
+                        stack.push(child);
+                    }
+                }
             }
 
-            // Check if this node type maps to a semantic category
-            if let Some(semantic_category) = language_support.node_mappings.get(node_kind) {
-                // Get the color for this semantic category from the theme
-                if let Some(color) = self.get_color_for_category(semantic_category) {
-                    // Add highlight directly
+            // Inline parse over same text
+            let mut inline_parser = Parser::new();
+            inline_parser
+                .set_language(&tree_sitter_md::INLINE_LANGUAGE.into())
+                .map_err(|e| anyhow!("Failed to set inline Markdown grammar: {}", e))?;
+            if let Some(inline_tree) = inline_parser.parse(parse_text, None) {
+                let mut inline_stack = vec![inline_tree.root_node()];
+                while let Some(node) = inline_stack.pop() {
+                    let node_kind = node.kind();
+                    if let Some(semantic_category) = language_support.node_mappings.get(node_kind)
+                        && let Some(color) = self.get_color_for_category(semantic_category)
+                    {
+                        let start = node.start_byte();
+                        let mut end = node.end_byte();
+                        if end > orig_len {
+                            end = orig_len;
+                        }
+                        if start < end {
+                            highlights.push(HighlightRange {
+                                start,
+                                end,
+                                style: HighlightStyle::from_color(color),
+                            });
+                        }
+                    }
+                    for i in 0..node.child_count() {
+                        if let Some(child) = node.child(i) {
+                            inline_stack.push(child);
+                        }
+                    }
+                }
+            }
+        } else {
+            // Non-Markdown languages: single parse as usual
+            let parser = self
+                .parsers
+                .get_mut(language)
+                .ok_or_else(|| anyhow!("No parser for language: {}", language))?;
+            let tree = parser
+                .parse(text, None)
+                .ok_or_else(|| anyhow!("Failed to parse text"))?;
+
+            let mut stack = vec![tree.root_node()];
+            while let Some(node) = stack.pop() {
+                let node_kind = node.kind();
+                if let Some(semantic_category) = language_support.node_mappings.get(node_kind)
+                    && let Some(color) = self.get_color_for_category(semantic_category)
+                {
                     highlights.push(HighlightRange {
                         start: node.start_byte(),
                         end: node.end_byte(),
                         style: HighlightStyle::from_color(color),
                     });
                 }
-            }
-
-            // Add children to stack for processing
-            for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
-                    stack.push(child);
+                for i in 0..node.child_count() {
+                    if let Some(child) = node.child(i) {
+                        stack.push(child);
+                    }
                 }
             }
         }
