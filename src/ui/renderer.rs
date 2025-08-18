@@ -798,22 +798,41 @@ impl UI {
                         base_offset: base_offset_chars,
                         total_line_chars: line.chars().count(),
                     };
-                    // Apply horizontal offset by slicing at a character boundary
-                    let display_slice = if base_offset_bytes < line.len() {
-                        &line[base_offset_bytes..]
-                    } else {
-                        ""
-                    };
-                    // Shift highlight ranges to match the sliced view (byte-based)
+                    // Apply horizontal offset and clamp to available width in character columns
+                    let start_byte = base_offset_bytes;
+                    let mut chars_seen = 0usize;
+                    let mut end_byte = start_byte;
+                    if start_byte < line.len() {
+                        for (b, ch) in line[start_byte..].char_indices() {
+                            let next_end = start_byte + b + ch.len_utf8();
+                            if chars_seen + 1 > text_width {
+                                break;
+                            }
+                            chars_seen += 1;
+                            end_byte = next_end;
+                            if chars_seen == text_width {
+                                break;
+                            }
+                        }
+                    }
+                    if end_byte < start_byte {
+                        end_byte = start_byte;
+                    }
+                    let display_slice = &line[start_byte..end_byte];
+                    // Shift highlight ranges to match the sliced view (byte-based); clamped in renderer
                     let shifted: Vec<HighlightRange> = highlights
                         .iter()
                         .map(|h| HighlightRange {
-                            start: h.start.saturating_sub(base_offset_bytes),
-                            end: h.end.saturating_sub(base_offset_bytes),
+                            start: h.start.saturating_sub(start_byte),
+                            end: h.end.saturating_sub(start_byte),
                             style: h.style.clone(),
                         })
                         .collect();
-                    self.render_highlighted_line(terminal, display_slice, &shifted, &context)?
+                    // Render the clamped slice
+                    let _ =
+                        self.render_highlighted_line(terminal, display_slice, &shifted, &context)?;
+                    // We rendered exactly `chars_seen` columns
+                    chars_seen
                 } else {
                     // Debug: Show we're missing highlights
                     if log::log_enabled!(log::Level::Debug) {
