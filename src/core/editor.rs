@@ -741,13 +741,8 @@ impl Editor {
                 .and_then(|p| p.extension())
                 .map(|e| e.to_string_lossy().to_string())
                 .or_else(|| {
-                    // fallback to language config if unnamed
-                    if let Some(buf) = self.current_buffer() {
-                        let content = buf.lines.join("\n");
-                        self.config.languages.detect_language_from_content(&content)
-                    } else {
-                        None
-                    }
+                    // If unnamed, show fallback language (e.g., text)
+                    self.config.languages.get_fallback_language()
                 }),
             macro_recording: self.macro_recorder.recording_register(),
             search_total: self.search_results.len(),
@@ -2543,9 +2538,9 @@ impl Editor {
                 log::debug!("Language detected from path '{}': {:?}", path, detected);
                 detected
             } else {
-                // For unnamed buffers, try to detect language from content
-                let detected = self.config.languages.detect_language_from_content(text);
-                log::debug!("Language detected from content: {:?}", detected);
+                // For unnamed buffers, use configured fallback language
+                let detected = self.config.languages.get_fallback_language();
+                log::debug!("Language fallback for unnamed buffer: {:?}", detected);
                 detected
             };
 
@@ -2806,7 +2801,7 @@ impl Editor {
         }
     }
 
-    /// Determine if the current buffer is Markdown based on extension or content detection
+    /// Determine if the current buffer is Markdown based only on file extension
     pub fn is_current_buffer_markdown(&self) -> bool {
         if let Some(buf) = self.current_buffer() {
             // Fast path: named files rely on extension-based detection only.
@@ -2826,22 +2821,7 @@ impl Editor {
                     return false;
                 }
             }
-
-            // Unnamed buffers: use a small content sample to detect language.
-            // Cap the sample to avoid large allocations and scans on each call.
-            let mut sample = String::with_capacity(4096);
-            for line in &buf.lines {
-                if sample.len() >= 8192 {
-                    break;
-                }
-                sample.push_str(line);
-                sample.push('\n');
-            }
-            if let Some(lang) = self.config.languages.detect_language_from_content(&sample)
-                && (lang.eq_ignore_ascii_case("markdown") || lang.eq_ignore_ascii_case("md"))
-            {
-                return true;
-            }
+            // Unnamed buffers: do not perform content detection; treat as not markdown
         }
         false
     }

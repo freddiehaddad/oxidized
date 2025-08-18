@@ -80,8 +80,6 @@ pub struct StatusLineConfig {
 pub struct LanguageConfig {
     /// Mapping from file extension (no dot) to language name
     pub extensions: HashMap<String, String>,
-    /// Disabled feature; kept for backward-compat. Empty by default.
-    pub content_patterns: HashMap<String, Vec<String>>,
     /// Default language when detection fails
     pub default_language: Option<String>,
 }
@@ -93,22 +91,6 @@ impl LanguageConfig {
 
         let extension = Path::new(file_path).extension()?.to_str()?;
         self.extensions.get(extension).cloned()
-    }
-
-    /// Detect language from file content patterns for unnamed files
-    pub fn detect_language_from_content(&self, content: &str) -> Option<String> {
-        for (language, patterns) in &self.content_patterns {
-            let match_count = patterns
-                .iter()
-                .filter(|pattern| content.contains(*pattern))
-                .count();
-
-            // If we find at least 2 patterns for a language, consider it a match
-            if match_count >= 2 {
-                return Some(language.clone());
-            }
-        }
-        None
     }
 
     /// Get all supported file extensions

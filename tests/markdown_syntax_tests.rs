@@ -1,31 +1,11 @@
 use oxidized::features::syntax::SyntaxHighlighter;
 
-fn sample_md() -> &'static str {
-    r#"# Title
-
-Some text with `inline` code and a [link](https://example.com).
-
-## Section
-
-- Item one
-- Item two
-"#
-}
-
 #[test]
 fn detect_language_by_extension_md() {
     let highlighter = SyntaxHighlighter::new().expect("init highlighter");
     let lang = highlighter
         .detect_language_from_extension("notes.md")
         .unwrap();
-    assert_eq!(lang, "markdown");
-}
-
-#[test]
-fn detect_language_by_content_md() {
-    let highlighter = SyntaxHighlighter::new().expect("init highlighter");
-    let content = sample_md();
-    let lang = highlighter.detect_language_from_content(content).unwrap();
     assert_eq!(lang, "markdown");
 }
 

@@ -8,7 +8,6 @@ fn test_language_config_default() {
 
     // Default should be empty - all config comes from editor.toml
     assert!(lang_config.extensions.is_empty());
-    assert!(lang_config.content_patterns.is_empty());
 }
 
 #[test]
@@ -37,19 +36,12 @@ fn test_language_config_from_file() {
             .detect_language_from_extension("unknown.xyz"),
         None
     );
-
-    // Content pattern detection is disabled
-    assert_eq!(
-        config.languages.detect_language_from_content("anything"),
-        None
-    );
 }
 
 #[test]
 fn test_editor_config_has_languages() {
     let config = EditorConfig::load(); // Load from actual file
     assert!(!config.languages.extensions.is_empty());
-    assert!(config.languages.content_patterns.is_empty());
 }
 
 #[test]

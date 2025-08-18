@@ -509,38 +509,20 @@ impl SyntaxHighlighter {
         config.languages.detect_language_from_extension(file_path)
     }
 
-    /// Detect language from content patterns for unnamed files
-    pub fn detect_language_from_content(&self, content: &str) -> Option<String> {
-        // For now, simple heuristics - can be enhanced later
-        if content.contains("fn main()") || content.contains("use std::") {
-            return Some("rust".to_string());
-        }
-
-        // Simple Markdown heuristics
-        if content.contains("# ")
-            || content.contains("\n- ")
-            || content.contains("\n* ")
-            || content.contains("```")
-        {
-            return Some("markdown".to_string());
-        }
-
-        // Fall back to editor config
-        let config = crate::config::EditorConfig::load();
-        config.languages.detect_language_from_content(content)
-    }
-
-    /// Detect language using both file path and content fallback
-    pub fn detect_language(&self, file_path: Option<&str>, content: &str) -> String {
+    /// Detect language relying only on file extension; fall back to configured default
+    pub fn detect_language(&self, file_path: Option<&str>, _content: &str) -> String {
         if let Some(path) = file_path
             && let Some(language) = self.detect_language_from_extension(path)
         {
             return language;
         }
 
-        // Fall back to content-based detection
-        self.detect_language_from_content(content)
-            .unwrap_or_else(|| "text".to_string()) // Ultimate fallback
+        // Fall back to configured default language or "text"
+        let config = crate::config::EditorConfig::load();
+        config
+            .languages
+            .get_fallback_language()
+            .unwrap_or_else(|| "text".to_string())
     }
 
     pub fn update_theme(&mut self, theme_name: &str) -> Result<()> {

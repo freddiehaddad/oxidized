@@ -66,6 +66,3 @@ md = "markdown" # Files ending in .md use Markdown
 toml = "toml"   # Files ending in .toml use TOML
 txt = "text"    # Plain text files
 rs = "rust"     # Rust source files
-
-[languages.content_patterns]
-# Reserved for future language detection by content; leave empty to disable
