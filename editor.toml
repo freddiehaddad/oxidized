@@ -52,11 +52,20 @@ show_progress = true # Show buffer progress (line/percent)
 separator = "  "     # Spacing between right-aligned segments
 
 [languages]
-# Default language used when detection fails
 default_language = "text" # Fallback language when no extension matches
+
+[markdown_preview]
+update = "live"              # manual | on_save | live
+debounce_ms = 150            # ms for live update debounce
+scroll_sync = true           # synchronize scroll positions
+math = "off"                 # off | inline | block
+large_file_mode = "truncate" # truncate | disable
 
 [languages.extensions]
 md = "markdown" # Files ending in .md use Markdown
 toml = "toml"   # Files ending in .toml use TOML
 txt = "text"    # Plain text files
 rs = "rust"     # Rust source files
+
+[languages.content_patterns]
+# Reserved for future language detection by content; leave empty to disable

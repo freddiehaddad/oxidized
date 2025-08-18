@@ -84,10 +84,8 @@ pub struct UIColors {
     pub warning: String,                // Warning text/accent color
     pub error: String,                  // Error text/accent color
     /// Optional: granular status line colors per segment
-    #[serde(default)]
     pub statusline: Option<StatusLineColors>, // Optional: granular status line colors per segment
     /// Optional: per-mode colors for mode indicator in status line
-    #[serde(default)]
     pub mode: Option<ModeColors>, // Optional: per-mode colors for status line badges
 }
 

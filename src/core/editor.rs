@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Instant;
 
 /// Represents an operator waiting for a text object or motion
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,6 +131,12 @@ pub struct Editor {
     text_object_finder: crate::features::text_objects::TextObjectFinder,
     /// Macro recording and playback system
     macro_recorder: crate::features::macros::MacroRecorder,
+    // Markdown preview state
+    markdown_preview_open: bool,
+    markdown_preview_buffer_id: Option<usize>,
+    markdown_preview_window_id: Option<usize>,
+    /// Debounce timestamp for live preview refreshes
+    last_markdown_preview_refresh: Option<Instant>,
 }
 
 impl Editor {
@@ -222,6 +229,10 @@ impl Editor {
             pending_operator: None,
             text_object_finder: crate::features::text_objects::TextObjectFinder::new(),
             macro_recorder: crate::features::macros::MacroRecorder::new(),
+            markdown_preview_open: false,
+            markdown_preview_buffer_id: None,
+            markdown_preview_window_id: None,
+            last_markdown_preview_refresh: None,
         };
         // Initialize reserved rows for status/command lines based on config
         let reserved_rows = editor.reserved_rows_from_config();
@@ -1935,6 +1946,23 @@ impl Editor {
                 Ok(_) => {
                     info!("Buffer saved");
                     self.status_message = "File saved".to_string();
+                    // On-save markdown preview refresh when configured
+                    if self.markdown_preview_open
+                        && (self
+                            .config
+                            .markdown_preview
+                            .update
+                            .eq_ignore_ascii_case("on_save")
+                            || self
+                                .config
+                                .markdown_preview
+                                .update
+                                .eq_ignore_ascii_case("live"))
+                        && self.is_current_buffer_markdown()
+                    {
+                        let _ = self.refresh_markdown_preview_now();
+                        self.last_markdown_preview_refresh = Some(std::time::Instant::now());
+                    }
                 }
                 Err(e) => {
                     error!("Failed to save buffer: {}", e);
@@ -1959,6 +1987,23 @@ impl Editor {
             match buffer.save() {
                 Ok(_) => {
                     self.status_message = "File saved".to_string();
+                    // On-save markdown preview refresh when configured
+                    if self.markdown_preview_open
+                        && (self
+                            .config
+                            .markdown_preview
+                            .update
+                            .eq_ignore_ascii_case("on_save")
+                            || self
+                                .config
+                                .markdown_preview
+                                .update
+                                .eq_ignore_ascii_case("live"))
+                        && self.is_current_buffer_markdown()
+                    {
+                        let _ = self.refresh_markdown_preview_now();
+                        self.last_markdown_preview_refresh = Some(std::time::Instant::now());
+                    }
                     Ok(())
                 }
                 Err(e) => {
@@ -2312,6 +2357,15 @@ impl Editor {
                     self.async_syntax_highlighter = None;
                 }
             }
+            // Markdown preview settings: accept and noop-apply for now
+            "mdpreview.update"
+            | "mdpreview.debounce_ms"
+            | "mdpreview.scrollsync"
+            | "mdpreview.math"
+            | "mdpreview.large_file_mode" => {
+                // Values are already updated via config.set_setting(); nothing else to do yet.
+                // Future: trigger debounce or refresh behavior depending on update mode.
+            }
             "colorscheme" | "colo" => {
                 // Update in-memory theme selection to reflect UI immediately
                 self.theme_config.set_current_theme(value);
@@ -2398,6 +2452,14 @@ impl Editor {
             "percentpathroot" | "ppr" => Some(self.config.interface.percent_path_root.to_string()),
             "colorscheme" | "colo" => Some(self.config.display.color_scheme.clone()),
             "syntax" | "syn" => Some(self.config.display.syntax_highlighting.to_string()),
+            // Markdown preview settings
+            "mdpreview.update" => Some(self.config.markdown_preview.update.clone()),
+            "mdpreview.debounce_ms" => Some(self.config.markdown_preview.debounce_ms.to_string()),
+            "mdpreview.scrollsync" => Some(self.config.markdown_preview.scroll_sync.to_string()),
+            "mdpreview.math" => Some(self.config.markdown_preview.math.clone()),
+            "mdpreview.large_file_mode" => {
+                Some(self.config.markdown_preview.large_file_mode.clone())
+            }
             _ => None,
         }
     }
@@ -2598,6 +2660,209 @@ impl Editor {
         if let Some(ref highlighter) = self.async_syntax_highlighter {
             highlighter.invalidate_buffer_cache(0); // Clear all cache for now
             self.status_message = "Syntax highlighting cache cleared".to_string();
+        }
+    }
+
+    // ---------- Markdown Preview MVP ----------
+    pub fn open_markdown_preview(&mut self) -> String {
+        if self.markdown_preview_open {
+            return "Markdown preview already open".to_string();
+        }
+        // Capture the source buffer context before creating any new buffers
+        let source_window_id = self.window_manager.current_window_id();
+        let source_buffer_id = self.current_buffer_id;
+        let src_lines: Option<Vec<String>> = source_buffer_id
+            .and_then(|src_id| self.buffers.get(&src_id).map(|src| src.lines.clone()));
+
+        // Create a vertical split to the right
+        let new_window_id = match self
+            .window_manager
+            .split_current_window(SplitDirection::VerticalRight)
+        {
+            Some(id) => id,
+            None => return "Failed to create split for preview".to_string(),
+        };
+
+        // Temporarily focus the new window so buffer creation attaches to it
+        let _ = self.window_manager.set_current_window(new_window_id);
+
+        // Create a new buffer for the preview content (attaches to right window)
+        let preview_buffer_id = match self.create_buffer(None) {
+            Ok(id) => id,
+            Err(_) => return "Failed to create preview buffer".to_string(),
+        };
+
+        // Populate preview buffer with header + source lines (if available)
+        if let Some(mut collected) = src_lines {
+            let mut lines = Vec::with_capacity(collected.len() + 2);
+            lines.push("Markdown Preview (MVP)".to_string());
+            lines.push(String::new());
+            lines.append(&mut collected);
+            if let Some(preview) = self.buffers.get_mut(&preview_buffer_id) {
+                preview.lines = lines;
+                preview.modified = false;
+                preview.cursor.row = 0;
+                preview.cursor.col = 0;
+            }
+        }
+
+        // Ensure the right window points at the preview buffer
+        if let Some(win) = self.window_manager.get_window_mut(new_window_id) {
+            win.set_buffer(preview_buffer_id);
+            win.save_cursor_position(0, 0);
+        }
+
+        // Restore focus and current buffer to the original source window/buffer
+        if let Some(src_wid) = source_window_id {
+            let _ = self.window_manager.set_current_window(src_wid);
+        }
+        if let Some(src_bid) = source_buffer_id {
+            self.current_buffer_id = Some(src_bid);
+            if let Some(win) = self.window_manager.current_window_mut() {
+                win.set_buffer(src_bid);
+                if let Some(buf) = self.buffers.get(&src_bid) {
+                    win.save_cursor_position(buf.cursor.row, buf.cursor.col);
+                }
+            }
+        }
+
+        self.markdown_preview_open = true;
+        self.markdown_preview_buffer_id = Some(preview_buffer_id);
+        self.markdown_preview_window_id = Some(new_window_id);
+        self.status_message = "Markdown preview opened".to_string();
+        self.request_redraw();
+        self.status_message.clone()
+    }
+
+    pub fn close_markdown_preview(&mut self) -> String {
+        if !self.markdown_preview_open {
+            return "Markdown preview already closed".to_string();
+        }
+        if let Some(wid) = self.markdown_preview_window_id.take() {
+            let _ = self.window_manager.set_current_window(wid);
+            let _ = self.close_window();
+        }
+        if let Some(bid) = self.markdown_preview_buffer_id.take() {
+            let _ = self.close_buffer(bid);
+        }
+        self.markdown_preview_open = false;
+        self.status_message = "Markdown preview closed".to_string();
+        self.request_redraw();
+        self.status_message.clone()
+    }
+
+    pub fn toggle_markdown_preview(&mut self) -> String {
+        if self.markdown_preview_open {
+            self.close_markdown_preview()
+        } else {
+            self.open_markdown_preview()
+        }
+    }
+
+    /// Determine if the current buffer is Markdown based on extension or content detection
+    pub fn is_current_buffer_markdown(&self) -> bool {
+        if let Some(buf) = self.current_buffer() {
+            // Fast path: named files rely on extension-based detection only.
+            // This avoids scanning the entire buffer on every keypress in live mode.
+            if let Some(path) = &buf.file_path {
+                let path_cow = path.as_os_str().to_string_lossy();
+                if let Some(lang) = self
+                    .config
+                    .languages
+                    .detect_language_from_extension(&path_cow)
+                {
+                    return lang.eq_ignore_ascii_case("markdown")
+                        || lang.eq_ignore_ascii_case("md");
+                } else {
+                    // If we can't detect by extension for a named file, assume not markdown.
+                    // Content-based detection here would be too expensive in hot paths.
+                    return false;
+                }
+            }
+
+            // Unnamed buffers: use a small content sample to detect language.
+            // Cap the sample to avoid large allocations and scans on each call.
+            let mut sample = String::with_capacity(4096);
+            for line in &buf.lines {
+                if sample.len() >= 8192 {
+                    break;
+                }
+                sample.push_str(line);
+                sample.push('\n');
+            }
+            if let Some(lang) = self.config.languages.detect_language_from_content(&sample)
+                && (lang.eq_ignore_ascii_case("markdown") || lang.eq_ignore_ascii_case("md"))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Refresh the markdown preview buffer contents immediately if open and current file is markdown
+    pub fn refresh_markdown_preview_now(&mut self) -> String {
+        if !self.markdown_preview_open {
+            return "Markdown preview is not open".to_string();
+        }
+        if !self.is_current_buffer_markdown() {
+            return "Current buffer is not markdown".to_string();
+        }
+
+        let (src_lines_opt, preview_buffer_id_opt) = (
+            self.current_buffer().map(|b| b.lines.clone()),
+            self.markdown_preview_buffer_id,
+        );
+
+        if let (Some(mut src_lines), Some(preview_id)) = (src_lines_opt, preview_buffer_id_opt) {
+            // Keep a simple header for clarity
+            let mut lines = Vec::with_capacity(src_lines.len() + 2);
+            lines.push("Markdown Preview (MVP)".to_string());
+            lines.push(String::new());
+            lines.append(&mut src_lines);
+            if let Some(preview) = self.buffers.get_mut(&preview_id) {
+                preview.lines = lines;
+                preview.modified = false;
+                // Keep cursor at top of preview on refresh for now
+                preview.cursor.row = 0;
+                preview.cursor.col = 0;
+            }
+            // Also request a redraw so UI updates
+            self.request_redraw();
+            self.status_message = "Markdown preview refreshed".to_string();
+        } else {
+            self.status_message = "No preview buffer to refresh".to_string();
+        }
+        self.status_message.clone()
+    }
+
+    /// Debounced refresh used for live updates while typing
+    pub fn debounced_maybe_refresh_markdown_preview(&mut self) {
+        // Only when configured for live updates (fast early exit)
+        if !self
+            .config
+            .markdown_preview
+            .update
+            .eq_ignore_ascii_case("live")
+        {
+            return;
+        }
+        // Must have an open preview and a markdown buffer
+        if !self.markdown_preview_open {
+            return;
+        }
+        if !self.is_current_buffer_markdown() {
+            return;
+        }
+        let debounce_ms = self.config.markdown_preview.debounce_ms;
+        let now = std::time::Instant::now();
+        if let Some(last) = self.last_markdown_preview_refresh {
+            if now.saturating_duration_since(last).as_millis() as u64 >= debounce_ms {
+                let _ = self.refresh_markdown_preview_now();
+                self.last_markdown_preview_refresh = Some(now);
+            }
+        } else {
+            let _ = self.refresh_markdown_preview_now();
+            self.last_markdown_preview_refresh = Some(now);
         }
     }
 
@@ -3235,6 +3500,18 @@ impl Editor {
 
             if let Err(ref e) = result {
                 error!("Error handling key event {:?}: {}", key_event, e);
+            }
+
+            // After processing a key event, if preview is configured for live updates,
+            // ask for a debounced refresh. This is lightweight when not enabled.
+            if self.markdown_preview_open
+                && self
+                    .config
+                    .markdown_preview
+                    .update
+                    .eq_ignore_ascii_case("live")
+            {
+                self.debounced_maybe_refresh_markdown_preview();
             }
 
             result

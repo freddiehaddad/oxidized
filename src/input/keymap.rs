@@ -1113,6 +1113,12 @@ impl KeyHandler {
             "resize_window_taller" => self.action_resize_window_taller(editor)?,
             "resize_window_shorter" => self.action_resize_window_shorter(editor)?,
 
+            // Markdown preview
+            "markdown_preview_toggle" => {
+                let msg = editor.toggle_markdown_preview();
+                editor.set_status_message(msg);
+            }
+
             _ => return Ok(()), // Unknown action, ignore
         }
         if used_count {
@@ -1730,6 +1736,16 @@ impl KeyHandler {
                 Ok(_) => editor.set_status_message("File saved".to_string()),
                 Err(e) => editor.set_status_message(format!("Error saving: {}", e)),
             }
+        }
+        // Also refresh markdown preview if needed (on_save/live)
+        if editor
+            .get_config_value("mdpreview.update")
+            .as_deref()
+            .map(|v| v.eq_ignore_ascii_case("on_save") || v.eq_ignore_ascii_case("live"))
+            .unwrap_or(false)
+            && editor.is_current_buffer_markdown()
+        {
+            let _ = editor.refresh_markdown_preview_now();
         }
         Ok(())
     }

@@ -1,7 +1,7 @@
 // Configuration management
 // This handles editor.toml parsing and settings management
 
-use log::{debug, info, warn};
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -13,8 +13,8 @@ pub struct EditorConfig {
     pub editing: EditingConfig,
     pub interface: InterfaceConfig,
     pub languages: LanguageConfig,
-    #[serde(default)]
     pub statusline: StatusLineConfig,
+    pub markdown_preview: MarkdownPreviewConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,7 +25,6 @@ pub struct DisplayConfig {
     pub color_scheme: String,
     pub syntax_highlighting: bool,
     /// Show a mark indicator in the gutter/number column for lines that have a mark
-    #[serde(default = "default_true")]
     pub show_marks: bool,
 }
 
@@ -61,60 +60,29 @@ pub struct InterfaceConfig {
     pub window_resize_amount: u16,
     pub completion_menu_height: u16,
     /// Enable '%' prefix in file path completion to root at current buffer directory
-    #[serde(default = "default_true")]
     pub percent_path_root: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusLineConfig {
-    #[serde(default = "default_true")]
     pub show_indent: bool,
-    #[serde(default = "default_true")]
     pub show_eol: bool,
-    #[serde(default = "default_true")]
     pub show_encoding: bool,
-    #[serde(default = "default_true")]
     pub show_type: bool,
-    #[serde(default = "default_true")]
     pub show_macro: bool,
-    #[serde(default = "default_true")]
     pub show_search: bool,
-    #[serde(default = "default_true")]
     pub show_progress: bool,
     /// Separator text used between right-side statusline segments
-    #[serde(default = "default_separator")]
     pub separator: String,
-}
-
-impl Default for StatusLineConfig {
-    fn default() -> Self {
-        Self {
-            show_indent: true,
-            show_eol: true,
-            show_encoding: true,
-            show_type: true,
-            show_macro: true,
-            show_search: true,
-            show_progress: true,
-            separator: default_separator(),
-        }
-    }
-}
-
-fn default_separator() -> String {
-    "  ".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LanguageConfig {
     /// Mapping from file extension (no dot) to language name
-    #[serde(default)]
     pub extensions: HashMap<String, String>,
     /// Disabled feature; kept for backward-compat. Empty by default.
-    #[serde(default)]
     pub content_patterns: HashMap<String, Vec<String>>,
     /// Default language when detection fails
-    #[serde(default)]
     pub default_language: Option<String>,
 }
 
@@ -171,83 +139,34 @@ impl LanguageConfig {
     }
 }
 
-impl Default for EditorConfig {
-    fn default() -> Self {
-        Self {
-            display: DisplayConfig {
-                show_line_numbers: true,
-                show_relative_numbers: false,
-                show_cursor_line: false,
-                color_scheme: "default".to_string(), // Match the theme in themes.toml
-                syntax_highlighting: true,
-                show_marks: true,
-            },
-            behavior: BehaviorConfig {
-                tab_width: 4,
-                expand_tabs: false,
-                auto_indent: true,
-                ignore_case: false,
-                smart_case: false,
-                highlight_search: true,
-                incremental_search: true,
-                wrap_lines: false,
-                line_break: false,
-            },
-            editing: EditingConfig {
-                undo_levels: 1000,
-                persistent_undo: false,
-                backup: false,
-                swap_file: false,
-                auto_save: false,
-            },
-            interface: InterfaceConfig {
-                show_status_line: true,
-                command_timeout: 1000,
-                show_command: true,
-                scroll_off: 0,
-                side_scroll_off: 0,
-                window_resize_amount: 1,
-                completion_menu_height: 8,
-                percent_path_root: true,
-            },
-            statusline: StatusLineConfig {
-                show_indent: true,
-                show_eol: true,
-                show_encoding: true,
-                show_type: true,
-                show_macro: true,
-                show_search: true,
-                show_progress: true,
-                separator: default_separator(),
-            },
-            languages: LanguageConfig::default(),
-        }
-    }
-}
-
-fn default_true() -> bool {
-    true
-}
+// Note: All defaults must be provided via editor.toml; there are no code defaults.
 
 impl EditorConfig {
     pub fn load() -> Self {
         debug!("Loading editor configuration");
-        // Try to load from editor.toml file, fall back to defaults if not found
-        if let Ok(config_content) = fs::read_to_string("editor.toml") {
-            debug!("Found editor.toml file, attempting to parse");
-            if let Ok(config) = toml::from_str(&config_content) {
+        // Load strictly from editor.toml; error if missing/invalid
+        let config_content = fs::read_to_string("editor.toml").unwrap_or_else(|e| {
+            error!(
+                "editor.toml not found or unreadable: {}. Oxidized requires an explicit configuration.",
+                e
+            );
+            panic!(
+                "editor.toml is required but was not found/readable. Please add an editor.toml with all settings."
+            );
+        });
+        debug!("Found editor.toml file, attempting to parse");
+        match toml::from_str(&config_content) {
+            Ok(config) => {
                 info!("Loaded editor configuration from editor.toml");
-                return config;
-            } else {
-                warn!("Failed to parse editor.toml, falling back to default configuration");
+                config
             }
-        } else {
-            debug!("editor.toml not found, using default configuration");
+            Err(e) => {
+                error!("Failed to parse editor.toml: {}", e);
+                panic!(
+                    "Invalid editor.toml. Fix the configuration file; no code defaults are provided."
+                );
+            }
         }
-
-        // Fallback to default configuration
-        debug!("Using default editor configuration");
-        Self::default()
     }
 
     /// Persist a single setting to editor.toml by editing the file in-place, preserving comments/layout.
@@ -307,6 +226,29 @@ impl EditorConfig {
                     "syntax_highlighting",
                     Kind::Bool,
                     if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                // Markdown preview settings
+                "mdpreview.update" => {
+                    Some(("markdown_preview", "update", Kind::Str, val.to_string()))
+                }
+                "mdpreview.debounce_ms" => Some((
+                    "markdown_preview",
+                    "debounce_ms",
+                    Kind::Int,
+                    val.to_string(),
+                )),
+                "mdpreview.scrollsync" => Some((
+                    "markdown_preview",
+                    "scroll_sync",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "mdpreview.math" => Some(("markdown_preview", "math", Kind::Str, val.to_string())),
+                "mdpreview.large_file_mode" => Some((
+                    "markdown_preview",
+                    "large_file_mode",
+                    Kind::Str,
+                    val.to_string(),
                 )),
 
                 // Behavior
@@ -424,20 +366,13 @@ impl EditorConfig {
             return Ok(());
         };
 
-        // Read or create file
+        // Read file (do not auto-create; configuration must exist)
         let path = Path::new("editor.toml");
         if !path.exists() {
-            // Create minimal file with just the target section/key
-            let value_literal = match kind {
-                Kind::Bool | Kind::Int => normalized,
-                Kind::Str => format!("\"{}\"", normalized),
-            };
-            let mut file = std::fs::File::create(path)?;
-            let mut out = String::new();
-            out.push_str(&format!("[{}]\n", section));
-            out.push_str(&format!("{} = {}\n", key, value_literal));
-            file.write_all(out.as_bytes())?;
-            return Ok(());
+            return Err(
+                "editor.toml not found; cannot persist setting. Create the file and try again."
+                    .into(),
+            );
         }
 
         let mut content = String::new();
@@ -821,6 +756,45 @@ impl EditorConfig {
                 ))
             }
 
+            // Markdown preview settings
+            "mdpreview.update" => {
+                self.markdown_preview.update = value.to_string();
+                Ok(format!(
+                    "mdpreview.update: {}",
+                    self.markdown_preview.update
+                ))
+            }
+            "mdpreview.debounce_ms" => {
+                if let Ok(ms) = value.parse::<u64>() {
+                    self.markdown_preview.debounce_ms = ms;
+                    Ok(format!("mdpreview.debounce_ms: {}", ms))
+                } else {
+                    Err("Invalid debounce value".to_string())
+                }
+            }
+            "mdpreview.scrollsync" => {
+                self.markdown_preview.scroll_sync = value.parse().unwrap_or(true);
+                Ok(format!(
+                    "mdpreview.scrollsync: {}",
+                    if self.markdown_preview.scroll_sync {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                ))
+            }
+            "mdpreview.math" => {
+                self.markdown_preview.math = value.to_string();
+                Ok(format!("mdpreview.math: {}", self.markdown_preview.math))
+            }
+            "mdpreview.large_file_mode" => {
+                self.markdown_preview.large_file_mode = value.to_string();
+                Ok(format!(
+                    "mdpreview.large_file_mode: {}",
+                    self.markdown_preview.large_file_mode
+                ))
+            }
+
             // Language settings (informational only - no modification via :set)
             "languages" | "lang" => {
                 let extensions: Vec<String> = self
@@ -835,6 +809,20 @@ impl EditorConfig {
             _ => Err(format!("Unknown setting: {}", setting)),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarkdownPreviewConfig {
+    /// When to update the preview: "manual", "on_save", or "live"
+    pub update: String,
+    /// Debounce milliseconds for live updates
+    pub debounce_ms: u64,
+    /// Enable scroll synchronization between source and preview
+    pub scroll_sync: bool,
+    /// Math mode handling: "off", "inline", or "block"
+    pub math: String,
+    /// Behavior on very large files: "truncate" or "disable"
+    pub large_file_mode: String,
 }
 
 // Legacy config types for backwards compatibility

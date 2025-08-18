@@ -231,6 +231,30 @@ pub fn static_commands() -> Vec<CompletionItem> {
         },
     ]);
 
+    // Markdown preview Ex commands
+    commands.extend(vec![
+        CompletionItem {
+            text: "MarkdownPreviewOpen".into(),
+            description: "Open Markdown preview split".into(),
+            category: "preview".into(),
+        },
+        CompletionItem {
+            text: "MarkdownPreviewClose".into(),
+            description: "Close Markdown preview split".into(),
+            category: "preview".into(),
+        },
+        CompletionItem {
+            text: "MarkdownPreviewToggle".into(),
+            description: "Toggle Markdown preview split".into(),
+            category: "preview".into(),
+        },
+        CompletionItem {
+            text: "MarkdownPreviewRefresh".into(),
+            description: "Refresh Markdown preview content".into(),
+            category: "preview".into(),
+        },
+    ]);
+
     // Set commands - display
     commands.extend(vec![
         CompletionItem {
@@ -483,6 +507,37 @@ pub fn static_commands() -> Vec<CompletionItem> {
         CompletionItem {
             text: "set udf".into(),
             description: "Enable persistent undo (short)".into(),
+            category: "set".into(),
+        },
+        // Markdown preview related :set keys
+        CompletionItem {
+            text: "set mdpreview.update".into(),
+            description: "Markdown preview refresh policy".into(),
+            category: "set".into(),
+        },
+        CompletionItem {
+            text: "set mdpreview.debounce_ms".into(),
+            description: "Markdown preview debounce in ms".into(),
+            category: "set".into(),
+        },
+        CompletionItem {
+            text: "set mdpreview.scrollsync".into(),
+            description: "Sync preview scroll with source".into(),
+            category: "set".into(),
+        },
+        CompletionItem {
+            text: "set nomdpreview.scrollsync".into(),
+            description: "Disable preview scroll sync".into(),
+            category: "set".into(),
+        },
+        CompletionItem {
+            text: "set mdpreview.math".into(),
+            description: "Math rendering mode".into(),
+            category: "set".into(),
+        },
+        CompletionItem {
+            text: "set mdpreview.large_file_mode".into(),
+            description: "Strategy for very large markdown files".into(),
             category: "set".into(),
         },
         CompletionItem {
@@ -889,6 +944,48 @@ pub fn dynamic_matches(ctx: Option<&CompletionContext>, input: &str) -> Vec<Comp
         );
     }
 
+    // mdpreview.debounce_ms numeric suggestions
+    if lower.starts_with(&format!("{set_prefix}mdpreview.debounce_ms ")) {
+        add_numeric(
+            &mut out,
+            "mdpreview.debounce_ms",
+            &["0", "50", "100", "200", "500"],
+        );
+    }
+
+    // mdpreview.update enum suggestions
+    if lower.starts_with(&format!("{set_prefix}mdpreview.update ")) {
+        for v in ["manual", "on_save", "live"] {
+            out.push(CompletionItem {
+                text: format!("{}mdpreview.update {}", set_prefix, v),
+                description: "Value".into(),
+                category: "set".into(),
+            });
+        }
+    }
+
+    // mdpreview.math enum suggestions
+    if lower.starts_with(&format!("{set_prefix}mdpreview.math ")) {
+        for v in ["off", "inline", "block"] {
+            out.push(CompletionItem {
+                text: format!("{}mdpreview.math {}", set_prefix, v),
+                description: "Value".into(),
+                category: "set".into(),
+            });
+        }
+    }
+
+    // mdpreview.large_file_mode enum suggestions
+    if lower.starts_with(&format!("{set_prefix}mdpreview.large_file_mode ")) {
+        for v in ["truncate", "disable"] {
+            out.push(CompletionItem {
+                text: format!("{}mdpreview.large_file_mode {}", set_prefix, v),
+                description: "Value".into(),
+                category: "set".into(),
+            });
+        }
+    }
+
     // File path completion for :e and :w commands
     if (lower.starts_with("e ")
         || lower.starts_with("edit ")
@@ -1064,9 +1161,11 @@ impl CompletionProvider for SetOptionsProvider {
         v.retain(|c| c.category == "set");
         v
     }
-    fn dynamic_items(&self, _ctx: Option<&CompletionContext>, _input: &str) -> Vec<CompletionItem> {
-        // Dynamic set-related items are handled by more specific providers
-        Vec::new()
+    fn dynamic_items(&self, ctx: Option<&CompletionContext>, input: &str) -> Vec<CompletionItem> {
+        // Forward dynamic matches for ':set' space/value completions
+        let mut v = dynamic_matches(ctx, input);
+        v.retain(|c| c.category == "set");
+        v
     }
 }
 

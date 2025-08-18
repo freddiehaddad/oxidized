@@ -204,6 +204,7 @@
 "F1" = "command_mode"   # Help/command mode
 "F2" = "save_file"      # Quick save
 "F3" = "search_forward" # Find
+"F8" = "markdown_preview_toggle" # Toggle Markdown preview split
 "F10" = "quit"          # Exit
 
 [insert_mode]

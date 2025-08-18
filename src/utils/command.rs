@@ -159,6 +159,23 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
             let msg = editor.open_registers_view();
             editor.set_status_message(msg);
         }
+        // Markdown preview commands
+        "MarkdownPreviewOpen" => {
+            let msg = editor.open_markdown_preview();
+            editor.set_status_message(msg);
+        }
+        "MarkdownPreviewClose" => {
+            let msg = editor.close_markdown_preview();
+            editor.set_status_message(msg);
+        }
+        "MarkdownPreviewToggle" => {
+            let msg = editor.toggle_markdown_preview();
+            editor.set_status_message(msg);
+        }
+        "MarkdownPreviewRefresh" => {
+            let msg = editor.refresh_markdown_preview_now();
+            editor.set_status_message(msg);
+        }
 
         _ => {
             // Handle parameterized commands
@@ -510,6 +527,14 @@ pub fn handle_set_command(editor: &mut Editor, args: &str, persist: bool) {
                     editor.set_config_setting_ephemeral("percentpathroot", "false")
                 }
             }
+            // Markdown preview booleans
+            "mdpreview.scrollsync" => {
+                if persist {
+                    editor.set_config_setting("mdpreview.scrollsync", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("mdpreview.scrollsync", "false")
+                }
+            }
             _ => {
                 warn!("Unknown :set option: no{}", setting);
                 editor.set_status_message(format!("Unknown option: no{}", setting))
@@ -602,6 +627,54 @@ pub fn handle_set_command(editor: &mut Editor, args: &str, persist: bool) {
         } else {
             editor.set_status_message("Invalid timeout value".to_string());
         }
+        return;
+    }
+    // mdpreview.debounce_ms <number>
+    if let Some(value) = args.strip_prefix("mdpreview.debounce_ms ") {
+        let val = value.trim();
+        if val.parse::<u64>().is_ok() {
+            if persist {
+                editor.set_config_setting("mdpreview.debounce_ms", val);
+            } else {
+                editor.set_config_setting_ephemeral("mdpreview.debounce_ms", val);
+            }
+            editor.set_status_message(format!("mdpreview.debounce_ms set to {}", val));
+        } else {
+            editor.set_status_message("Invalid mdpreview.debounce_ms value".to_string());
+        }
+        return;
+    }
+    // mdpreview.update <manual|on_save|live>
+    if let Some(value) = args.strip_prefix("mdpreview.update ") {
+        let val = value.trim();
+        if persist {
+            editor.set_config_setting("mdpreview.update", val);
+        } else {
+            editor.set_config_setting_ephemeral("mdpreview.update", val);
+        }
+        editor.set_status_message(format!("mdpreview.update set to {}", val));
+        return;
+    }
+    // mdpreview.math <off|inline|block>
+    if let Some(value) = args.strip_prefix("mdpreview.math ") {
+        let val = value.trim();
+        if persist {
+            editor.set_config_setting("mdpreview.math", val);
+        } else {
+            editor.set_config_setting_ephemeral("mdpreview.math", val);
+        }
+        editor.set_status_message(format!("mdpreview.math set to {}", val));
+        return;
+    }
+    // mdpreview.large_file_mode <truncate|disable>
+    if let Some(value) = args.strip_prefix("mdpreview.large_file_mode ") {
+        let val = value.trim();
+        if persist {
+            editor.set_config_setting("mdpreview.large_file_mode", val);
+        } else {
+            editor.set_config_setting_ephemeral("mdpreview.large_file_mode", val);
+        }
+        editor.set_status_message(format!("mdpreview.large_file_mode set to {}", val));
         return;
     }
     if let Some(value) = args
@@ -776,6 +849,14 @@ pub fn handle_set_command(editor: &mut Editor, args: &str, persist: bool) {
                 editor.set_config_setting("percentpathroot", "true")
             } else {
                 editor.set_config_setting_ephemeral("percentpathroot", "true")
+            }
+        }
+        // Markdown preview booleans
+        "mdpreview.scrollsync" => {
+            if persist {
+                editor.set_config_setting("mdpreview.scrollsync", "true");
+            } else {
+                editor.set_config_setting_ephemeral("mdpreview.scrollsync", "true");
             }
         }
         _ => {

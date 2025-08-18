@@ -772,10 +772,13 @@ impl UI {
                             line.chars().take(30).collect::<String>()
                         );
 
-                        // Show what's actually being highlighted
+                        // Show what's actually being highlighted (UTF-8 safe)
                         for (i, highlight) in highlights.iter().enumerate() {
-                            let highlighted_text = &line
-                                [highlight.start.min(line.len())..highlight.end.min(line.len())];
+                            let bytes = line.as_bytes();
+                            let s = highlight.start.min(bytes.len());
+                            let e = highlight.end.min(bytes.len());
+                            let highlighted_text =
+                                std::str::from_utf8(&bytes[s..e]).unwrap_or("<invalid-utf8-range>");
                             debug!(
                                 "  Highlight {}: '{}' ({}-{}) color: {:?}",
                                 i,
@@ -845,20 +848,7 @@ impl UI {
                     }
                     // Render line without syntax highlighting but with visual selection support
                     // Apply horizontal offset and clamp to available width (UTF-8 safe)
-                    let start_byte = {
-                        if window.horiz_offset == 0 {
-                            0
-                        } else {
-                            let mut byte_idx = line.len();
-                            for (count, (b, _)) in line.char_indices().enumerate() {
-                                if count == window.horiz_offset {
-                                    byte_idx = b;
-                                    break;
-                                }
-                            }
-                            byte_idx
-                        }
-                    };
+                    let start_byte = Self::floor_char_boundary(line, window.horiz_offset);
                     // Determine end byte that fits within text_width characters
                     let mut chars_seen = 0usize;
                     let mut end_byte = start_byte;
