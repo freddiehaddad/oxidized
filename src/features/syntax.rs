@@ -236,7 +236,19 @@ impl LanguageSupport {
         node_mappings.insert("code_span".to_string(), SemanticCategory::Macro); // inline code
         node_mappings.insert("link".to_string(), SemanticCategory::Attribute);
         node_mappings.insert("image".to_string(), SemanticCategory::Attribute);
+        // Link/image subcomponents for richer highlighting
+        node_mappings.insert("link_label".to_string(), SemanticCategory::String);
+        node_mappings.insert("link_destination".to_string(), SemanticCategory::Attribute);
+        node_mappings.insert("link_title".to_string(), SemanticCategory::String);
+        node_mappings.insert("autolink".to_string(), SemanticCategory::Attribute);
+        // Some grammars split image parts as well
+        node_mappings.insert("image_description".to_string(), SemanticCategory::String);
+        node_mappings.insert("image_destination".to_string(), SemanticCategory::Attribute);
         node_mappings.insert("list_marker".to_string(), SemanticCategory::Punctuation);
+        node_mappings.insert(
+            "ordered_list_marker".to_string(),
+            SemanticCategory::Punctuation,
+        );
         node_mappings.insert(
             "task_list_marker_checked".to_string(),
             SemanticCategory::Punctuation,
@@ -247,9 +259,37 @@ impl LanguageSupport {
         );
         node_mappings.insert("block_quote".to_string(), SemanticCategory::Comment);
         node_mappings.insert("thematic_break".to_string(), SemanticCategory::Delimiter);
+        // Heading and underline markers
+        node_mappings.insert(
+            "atx_heading_marker".to_string(),
+            SemanticCategory::Punctuation,
+        );
+        node_mappings.insert(
+            "setext_heading_underline".to_string(),
+            SemanticCategory::Punctuation,
+        );
+        // Tables (generic + pipe-table variants)
         node_mappings.insert("table".to_string(), SemanticCategory::Delimiter);
         node_mappings.insert("table_row".to_string(), SemanticCategory::Delimiter);
         node_mappings.insert("table_cell".to_string(), SemanticCategory::Delimiter);
+        node_mappings.insert("pipe_table".to_string(), SemanticCategory::Delimiter);
+        node_mappings.insert("pipe_table_header".to_string(), SemanticCategory::Delimiter);
+        node_mappings.insert("pipe_table_row".to_string(), SemanticCategory::Delimiter);
+        node_mappings.insert("pipe_table_cell".to_string(), SemanticCategory::Delimiter);
+        node_mappings.insert(
+            "pipe_table_delimiter_row".to_string(),
+            SemanticCategory::Delimiter,
+        );
+        node_mappings.insert(
+            "table_delimiter_row".to_string(),
+            SemanticCategory::Delimiter,
+        );
+        // Reference-style links
+        node_mappings.insert(
+            "link_reference_definition".to_string(),
+            SemanticCategory::Attribute,
+        );
+        node_mappings.insert("reference_link".to_string(), SemanticCategory::Attribute);
 
         LanguageSupport {
             name: "markdown".to_string(),
