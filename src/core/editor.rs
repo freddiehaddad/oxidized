@@ -855,6 +855,50 @@ impl Editor {
                 current_window.horiz_offset = 0;
             }
         }
+
+        // After adjusting the current window's viewport, try syncing the markdown preview
+        self.maybe_sync_markdown_preview_viewport();
+    }
+
+    /// If markdown preview is open and scroll sync is enabled, align the preview window's
+    /// vertical viewport with the source window. One-way sync: source -> preview.
+    fn maybe_sync_markdown_preview_viewport(&mut self) {
+        // Fast exits
+        if !self.markdown_preview_open {
+            return;
+        }
+        if !self.config.markdown_preview.scroll_sync {
+            return;
+        }
+        // Only sync when the current buffer is a markdown source buffer
+        if !self.is_current_buffer_markdown() {
+            return;
+        }
+
+        // Get source viewport_top and preview identifiers
+        let (src_top, preview_wid, preview_bid) = match (
+            self.window_manager.current_window().map(|w| w.viewport_top),
+            self.markdown_preview_window_id,
+            self.markdown_preview_buffer_id,
+        ) {
+            (Some(t), Some(pwid), Some(pbid)) => (t, pwid, pbid),
+            _ => return,
+        };
+
+        // Account for the 2-line header in the preview buffer
+        let desired_top = src_top.saturating_add(2);
+
+        // Apply to the preview window, clamped to content
+        if let Some(preview_win) = self.window_manager.get_window_mut(preview_wid) {
+            let content_height = preview_win.content_height();
+            let total_lines = self
+                .buffers
+                .get(&preview_bid)
+                .map(|b| b.lines.len())
+                .unwrap_or(0);
+            let max_top = total_lines.saturating_sub(content_height);
+            preview_win.viewport_top = desired_top.min(max_top);
+        }
     }
 
     // Getters for UI and other components
@@ -2729,6 +2773,8 @@ impl Editor {
         self.markdown_preview_open = true;
         self.markdown_preview_buffer_id = Some(preview_buffer_id);
         self.markdown_preview_window_id = Some(new_window_id);
+        // Align preview viewport with current source position if enabled
+        self.maybe_sync_markdown_preview_viewport();
         self.status_message = "Markdown preview opened".to_string();
         self.request_redraw();
         self.status_message.clone()
@@ -2827,6 +2873,8 @@ impl Editor {
                 preview.cursor.col = 0;
             }
             // Also request a redraw so UI updates
+            // Try to keep preview viewport aligned after content changes
+            self.maybe_sync_markdown_preview_viewport();
             self.request_redraw();
             self.status_message = "Markdown preview refreshed".to_string();
         } else {
@@ -3004,6 +3052,8 @@ impl Editor {
         }
         // Request highlighting for newly visible lines
         self.request_visible_line_highlighting();
+        // Sync preview viewport if enabled
+        self.maybe_sync_markdown_preview_viewport();
     }
 
     pub fn scroll_up_line(&mut self) {
@@ -3013,6 +3063,8 @@ impl Editor {
         }
         // Request highlighting for newly visible lines
         self.request_visible_line_highlighting();
+        // Sync preview viewport if enabled
+        self.maybe_sync_markdown_preview_viewport();
     }
 
     pub fn scroll_down_page(&mut self) {
@@ -3059,6 +3111,8 @@ impl Editor {
 
         // Request highlighting for newly visible lines after scrolling
         self.request_visible_line_highlighting();
+        // Sync preview viewport if enabled
+        self.maybe_sync_markdown_preview_viewport();
     }
 
     pub fn scroll_up_page(&mut self) {
@@ -3104,6 +3158,8 @@ impl Editor {
 
         // Request highlighting for newly visible lines after scrolling
         self.request_visible_line_highlighting();
+        // Sync preview viewport if enabled
+        self.maybe_sync_markdown_preview_viewport();
     }
 
     pub fn scroll_down_half_page(&mut self) {
@@ -3151,6 +3207,8 @@ impl Editor {
 
         // Request highlighting for newly visible lines after scrolling
         self.request_visible_line_highlighting();
+        // Sync preview viewport if enabled
+        self.maybe_sync_markdown_preview_viewport();
     }
 
     pub fn scroll_up_half_page(&mut self) {
@@ -3197,6 +3255,8 @@ impl Editor {
 
         // Request highlighting for newly visible lines after scrolling
         self.request_visible_line_highlighting();
+        // Sync preview viewport if enabled
+        self.maybe_sync_markdown_preview_viewport();
     }
 
     // Centering methods (z commands in Vim)
@@ -3221,6 +3281,7 @@ impl Editor {
             // Request highlighting for newly visible lines and trigger redraw
             self.request_visible_line_highlighting();
             self.request_redraw();
+            self.maybe_sync_markdown_preview_viewport();
         }
     }
 
@@ -3235,6 +3296,7 @@ impl Editor {
             // Request highlighting for newly visible lines and trigger redraw
             self.request_visible_line_highlighting();
             self.request_redraw();
+            self.maybe_sync_markdown_preview_viewport();
         }
     }
 
@@ -3253,6 +3315,7 @@ impl Editor {
             // Request highlighting for newly visible lines and trigger redraw
             self.request_visible_line_highlighting();
             self.request_redraw();
+            self.maybe_sync_markdown_preview_viewport();
         }
     }
 
