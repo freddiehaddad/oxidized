@@ -1529,9 +1529,10 @@ impl KeyHandler {
         );
         if let Some(buffer) = editor.current_buffer_mut() {
             buffer.cursor.row = buffer.lines.len().saturating_sub(1);
-            if let Some(line) = buffer.get_line(buffer.cursor.row) {
-                buffer.cursor.col = line.len();
-            }
+            // Match Vim's default 'startofline' behavior: move to first non-blank
+            // character when jumping to a (different) line with G.
+            let row = buffer.cursor.row;
+            buffer.cursor.col = buffer.first_non_blank_col(row);
             if is_visual_mode {
                 buffer.update_visual_selection(buffer.cursor);
             }
