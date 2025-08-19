@@ -45,6 +45,57 @@ impl Default for UI {
 }
 
 impl UI {
+    /// Compute the hanging indent columns for a rendered Markdown preview line.
+    /// This prefers aligning wrapped continuations under the text following any
+    /// blockquote prefix (▎ ), unordered list bullet (• ), or ordered list marker
+    /// (e.g., `10. `). Returns the display column width to indent continuation rows.
+    fn preview_hanging_indent_cols(&self, line: &str) -> usize {
+        let mut i = 0usize;
+        let mut cols = 0usize;
+
+        // Consume any number of blockquote prefixes: "▎ "
+        while i < line.len() {
+            let s = &line[i..];
+            if s.starts_with("▎ ") {
+                cols += UnicodeWidthStr::width("▎ ");
+                i += "▎ ".len();
+            } else {
+                break;
+            }
+        }
+
+        // Unordered list bullet used by preview: "• "
+        if i < line.len() {
+            let s = &line[i..];
+            if s.starts_with("• ") {
+                cols += UnicodeWidthStr::width("• ");
+                return cols;
+            }
+        }
+
+        // Ordered list: one or more ASCII digits, then ". "
+        let digits_start = i;
+        while i < line.len() {
+            let b = line.as_bytes()[i];
+            if b.is_ascii_digit() {
+                cols += 1; // ASCII digit width
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        if i > digits_start {
+            let s = &line[i..];
+            if s.starts_with(". ") {
+                cols += UnicodeWidthStr::width(". ");
+                return cols;
+            }
+        }
+
+        // No recognized prefix -> no hanging indent
+        0
+    }
+
     pub fn new() -> Self {
         // Load theme configuration from themes.toml
         let theme_config = ThemeConfig::load();
@@ -536,7 +587,16 @@ impl UI {
         } else {
             editor_state.config.behavior.wrap_lines
         };
-        let word_break = editor_state.config.behavior.line_break;
+        // Use word-boundary wrapping for the markdown preview window to keep words intact
+        let word_break = if let Some(prev_id) = editor_state.markdown_preview_buffer_id {
+            if Some(prev_id) == window.buffer_id {
+                true
+            } else {
+                editor_state.config.behavior.line_break
+            }
+        } else {
+            editor_state.config.behavior.line_break
+        };
 
         if wrap_enabled {
             // Render using soft wrapping: multiple visual rows per logical line
@@ -586,11 +646,28 @@ impl UI {
 
                     // Render as many wrapped segments from this logical line as fit in remaining rows
                     let line = &buffer.lines[buf_row];
+                    // For preview, compute a hanging indent so continuation rows align under content
+                    let hanging_indent_cols =
+                        if let Some(prev_id) = editor_state.markdown_preview_buffer_id {
+                            if Some(prev_id) == window.buffer_id {
+                                self.preview_hanging_indent_cols(line).min(text_width)
+                            } else {
+                                0
+                            }
+                        } else {
+                            0
+                        };
                     let mut start = 0usize;
                     loop {
                         // Determine the end of this segment using UTF-8 safe wrapping
+                        // Continuations reserve space for the hanging indent in preview
+                        let avail_width = if start == 0 {
+                            text_width
+                        } else {
+                            text_width.saturating_sub(hanging_indent_cols)
+                        };
                         let (end, _seg_count) =
-                            self.wrap_next_end_byte(line, start, text_width, word_break);
+                            self.wrap_next_end_byte(line, start, avail_width, word_break);
                         let display_slice = &line[start..end];
                         // Measure visual columns of this slice for correct padding
                         let display_slice_cols = UnicodeWidthStr::width(display_slice);
@@ -618,23 +695,36 @@ impl UI {
                                 base_offset: base_offset_chars,
                                 total_line_chars: line.chars().count(),
                             };
+                            // Print hanging indent for continuation rows (preview only)
+                            if start > 0 && hanging_indent_cols > 0 {
+                                terminal.queue_print(&" ".repeat(hanging_indent_cols))?;
+                            }
                             let _rendered_cols = self.render_highlighted_line(
                                 terminal,
                                 display_slice,
                                 &shifted,
                                 &context,
                             )?;
-                            if display_slice_cols < text_width {
+                            let padded_width = if start == 0 {
+                                text_width
+                            } else {
+                                text_width.saturating_sub(hanging_indent_cols)
+                            };
+                            if display_slice_cols < padded_width {
                                 // Ensure filler uses the row background, not selection bg
                                 if is_cursor_line && self.show_cursor_line {
                                     terminal.queue_set_bg_color(self.theme.cursor_line_bg)?;
                                 } else {
                                     terminal.queue_set_bg_color(self.theme.background)?;
                                 }
-                                let filler = " ".repeat(text_width - display_slice_cols);
+                                let filler = " ".repeat(padded_width - display_slice_cols);
                                 terminal.queue_print(&filler)?;
                             }
                         } else {
+                            // Print hanging indent for continuation rows (preview only)
+                            if start > 0 && hanging_indent_cols > 0 {
+                                terminal.queue_print(&" ".repeat(hanging_indent_cols))?;
+                            }
                             self.render_plain_text_line(
                                 terminal,
                                 display_slice,
@@ -645,14 +735,19 @@ impl UI {
                                 base_offset_chars,
                                 line.chars().count(),
                             )?;
-                            if display_slice_cols < text_width {
+                            let padded_width = if start == 0 {
+                                text_width
+                            } else {
+                                text_width.saturating_sub(hanging_indent_cols)
+                            };
+                            if display_slice_cols < padded_width {
                                 // Ensure filler uses the row background, not selection bg
                                 if is_cursor_line && self.show_cursor_line {
                                     terminal.queue_set_bg_color(self.theme.cursor_line_bg)?;
                                 } else {
                                     terminal.queue_set_bg_color(self.theme.background)?;
                                 }
-                                let filler = " ".repeat(text_width - display_slice_cols);
+                                let filler = " ".repeat(padded_width - display_slice_cols);
                                 terminal.queue_print(&filler)?;
                             }
                         }
@@ -1019,7 +1114,16 @@ impl UI {
                 } else {
                     editor_state.config.behavior.wrap_lines
                 };
-                let word_break = editor_state.config.behavior.line_break;
+                // Use word-boundary wrapping for the markdown preview window to keep words intact
+                let word_break = if let Some(prev_id) = editor_state.markdown_preview_buffer_id {
+                    if Some(prev_id) == current_window.buffer_id {
+                        true
+                    } else {
+                        editor_state.config.behavior.line_break
+                    }
+                } else {
+                    editor_state.config.behavior.line_break
+                };
 
                 if wrap_enabled {
                     // Compute the visual row of the cursor by simulating wrapping from viewport_top
@@ -1043,10 +1147,25 @@ impl UI {
                             visual_rows += 1;
                             continue;
                         }
+                        let hanging_indent_cols =
+                            if let Some(prev_id) = editor_state.markdown_preview_buffer_id {
+                                if Some(prev_id) == current_window.buffer_id {
+                                    self.preview_hanging_indent_cols(line).min(text_width)
+                                } else {
+                                    0
+                                }
+                            } else {
+                                0
+                            };
                         let mut start = 0usize;
                         loop {
+                            let avail_width = if start == 0 {
+                                text_width
+                            } else {
+                                text_width.saturating_sub(hanging_indent_cols)
+                            };
                             let (end, _c) =
-                                self.wrap_next_end_byte(line, start, text_width, word_break);
+                                self.wrap_next_end_byte(line, start, avail_width, word_break);
                             visual_rows += 1;
                             if end >= line.len() {
                                 break;
@@ -1058,11 +1177,26 @@ impl UI {
                     // Determine which wrapped segment within the cursor line the cursor is in
                     let (segment_index, segment_start) = if buffer.cursor.row < buffer.lines.len() {
                         let line = &buffer.lines[buffer.cursor.row];
+                        let hanging_indent_cols =
+                            if let Some(prev_id) = editor_state.markdown_preview_buffer_id {
+                                if Some(prev_id) == current_window.buffer_id {
+                                    self.preview_hanging_indent_cols(line).min(text_width)
+                                } else {
+                                    0
+                                }
+                            } else {
+                                0
+                            };
                         let mut start = 0usize;
                         let mut seg_idx = 0usize;
                         loop {
+                            let avail_width = if start == 0 {
+                                text_width
+                            } else {
+                                text_width.saturating_sub(hanging_indent_cols)
+                            };
                             let (end, _c) =
-                                self.wrap_next_end_byte(line, start, text_width, word_break);
+                                self.wrap_next_end_byte(line, start, avail_width, word_break);
                             // Treat a cursor at a segment boundary as belonging to the NEXT segment,
                             // except when this is the final segment (end-of-line).
                             if buffer.cursor.col < end {
@@ -1091,8 +1225,21 @@ impl UI {
                         let slice = if start < end { &line[start..end] } else { "" };
                         let within_segment_cols = UnicodeWidthStr::width(slice);
                         let final_row = current_window.y as usize + screen_row;
-                        let final_col =
-                            current_window.x as usize + line_number_width + within_segment_cols;
+                        // Include hanging indent for continuation segments in preview
+                        let hanging_indent_cols =
+                            if let Some(prev_id) = editor_state.markdown_preview_buffer_id {
+                                if Some(prev_id) == current_window.buffer_id && segment_start > 0 {
+                                    self.preview_hanging_indent_cols(line).min(text_width)
+                                } else {
+                                    0
+                                }
+                            } else {
+                                0
+                            };
+                        let final_col = current_window.x as usize
+                            + line_number_width
+                            + hanging_indent_cols
+                            + within_segment_cols;
                         terminal.queue_move_cursor(Position::new(final_row, final_col))?;
                     }
                 } else {
@@ -2251,6 +2398,91 @@ impl UI {
 
     pub fn set_viewport_top(&mut self, viewport_top: usize) {
         self.viewport_top = viewport_top;
+    }
+}
+
+// Note on test location:
+// These unit tests are colocated in renderer.rs on purpose. They exercise the
+// private helper `preview_hanging_indent_cols` used by the Markdown preview
+// wrapping logic. Keeping them here allows direct access to the private
+// function without changing its visibility or introducing a public seam just
+// for testing. End-to-end preview behavior remains covered by integration
+// tests under `tests/`.
+#[cfg(test)]
+mod preview_hanging_indent_tests {
+    use super::UI;
+    use unicode_width::UnicodeWidthStr;
+
+    #[test]
+    fn plain_text_has_no_hanging_indent() {
+        let ui = UI::new();
+        assert_eq!(ui.preview_hanging_indent_cols("hello world"), 0);
+        assert_eq!(ui.preview_hanging_indent_cols(""), 0);
+    }
+
+    #[test]
+    fn blockquote_only_has_no_indent_and_accumulates_with_list() {
+        let ui = UI::new();
+        let q = "▎ ";
+        let w_q = UnicodeWidthStr::width(q);
+        // Quote prefix alone does not trigger hanging indent
+        assert_eq!(ui.preview_hanging_indent_cols("▎ hello"), 0);
+        // Multiple quote prefixes alone also do not trigger indent
+        assert_eq!(ui.preview_hanging_indent_cols("▎ ▎ nested"), 0);
+        // Blockquote followed by bullet accumulates both
+        let w_bullet = UnicodeWidthStr::width("• ");
+        assert_eq!(ui.preview_hanging_indent_cols("▎ • item"), w_q + w_bullet);
+    }
+
+    #[test]
+    fn unordered_list_bullet_contributes_width() {
+        let ui = UI::new();
+        let w = UnicodeWidthStr::width("• ");
+        assert_eq!(ui.preview_hanging_indent_cols("• item"), w);
+        // Bullet must be at start (after optional quotes); mid-line bullet is ignored
+        assert_eq!(ui.preview_hanging_indent_cols("x • item"), 0);
+    }
+
+    #[test]
+    fn ordered_list_marker_counts_digits_and_dot_space() {
+        let ui = UI::new();
+        let dot_space = UnicodeWidthStr::width(". ");
+        // Single digit: 1 digit + ". "
+        assert_eq!(ui.preview_hanging_indent_cols("9. item"), 1 + dot_space);
+        // Multiple digits
+        assert_eq!(ui.preview_hanging_indent_cols("10. item"), 2 + dot_space);
+        assert_eq!(ui.preview_hanging_indent_cols("123. item"), 3 + dot_space);
+
+        // Requires exact ". " after digits; otherwise no indent
+        assert_eq!(ui.preview_hanging_indent_cols("1.x item"), 0);
+        assert_eq!(ui.preview_hanging_indent_cols("1 item"), 0);
+    }
+
+    #[test]
+    fn mixed_blockquote_and_ordered_list_accumulate() {
+        let ui = UI::new();
+        let w_q = UnicodeWidthStr::width("▎ ");
+        let dot_space = UnicodeWidthStr::width(". ");
+        // ▎ 10. item -> quote width + 2 digits + ". "
+        assert_eq!(
+            ui.preview_hanging_indent_cols("▎ 10. item"),
+            w_q + 2 + dot_space
+        );
+        // ▎ ▎ 3. item -> two quotes + 1 digit + ". "
+        assert_eq!(
+            ui.preview_hanging_indent_cols("▎ ▎ 3. item"),
+            (w_q * 2) + 1 + dot_space
+        );
+    }
+
+    #[test]
+    fn unrelated_prefixes_do_not_trigger_indent() {
+        let ui = UI::new();
+        assert_eq!(ui.preview_hanging_indent_cols("> not our quote style"), 0);
+        assert_eq!(ui.preview_hanging_indent_cols("- item"), 0);
+        assert_eq!(ui.preview_hanging_indent_cols("•item (no space)"), 0);
+        // Embedded symbols not at start are ignored
+        assert_eq!(ui.preview_hanging_indent_cols("text ▎ quoted later"), 0);
     }
 }
 
