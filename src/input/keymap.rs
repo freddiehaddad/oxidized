@@ -10,6 +10,10 @@ use std::time::Instant;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct KeymapConfig {
+    /// Optional leader key token as it should appear in key strings (e.g., "Space", ",", "\\")
+    /// If not provided in keymaps.toml, we default to "Space".
+    #[serde(default)]
+    pub leader: Option<String>,
     pub normal_mode: HashMap<String, String>,
     pub insert_mode: HashMap<String, String>,
     pub command_mode: HashMap<String, String>,
@@ -83,7 +87,7 @@ impl Default for KeyHandler {
 
 impl KeyHandler {
     pub fn new() -> Self {
-        Self {
+        let mut this = Self {
             keymap_config: Self::load_default_keymaps(),
             pending_sequence: String::new(),
             last_key_time: None,
@@ -97,7 +101,10 @@ impl KeyHandler {
             pending_mark_jump_line: false,
             pending_mark_jump_exact: false,
             pending_register_prefix: false,
-        }
+        };
+        // Post-process keymaps to expand leader placeholders
+        this.keymap_config = Self::postprocess_keymaps(this.keymap_config.clone());
+        this
     }
 
     /// Test-only helper: build a `KeyHandler` using the repository-embedded default
@@ -107,6 +114,7 @@ impl KeyHandler {
     pub fn test_with_embedded() -> Self {
         const EMBEDDED_KEYMAPS: &str = include_str!("../../keymaps.toml");
         let keymap_config = toml::from_str::<KeymapConfig>(EMBEDDED_KEYMAPS)
+            .map(Self::postprocess_keymaps)
             .unwrap_or_else(|_| Self::create_minimal_fallback());
         Self {
             keymap_config,
@@ -151,6 +159,7 @@ impl KeyHandler {
     fn create_minimal_fallback() -> KeymapConfig {
         // Return fully empty maps to avoid any hard-coded keybindings in code
         KeymapConfig {
+            leader: Some("Space".to_string()),
             normal_mode: HashMap::new(),
             insert_mode: HashMap::new(),
             command_mode: HashMap::new(),
@@ -163,6 +172,99 @@ impl KeyHandler {
             search_mode: HashMap::new(),
             operator_pending_mode: HashMap::new(),
         }
+    }
+
+    /// Post-process keymaps: expand any occurrences of the special token "leader"
+    /// into the configured leader key (default "Space"), and normalize sequences
+    /// so that keys following the leader are space-separated single-key tokens
+    /// (e.g., "leader mp" -> "Space m p").
+    fn postprocess_keymaps(mut cfg: KeymapConfig) -> KeymapConfig {
+        let leader_token = cfg.leader.clone().unwrap_or_else(|| "Space".to_string());
+
+        fn expand_map(
+            src: &HashMap<String, String>,
+            leader_token: &str,
+        ) -> HashMap<String, String> {
+            let mut out = HashMap::new();
+            for (k, v) in src.iter() {
+                let expanded = expand_leader_key(k, leader_token);
+                out.insert(expanded, v.clone());
+            }
+            out
+        }
+
+        fn expand_leader_key(key: &str, leader_token: &str) -> String {
+            // Tokenize by spaces; look for a standalone token equal to "leader" (case-insensitive)
+            let tokens: Vec<&str> = key.split(' ').collect();
+            if !tokens.iter().any(|t| t.eq_ignore_ascii_case("leader")) {
+                return key.to_string();
+            }
+
+            let mut out_tokens: Vec<String> = Vec::new();
+            let mut leader_seen = false;
+            for tok in tokens {
+                if tok.eq_ignore_ascii_case("leader") {
+                    out_tokens.push(leader_token.to_string());
+                    leader_seen = true;
+                } else if leader_seen && should_split_token(tok) {
+                    // Split into single characters
+                    for ch in tok.chars() {
+                        out_tokens.push(ch.to_string());
+                    }
+                } else {
+                    out_tokens.push(tok.to_string());
+                }
+            }
+            out_tokens.join(" ")
+        }
+
+        fn should_split_token(tok: &str) -> bool {
+            if tok.len() <= 1 {
+                return false;
+            }
+            // Do not split well-known multi-char tokens or modified keys
+            if tok.contains('+') {
+                return false;
+            }
+            let upper = tok.to_ascii_uppercase();
+            if upper.starts_with('F') && upper[1..].chars().all(|c| c.is_ascii_digit()) {
+                return false; // Function keys like F8
+            }
+            !matches!(
+                tok,
+                "Enter"
+                    | "Escape"
+                    | "Tab"
+                    | "Backspace"
+                    | "Delete"
+                    | "Home"
+                    | "End"
+                    | "PageUp"
+                    | "PageDown"
+                    | "Insert"
+                    | "Left"
+                    | "Right"
+                    | "Up"
+                    | "Down"
+                    | "Space"
+            )
+        }
+
+        cfg.normal_mode = expand_map(&cfg.normal_mode, &leader_token);
+        cfg.insert_mode = expand_map(&cfg.insert_mode, &leader_token);
+        cfg.command_mode = expand_map(&cfg.command_mode, &leader_token);
+        cfg.visual_mode = expand_map(&cfg.visual_mode, &leader_token);
+        cfg.visual_line_mode = expand_map(&cfg.visual_line_mode, &leader_token);
+        cfg.visual_block_mode = expand_map(&cfg.visual_block_mode, &leader_token);
+        cfg.select_mode = expand_map(&cfg.select_mode, &leader_token);
+        cfg.select_line_mode = expand_map(&cfg.select_line_mode, &leader_token);
+        cfg.replace_mode = expand_map(&cfg.replace_mode, &leader_token);
+        cfg.search_mode = expand_map(&cfg.search_mode, &leader_token);
+        cfg.operator_pending_mode = expand_map(&cfg.operator_pending_mode, &leader_token);
+
+        // Ensure leader is set to a concrete value post processing
+        cfg.leader = Some(leader_token);
+        cfg
     }
 
     pub fn handle_key(&mut self, editor: &mut Editor, key: KeyEvent) -> Result<()> {
@@ -767,6 +869,9 @@ impl KeyHandler {
                     // For shifted special characters, remove Shift+ as the character itself represents the shifted version
                     result.truncate(result.len() - 6); // Remove "Shift+"
                     result.push(c);
+                } else if c == ' ' {
+                    // Represent space as a named token to avoid clashing with sequence separator
+                    result.push_str("Space");
                 } else {
                     result.push(c);
                 }

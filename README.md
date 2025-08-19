@@ -37,12 +37,12 @@ Docs:
 First‑class Markdown authoring in a terminal editor:
 
 - Tree‑sitter powered Markdown highlighting that combines the block and inline grammars for accurate headings, emphasis, code spans, links, lists, tables, and more. Safe integration (no runtime mismatch) and rust‑inspired colors.
-- Built‑in Markdown preview: right split, live updates (debounced), one‑way scroll sync, and terminal‑safe rendering via pulldown‑cmark (no HTML in the TTY). Toggle with F8 or `:MarkdownPreviewToggle`; control behavior with `editor.toml`.
+- Built‑in Markdown preview: right split, live updates (debounced), one‑way scroll sync, and terminal‑safe rendering via pulldown‑cmark (no HTML in the TTY). Toggle with F8, `<leader> m p` (leader defaults to Space), or `:MarkdownPreviewToggle`; control behavior with `editor.toml`.
 
 Learn more:
 
 - Configuration and commands: [docs/CONFIGURATION.md](./docs/CONFIGURATION.md#markdown-preview-settings-and-commands)
-- Keymaps (F8): [docs/KEYMAPS.md](./docs/KEYMAPS.md)
+- Keymaps (F8 / `<leader> m p`): [docs/KEYMAPS.md](./docs/KEYMAPS.md)
 - Status and roadmap: [docs/FEATURE_STATUS.md](./docs/FEATURE_STATUS.md) · [docs/ROADMAP.md](./docs/ROADMAP.md)
 
 See status and timeline: [docs/FEATURE_STATUS.md](./docs/FEATURE_STATUS.md) and [docs/ROADMAP.md](./docs/ROADMAP.md).

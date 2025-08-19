@@ -116,7 +116,8 @@ Runtime commands:
 
 - `:MarkdownPreviewOpen` — open a right split with the preview
 - `:MarkdownPreviewClose` — close the preview split
-- `:MarkdownPreviewToggle` — toggle the preview on/off (also bound to F8)
+- `:MarkdownPreviewToggle` — toggle the preview on/off (bound to `F8` and to
+  the leader mapping `leader m p` by default)
 - `:MarkdownPreviewRefresh` — re-render the preview now
 
 Runtime tweaks (session-only) and persistence (write to config):

@@ -15,6 +15,10 @@
 # - After editing, save the file; the editor will live-reload keymaps.
 # ###############################################################################
 
+# Special: configurable leader key (like Vim). Use token "leader" in mappings.
+# Default here is Space; users can change to "," or another key.
+leader = "Space"
+
 [normal_mode]
 # Movement
 "h" = "cursor_left"         # Move cursor left
@@ -205,6 +209,7 @@
 "F2" = "save_file"      # Quick save
 "F3" = "search_forward" # Find
 "F8" = "markdown_preview_toggle" # Toggle Markdown preview split
+"leader m p" = "markdown_preview_toggle" # Leader shortcut like Vim: <leader>mp
 "F10" = "quit"          # Exit
 
 [insert_mode]

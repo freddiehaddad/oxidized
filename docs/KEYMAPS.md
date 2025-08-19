@@ -45,6 +45,27 @@ at the root.
 "F8" = "markdown_preview_toggle"
 ```
 
+## Leader key
+
+Oxidized supports a Vim-style leader key. Use the special token `leader` in your
+keymaps; by default the leader is `Space`. You can change it at the top level of
+`keymaps.toml`:
+
+```toml
+# Special: configurable leader key (like Vim). Use token "leader" in mappings.
+leader = "Space"            # examples: "," or "Space" or "\\"
+
+[normal_mode]
+"leader m p" = "markdown_preview_toggle"  # Space m p by default
+```
+
+Notes:
+
+- The token `leader` is expanded during keymap loading; it works in any mode
+  table. Sequences after `leader` are space-separated single keys.
+- The default `keymaps.toml` ships with `leader = "Space"` and maps
+  `leader m p` to `markdown_preview_toggle` (same as `F8`).
+
 ## Tips
 
 - Keep overrides small; merging is by table, so only changed keys are needed.
