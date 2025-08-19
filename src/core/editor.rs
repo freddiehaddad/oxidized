@@ -759,10 +759,15 @@ impl Editor {
             filetype: self
                 .current_buffer()
                 .and_then(|b| b.file_path.as_ref())
-                .and_then(|p| p.extension())
-                .map(|e| e.to_string_lossy().to_string())
+                .map(|p| p.to_string_lossy().to_string())
+                .and_then(|path_str| {
+                    // Prefer a friendly language name (e.g., "markdown") over raw extension (e.g., "md")
+                    self.config
+                        .languages
+                        .detect_language_from_extension(&path_str)
+                })
                 .or_else(|| {
-                    // If unnamed, show fallback language (e.g., text)
+                    // If unnamed or undetected, fall back to configured default language (e.g., "text")
                     self.config.languages.get_fallback_language()
                 }),
             macro_recording: self.macro_recorder.recording_register(),
