@@ -58,6 +58,7 @@ default_language = "text" # Fallback language when no extension matches
 update = "live"              # manual | on_save | live
 debounce_ms = 150            # ms for live update debounce
 scroll_sync = true           # synchronize scroll positions
+wrap_lines = true            # soft wrap in preview window only
 math = "off"                 # off | inline | block
 large_file_mode = "truncate" # truncate | disable
 

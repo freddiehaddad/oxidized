@@ -526,8 +526,16 @@ impl UI {
         let text_start_col = window.x as usize + line_number_width;
         let text_width = window.width.saturating_sub(line_number_width as u16) as usize;
 
-        // Wrapping flags
-        let wrap_enabled = editor_state.config.behavior.wrap_lines;
+        // Wrapping flags: use preview-specific setting if this window shows the preview buffer
+        let wrap_enabled = if let Some(prev_id) = editor_state.markdown_preview_buffer_id {
+            if Some(prev_id) == window.buffer_id {
+                editor_state.config.markdown_preview.wrap_lines
+            } else {
+                editor_state.config.behavior.wrap_lines
+            }
+        } else {
+            editor_state.config.behavior.wrap_lines
+        };
         let word_break = editor_state.config.behavior.line_break;
 
         if wrap_enabled {
@@ -1002,7 +1010,15 @@ impl UI {
                 // Calculate gutter width
                 let line_number_width = self.compute_gutter_width(buffer.lines.len());
 
-                let wrap_enabled = editor_state.config.behavior.wrap_lines;
+                let wrap_enabled = if let Some(prev_id) = editor_state.markdown_preview_buffer_id {
+                    if Some(prev_id) == current_window.buffer_id {
+                        editor_state.config.markdown_preview.wrap_lines
+                    } else {
+                        editor_state.config.behavior.wrap_lines
+                    }
+                } else {
+                    editor_state.config.behavior.wrap_lines
+                };
                 let word_break = editor_state.config.behavior.line_break;
 
                 if wrap_enabled {
@@ -1738,6 +1754,7 @@ impl UI {
                 "percentpathroot" => &["ppr"],
                 "colorscheme" => &["colo"],
                 "syntax" => &["syn"],
+                "mdpreview.wrap" => &[],
                 _ => &[],
             };
 
@@ -1765,6 +1782,9 @@ impl UI {
                 "hlsearch" => Some(editor_state.config.behavior.highlight_search.to_string()),
                 "incsearch" => Some(editor_state.config.behavior.incremental_search.to_string()),
                 "wrap" => Some(editor_state.config.behavior.wrap_lines.to_string()),
+                "mdpreview.wrap" => {
+                    Some(editor_state.config.markdown_preview.wrap_lines.to_string())
+                }
                 "linebreak" => Some(editor_state.config.behavior.line_break.to_string()),
                 // Editing
                 "undolevels" => Some(editor_state.config.editing.undo_levels.to_string()),
@@ -1847,6 +1867,7 @@ impl UI {
                         | "hlsearch"
                         | "incsearch"
                         | "wrap"
+                        | "mdpreview.wrap"
                         | "linebreak"
                         | "undofile"
                         | "backup"
@@ -1876,6 +1897,7 @@ impl UI {
                         "hlsearch" => editor_state.config.behavior.highlight_search,
                         "incsearch" => editor_state.config.behavior.incremental_search,
                         "wrap" => editor_state.config.behavior.wrap_lines,
+                        "mdpreview.wrap" => editor_state.config.markdown_preview.wrap_lines,
                         "linebreak" => editor_state.config.behavior.line_break,
                         "undofile" => editor_state.config.editing.persistent_undo,
                         "backup" => editor_state.config.editing.backup,
@@ -1915,6 +1937,7 @@ impl UI {
                         "hlsearch" => editor_state.config.behavior.highlight_search,
                         "incsearch" => editor_state.config.behavior.incremental_search,
                         "wrap" => editor_state.config.behavior.wrap_lines,
+                        "mdpreview.wrap" => editor_state.config.markdown_preview.wrap_lines,
                         "linebreak" => editor_state.config.behavior.line_break,
                         "undofile" => editor_state.config.editing.persistent_undo,
                         "backup" => editor_state.config.editing.backup,

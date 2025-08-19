@@ -73,6 +73,8 @@ pub struct EditorRenderState {
     pub syntax_highlights: HashMap<(usize, usize), Vec<HighlightRange>>, // (buffer_id, line_index) -> highlights
     pub command_completion: CommandCompletion,
     pub config: EditorConfig,
+    /// If set, indicates the buffer ID used for the Markdown preview window
+    pub markdown_preview_buffer_id: Option<usize>,
     // --- Status line extras ---
     pub filetype: Option<String>,
     pub macro_recording: Option<char>,
@@ -753,6 +755,7 @@ impl Editor {
             syntax_highlights,
             command_completion: self.command_completion.clone(),
             config: self.config.clone(),
+            markdown_preview_buffer_id: self.markdown_preview_buffer_id,
             filetype: self
                 .current_buffer()
                 .and_then(|b| b.file_path.as_ref())
@@ -799,8 +802,16 @@ impl Editor {
             let max_viewport_top = buffer.lines.len().saturating_sub(content_height);
             current_window.viewport_top = current_window.viewport_top.min(max_viewport_top);
 
-            // Maintain horizontal offset when wrapping is disabled
-            if !self.config.behavior.wrap_lines {
+            // Maintain horizontal offset when wrapping is disabled for this window
+            let is_preview_window = self
+                .markdown_preview_window_id
+                .is_some_and(|wid| Some(wid) == Some(current_window.id));
+            let wrap_for_this_window = if is_preview_window {
+                self.config.markdown_preview.wrap_lines
+            } else {
+                self.config.behavior.wrap_lines
+            };
+            if !wrap_for_this_window {
                 use unicode_segmentation::UnicodeSegmentation;
                 use unicode_width::UnicodeWidthStr;
 
@@ -2532,6 +2543,7 @@ impl Editor {
             "mdpreview.update" => Some(self.config.markdown_preview.update.clone()),
             "mdpreview.debounce_ms" => Some(self.config.markdown_preview.debounce_ms.to_string()),
             "mdpreview.scrollsync" => Some(self.config.markdown_preview.scroll_sync.to_string()),
+            "mdpreview.wrap" => Some(self.config.markdown_preview.wrap_lines.to_string()),
             "mdpreview.math" => Some(self.config.markdown_preview.math.clone()),
             "mdpreview.large_file_mode" => {
                 Some(self.config.markdown_preview.large_file_mode.clone())

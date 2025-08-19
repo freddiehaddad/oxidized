@@ -32,6 +32,7 @@ fn status_line_matches_terminal_width_on_resize() {
         syntax_highlights: HashMap::new(),
         command_completion: Default::default(),
         config,
+        markdown_preview_buffer_id: None,
         filetype: Some("Plain".to_string()),
         macro_recording: None,
         search_total: 0,

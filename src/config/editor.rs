@@ -225,6 +225,12 @@ impl EditorConfig {
                     Kind::Bool,
                     if b(val) { "true" } else { "false" }.to_string(),
                 )),
+                "mdpreview.wrap" => Some((
+                    "markdown_preview",
+                    "wrap_lines",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
                 "mdpreview.math" => Some(("markdown_preview", "math", Kind::Str, val.to_string())),
                 "mdpreview.large_file_mode" => Some((
                     "markdown_preview",
@@ -765,6 +771,17 @@ impl EditorConfig {
                     }
                 ))
             }
+            "mdpreview.wrap" => {
+                self.markdown_preview.wrap_lines = value.parse().unwrap_or(true);
+                Ok(format!(
+                    "mdpreview.wrap: {}",
+                    if self.markdown_preview.wrap_lines {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                ))
+            }
             "mdpreview.math" => {
                 self.markdown_preview.math = value.to_string();
                 Ok(format!("mdpreview.math: {}", self.markdown_preview.math))
@@ -801,6 +818,8 @@ pub struct MarkdownPreviewConfig {
     pub debounce_ms: u64,
     /// Enable scroll synchronization between source and preview
     pub scroll_sync: bool,
+    /// Soft wrap long lines in the markdown preview window only
+    pub wrap_lines: bool,
     /// Math mode handling: "off", "inline", or "block"
     pub math: String,
     /// Behavior on very large files: "truncate" or "disable"

@@ -30,6 +30,7 @@ fn make_base_state() -> (EditorRenderState, oxidized::config::EditorConfig) {
             syntax_highlights: HashMap::new(),
             command_completion: Default::default(),
             config: config.clone(),
+            markdown_preview_buffer_id: None,
             filetype: None,
             macro_recording: None,
             search_total: 0,

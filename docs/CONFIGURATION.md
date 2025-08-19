@@ -102,6 +102,9 @@ debounce_ms = 150
 # Keep the preview viewport aligned with the source buffer
 scrollsync = true
 
+# Wrap long lines in the preview window only (independent from main editor "wrap")
+wrap = true
+
 # Inline/block math passthrough in the preview: "off" | "inline" | "block"
 math = "off"
 
@@ -120,6 +123,13 @@ Runtime tweaks (session-only) and persistence (write to config):
 
 - Session-only: `:set mdpreview.update live`, `:set mdpreview.scrollsync`
 - Persisted: `:setp mdpreview.update on_save`, `:setp nomdpreview.scrollsync`
+
+Preview wrapping:
+
+- Toggle for this session: `:set mdpreview.wrap` / `:set nomdpreview.wrap`
+- Persist to config: `:setp mdpreview.wrap` / `:setp nomdpreview.wrap`
+- This only affects the preview pane; the main editor uses `wrap` under
+  `[behavior]`.
 
 Notes:
 

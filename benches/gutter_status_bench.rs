@@ -25,6 +25,7 @@ fn make_editor_state(_total_lines: usize, width: u16) -> EditorRenderState {
         macro_recording: None,
         search_total: 0,
         search_index: None,
+        markdown_preview_buffer_id: None,
     }
 }
 
