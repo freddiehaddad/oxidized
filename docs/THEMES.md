@@ -42,3 +42,20 @@ See the root `themes.toml` for the canonical list and default values.
 - Unspecified keys fall back to built-in defaults.
 - After editing `themes.toml`, changes apply live; the syntax cache is cleared
   and visible lines are re-enqueued for highlighting.
+
+## Markdown preview theming
+
+The Markdown preview uses semantic categories that map to the
+`[themes.<name>.tree_sitter]` colors.
+
+Common categories used by the preview:
+
+- `comment` — blockquote prefixes and inline/code block content
+- `punctuation` — link brackets `[` and `]`, task list markers
+- `attribute` — inner link text (e.g., `[text]`)
+- `delimiter` — heading underline lines, horizontal rules
+- `type` — base heading text (non-bold/italic parts)
+- `constant` — bold text regions
+- `string` — italic text regions
+
+You can tweak these keys in your theme to change the preview appearance.

@@ -6,7 +6,9 @@ use crate::core::mode::Mode;
 use crate::core::window::{SplitDirection, WindowManager};
 use crate::features::completion::CommandCompletion;
 use crate::features::search::{SearchEngine, SearchResult};
-use crate::features::syntax::{AsyncSyntaxHighlighter, HighlightRange, HighlightResult, Priority};
+use crate::features::syntax::{
+    AsyncSyntaxHighlighter, HighlightRange, HighlightResult, HighlightStyle, Priority,
+};
 use crate::input::keymap::KeyHandler;
 use crate::ui::UI;
 use crate::ui::terminal::Terminal;
@@ -137,6 +139,8 @@ pub struct Editor {
     markdown_preview_window_id: Option<usize>,
     /// Debounce timestamp for live preview refreshes
     last_markdown_preview_refresh: Option<Instant>,
+    /// Precomputed highlights for markdown preview buffer lines: (buffer_id, line) -> ranges
+    preview_highlights: HashMap<(usize, usize), Vec<HighlightRange>>,
 }
 
 impl Editor {
@@ -233,6 +237,7 @@ impl Editor {
             markdown_preview_buffer_id: None,
             markdown_preview_window_id: None,
             last_markdown_preview_refresh: None,
+            preview_highlights: HashMap::new(),
         };
         // Initialize reserved rows for status/command lines based on config
         let reserved_rows = editor.reserved_rows_from_config();
@@ -666,7 +671,8 @@ impl Editor {
         let mut syntax_highlights = HashMap::new();
 
         // First, collect all the lines that need highlighting from all windows
-        let mut lines_to_highlight = HashMap::new(); // (buffer_id, line_index) -> (line_content, file_path)
+        // Always collect lines, even if the buffer has no file path (e.g., markdown preview buffers)
+        let mut lines_to_highlight: HashMap<(usize, usize), (String, String)> = HashMap::new();
 
         for window in self.window_manager.all_windows().values() {
             if let Some(buffer_id) = window.buffer_id
@@ -688,13 +694,13 @@ impl Editor {
                     }
 
                     if let Some(line) = buffer.get_line(line_index) {
-                        let file_path = buffer
+                        let path = buffer
                             .file_path
                             .as_ref()
-                            .map(|p| p.to_string_lossy().to_string());
-                        if let Some(path) = file_path {
-                            lines_to_highlight.insert(key, (line.clone(), path));
-                        }
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        // Insert even if path is empty; preview buffers will use precomputed highlights
+                        lines_to_highlight.insert(key, (line.clone(), path));
                     }
                 }
             }
@@ -703,8 +709,17 @@ impl Editor {
         // Now generate syntax highlights for all collected lines
         for (key, (line_content, file_path)) in lines_to_highlight {
             let (buffer_id, line_index) = key;
-            let highlights =
-                self.get_syntax_highlights(buffer_id, line_index, &line_content, Some(&file_path));
+            // If this is a markdown preview buffer and we have precomputed preview highlights, use them
+            let highlights = if self.markdown_preview_buffer_id == Some(buffer_id) {
+                if let Some(h) = self.preview_highlights.get(&(buffer_id, line_index)) {
+                    h.clone()
+                } else {
+                    // No precomputed spans: don't attempt tree-sitter for preview buffers
+                    Vec::new()
+                }
+            } else {
+                self.get_syntax_highlights(buffer_id, line_index, &line_content, Some(&file_path))
+            };
             // Store ALL highlights, even empty ones, so UI knows syntax highlighting was attempted
             syntax_highlights.insert(key, highlights);
         }
@@ -2661,6 +2676,52 @@ impl Editor {
         }
     }
 
+    /// Build per-line highlight ranges for a markdown preview render using the current theme mapping
+    fn build_preview_highlights(
+        &mut self,
+        buffer_id: usize,
+        render: crate::utils::markdown::MarkdownRender,
+    ) {
+        // Map SemanticCategory -> HighlightStyle (color) using current theme
+        let theme = self.theme_config.get_current_theme();
+
+        let make_style =
+            |cat: &crate::features::syntax::SemanticCategory| -> Option<HighlightStyle> {
+                let key = cat.as_str();
+                theme
+                    .syntax
+                    .tree_sitter_mappings
+                    .get(key)
+                    .map(|color| HighlightStyle::from_color(*color))
+            };
+
+        // Clear old highlights for this buffer
+        self.preview_highlights
+            .retain(|(bid, _line), _| *bid != buffer_id);
+
+        for (line_idx, line) in render.lines.iter().enumerate() {
+            if let Some(spans) = render.spans.get(&line_idx) {
+                let mut ranges: Vec<HighlightRange> = Vec::with_capacity(spans.len());
+                for sp in spans {
+                    if sp.start < sp.end
+                        && sp.end <= line.len()
+                        && let Some(style) = make_style(&sp.category)
+                    {
+                        ranges.push(HighlightRange {
+                            start: sp.start,
+                            end: sp.end,
+                            style,
+                        });
+                    }
+                }
+                if !ranges.is_empty() {
+                    self.preview_highlights
+                        .insert((buffer_id, line_idx), ranges);
+                }
+            }
+        }
+    }
+
     /// Get highlighted text for a specific line in the current buffer
     pub fn get_line_highlights(
         &mut self,
@@ -2733,17 +2794,19 @@ impl Editor {
 
         // Populate preview buffer with rendered markdown (if available)
         if let Some(collected) = src_lines {
-            let lines = crate::utils::markdown::render_markdown_to_lines(
+            let render = crate::utils::markdown::render_markdown(
                 &collected,
                 &self.config.markdown_preview.math,
                 &self.config.markdown_preview.large_file_mode,
             );
             if let Some(preview) = self.buffers.get_mut(&preview_buffer_id) {
-                preview.lines = lines;
+                preview.lines = render.lines.clone();
                 preview.modified = false;
                 preview.cursor.row = 0;
                 preview.cursor.col = 0;
             }
+            // Build preview highlights with current theme
+            self.build_preview_highlights(preview_buffer_id, render);
         }
 
         // Ensure the right window points at the preview buffer
@@ -2786,6 +2849,9 @@ impl Editor {
         }
         if let Some(bid) = self.markdown_preview_buffer_id.take() {
             let _ = self.close_buffer(bid);
+            // Drop any cached preview highlights for this buffer
+            self.preview_highlights
+                .retain(|(buf_id, _line), _| *buf_id != bid);
         }
         self.markdown_preview_open = false;
         self.status_message = "Markdown preview closed".to_string();
@@ -2842,18 +2908,20 @@ impl Editor {
 
         if let (Some(src_lines), Some(preview_id)) = (src_lines_opt, preview_buffer_id_opt) {
             // Render formatted markdown to preview lines
-            let lines = crate::utils::markdown::render_markdown_to_lines(
+            let render = crate::utils::markdown::render_markdown(
                 &src_lines,
                 &self.config.markdown_preview.math,
                 &self.config.markdown_preview.large_file_mode,
             );
             if let Some(preview) = self.buffers.get_mut(&preview_id) {
-                preview.lines = lines;
+                preview.lines = render.lines.clone();
                 preview.modified = false;
                 // Keep cursor at top of preview on refresh for now
                 preview.cursor.row = 0;
                 preview.cursor.col = 0;
             }
+            // Rebuild preview highlights
+            self.build_preview_highlights(preview_id, render);
             // Also request a redraw so UI updates
             // Try to keep preview viewport aligned after content changes
             self.maybe_sync_markdown_preview_viewport();

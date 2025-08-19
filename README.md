@@ -324,6 +324,7 @@ See install steps and troubleshooting recipes in:
 
 - docs: [DEVELOPMENT.md](./docs/DEVELOPMENT.md#installation--distribution)
 - docs: [DEVELOPMENT.md](./docs/DEVELOPMENT.md#troubleshooting)
+
 **High‑signal test files:**
 
 - [tests/editor_tests.rs](./tests/editor_tests.rs) — editor core behaviors and redraw expectations

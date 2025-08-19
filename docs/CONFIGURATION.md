@@ -125,3 +125,25 @@ Notes:
 
 - Completions suggest valid values for `mdpreview.*` options.
 - The preview uses a terminal-safe renderer (pulldown-cmark) and no header banner.
+
+### Preview rendering behavior
+
+The built-in preview renders plain text (no HTML) with semantic spans for
+theming. Key behaviors:
+
+- Headings: no leading `#`; the text is followed by an underline (`=` for H1,
+  `-` for H2–H6) sized by the Unicode display width, then a blank separator
+  line.
+- Links: shown as `[text]` only; the URL is hidden. Brackets are styled as
+  punctuation; inner text as an attribute.
+- Emphasis/strong: italic and bold are styled on the text itself without
+  leaving marker characters; no duplicate styling inside links or headings.
+- Inline code: shown without backticks; code content is styled as a comment.
+- Code blocks: fences are not shown; code lines are indented by 4 spaces and
+  styled as comments. A blank line is inserted before a code block inside a
+  list item and after any code block.
+- Blockquotes: each nesting level is prefixed with `▎`; a blank line is added
+  before the first outermost quote and after it closes.
+- Lists and paragraphs: exactly one blank line is enforced between paragraphs
+  and lists, after an outermost list, and around list/code/heading transitions
+  to keep groups readable.

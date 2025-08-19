@@ -22,7 +22,10 @@ This page summarizes what Oxidized supports today. For the development roadmap, 
   - Open/Close/Toggle/Refresh commands and F8 toggle
   - Update modes: manual, on_save, live with debounce
   - One-way scroll sync (source → preview) when enabled
-  - Safe, width-clamped rendering via pulldown-cmark; no header banner
+  - Terminal-safe rendering via pulldown-cmark (no HTML); headings with
+    underlines, `[text]`-only links, styled emphasis/strong, inline/code blocks
+    without backticks/fences, list/paragraph spacing rules, and semantic spans
+    for theming
 
 ## In Progress
 
