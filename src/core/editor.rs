@@ -2793,7 +2793,7 @@ impl Editor {
     pub fn clear_syntax_cache(&mut self) {
         if let Some(ref highlighter) = self.async_syntax_highlighter {
             highlighter.invalidate_buffer_cache(0); // Clear all cache for now
-            self.status_message = "Syntax highlighting cache cleared".to_string();
+            debug!("Syntax highlighting cache cleared");
         }
     }
 
