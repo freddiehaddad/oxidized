@@ -141,6 +141,8 @@ pub struct Editor {
     last_markdown_preview_refresh: Option<Instant>,
     /// Precomputed highlights for markdown preview buffer lines: (buffer_id, line) -> ranges
     preview_highlights: HashMap<(usize, usize), Vec<HighlightRange>>,
+    /// Mapping from source line index to preview line index for scroll sync
+    markdown_src_to_preview: Vec<usize>,
 }
 
 impl Editor {
@@ -238,6 +240,7 @@ impl Editor {
             markdown_preview_window_id: None,
             last_markdown_preview_refresh: None,
             preview_highlights: HashMap::new(),
+            markdown_src_to_preview: Vec::new(),
         };
         // Initialize reserved rows for status/command lines based on config
         let reserved_rows = editor.reserved_rows_from_config();
@@ -886,17 +889,33 @@ impl Editor {
         }
 
         // Get source viewport_top and preview identifiers
-        let (src_top, preview_wid, preview_bid) = match (
+        let (src_top, preview_wid, preview_bid, src_len) = match (
             self.window_manager.current_window().map(|w| w.viewport_top),
             self.markdown_preview_window_id,
             self.markdown_preview_buffer_id,
+            self.current_buffer().map(|b| b.lines.len()),
         ) {
-            (Some(t), Some(pwid), Some(pbid)) => (t, pwid, pbid),
+            (Some(t), Some(pwid), Some(pbid), Some(slen)) => (t, pwid, pbid, slen),
             _ => return,
         };
 
-        // With no header in the preview buffer, align directly to source
-        let desired_top = src_top;
+        // Use precomputed mapping if available; otherwise fall back to direct line mapping
+        let mut desired_top = if !self.markdown_src_to_preview.is_empty() {
+            let mut candidates: Vec<usize> = Vec::new();
+            let end = (src_top + 3).min(src_len);
+            for i in src_top..end {
+                if let Some(&pv) = self.markdown_src_to_preview.get(i) {
+                    candidates.push(pv);
+                }
+            }
+            if candidates.is_empty() {
+                src_top
+            } else {
+                *candidates.iter().min().unwrap_or(&src_top)
+            }
+        } else {
+            src_top
+        };
 
         // Apply to the preview window, clamped to content
         if let Some(preview_win) = self.window_manager.get_window_mut(preview_wid) {
@@ -907,6 +926,9 @@ impl Editor {
                 .map(|b| b.lines.len())
                 .unwrap_or(0);
             let max_top = total_lines.saturating_sub(content_height);
+            if desired_top > max_top {
+                desired_top = max_top;
+            }
             preview_win.viewport_top = desired_top.min(max_top);
         }
     }
@@ -2799,6 +2821,8 @@ impl Editor {
                 &self.config.markdown_preview.math,
                 &self.config.markdown_preview.large_file_mode,
             );
+            // Keep a copy of the src->preview line map before moving render
+            let src_to_preview_map = render.src_to_preview.clone();
             if let Some(preview) = self.buffers.get_mut(&preview_buffer_id) {
                 preview.lines = render.lines.clone();
                 preview.modified = false;
@@ -2807,6 +2831,16 @@ impl Editor {
             }
             // Build preview highlights with current theme
             self.build_preview_highlights(preview_buffer_id, render);
+            // Save src->preview line map for scroll sync
+            if let Some(src_id) = source_buffer_id
+                && let Some(src_buf) = self.buffers.get(&src_id)
+            {
+                self.markdown_src_to_preview = src_to_preview_map;
+                if self.markdown_src_to_preview.len() < src_buf.lines.len() {
+                    self.markdown_src_to_preview
+                        .resize(src_buf.lines.len(), 0usize);
+                }
+            }
         }
 
         // Ensure the right window points at the preview buffer
@@ -2853,6 +2887,7 @@ impl Editor {
             self.preview_highlights
                 .retain(|(buf_id, _line), _| *buf_id != bid);
         }
+        self.markdown_src_to_preview.clear();
         self.markdown_preview_open = false;
         self.status_message = "Markdown preview closed".to_string();
         self.request_redraw();
@@ -2922,6 +2957,13 @@ impl Editor {
             }
             // Rebuild preview highlights
             self.build_preview_highlights(preview_id, render);
+            // Update src->preview map
+            self.markdown_src_to_preview = crate::utils::markdown::render_markdown(
+                &src_lines,
+                &self.config.markdown_preview.math,
+                &self.config.markdown_preview.large_file_mode,
+            )
+            .src_to_preview;
             // Also request a redraw so UI updates
             // Try to keep preview viewport aligned after content changes
             self.maybe_sync_markdown_preview_viewport();

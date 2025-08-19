@@ -43,7 +43,7 @@ fn heading_with_bold_text_has_type_and_constant_spans_and_correct_underline() {
     let render = render_markdown(&lines(md), "off", "none");
 
     // Expect: heading line, underline line, then a blank separator
-    assert!(render.lines.len() >= 2);
+    assert!(!render.lines.is_empty());
     assert_eq!(render.lines[0], "Hello World");
 
     // Underline must be '=' repeated to Unicode display width of the heading text

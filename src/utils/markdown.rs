@@ -14,6 +14,9 @@ pub struct MarkdownSpan {
 pub struct MarkdownRender {
     pub lines: Vec<String>,
     pub spans: HashMap<usize, Vec<MarkdownSpan>>, // line_index -> spans
+    /// Mapping from source line index -> preview line index (best effort)
+    /// This helps align scroll positions between the source buffer and the preview.
+    pub src_to_preview: Vec<usize>,
 }
 
 fn flush_current_line(
@@ -756,5 +759,216 @@ pub fn render_markdown(
         }
     }
 
-    MarkdownRender { lines: out, spans }
+    // Build a best-effort source -> preview line map to keep scroll positions aligned
+    let src_to_preview = compute_src_to_preview_line_map(src_lines, &out, math_mode);
+
+    MarkdownRender {
+        lines: out,
+        spans,
+        src_to_preview,
+    }
+}
+
+/// Heuristic mapping from source lines to preview lines.
+/// Handles common drift sources:
+/// - Fenced code block fences (``` or ~~~) are not rendered; inner lines map to indented preview lines.
+/// - Headings render as text + underline + blank separator (3 preview lines for 1 source line).
+/// - Inline HTML is often dropped (unless math_mode is active); such lines map to the next preview line.
+/// - Lists and blockquotes add prefixes; we match on content suffix to find corresponding preview lines.
+fn compute_src_to_preview_line_map(
+    src_lines: &[String],
+    preview_lines: &[String],
+    math_mode: &str,
+) -> Vec<usize> {
+    fn is_fence(s: &str) -> bool {
+        let t = s.trim_start();
+        t.starts_with("```") || t.starts_with("~~~")
+    }
+    fn is_heading(s: &str) -> Option<String> {
+        let t = s.trim_start();
+        let mut hashes = 0;
+        for c in t.chars() {
+            if c == '#' {
+                hashes += 1;
+            } else {
+                break;
+            }
+        }
+        if hashes > 0 {
+            let rest = t[hashes..].trim_start();
+            if !rest.is_empty() {
+                return Some(rest.to_string());
+            }
+        }
+        None
+    }
+    fn strip_list_prefix(s: &str) -> &str {
+        let t = s.trim_start();
+        if t.starts_with("- ") || t.starts_with("* ") || t.starts_with("+ ") {
+            return &t[2..];
+        }
+        // ordered list like "12. text"
+        let mut idx = 0;
+        let bytes = t.as_bytes();
+        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+            idx += 1;
+        }
+        if idx < bytes.len() && bytes[idx] == b'.' {
+            let mut j = idx + 1;
+            if j < bytes.len() && bytes[j] == b' ' {
+                j += 1;
+            }
+            return &t[j..];
+        }
+        t
+    }
+    fn strip_quote_prefix(s: &str) -> &str {
+        let mut t = s;
+        // Remove any number of ">" and following single space
+        loop {
+            let ts = t.trim_start();
+            if let Some(rest) = ts.strip_prefix('>') {
+                t = rest.trim_start();
+            } else {
+                break;
+            }
+        }
+        t
+    }
+    fn likely_html_line(s: &str) -> bool {
+        let t = s.trim();
+        t.contains('<') && t.contains('>')
+    }
+
+    let mut map = Vec::with_capacity(src_lines.len());
+    let mut j: usize = 0; // pointer into preview lines
+    let mut in_code = false;
+    let pl = preview_lines.len();
+    let mut i = 0usize;
+    while i < src_lines.len() {
+        let line = &src_lines[i];
+        let trimmed = line.trim_end();
+
+        // Clamp a helper
+        let clamp_j = |x: usize| x.min(pl.saturating_sub(1));
+
+        if is_fence(trimmed) {
+            // Opening or closing fence: does not render
+            in_code = !in_code; // toggle state (heuristic)
+            map.push(clamp_j(j));
+            // If closing, try to step over the blank line that renderer inserts after code blocks
+            if !in_code {
+                // advance over at most one blank preview line
+                if j < pl && preview_lines[j].is_empty() {
+                    j = j.saturating_add(1);
+                }
+            }
+            i += 1;
+            continue;
+        }
+
+        if in_code {
+            // Expect an indented preview line: "    {content}"
+            let expected = {
+                let mut s = String::with_capacity(4 + trimmed.len());
+                s.push_str("    ");
+                s.push_str(trimmed);
+                s
+            };
+            let k = find_forward(preview_lines, j, &expected, 64);
+            let k = k.unwrap_or(j);
+            map.push(clamp_j(k));
+            j = k.saturating_add(1);
+            i += 1;
+            continue;
+        }
+
+        if let Some(head_text) = is_heading(trimmed) {
+            // Find heading text line exactly
+            let k = find_forward(preview_lines, j, &head_text, 64)
+                .or_else(|| find_contains_forward(preview_lines, j, &head_text, 64))
+                .unwrap_or(j);
+            map.push(clamp_j(k));
+            // Skip underline and blank if present
+            j = k.saturating_add(1);
+            if j < pl && !preview_lines[j].is_empty() {
+                // underline present
+                j += 1;
+            }
+            if j < pl && preview_lines[j].is_empty() {
+                j += 1;
+            }
+            i += 1;
+            continue;
+        }
+
+        // Inline HTML often removed (unless math enabled and contains math markers)
+        if likely_html_line(trimmed)
+            && (math_mode == "off" || (!trimmed.contains('$') && !trimmed.contains("\\(")))
+        {
+            map.push(clamp_j(j));
+            i += 1;
+            continue;
+        }
+
+        // List items and quotes: match on content without prefixes
+        let mut content = strip_list_prefix(trimmed);
+        content = strip_quote_prefix(content);
+        let content = content.trim();
+
+        // Try exact, then contains
+        let k = if !content.is_empty() {
+            find_forward(preview_lines, j, content, 64)
+                .or_else(|| find_contains_forward(preview_lines, j, content, 64))
+        } else {
+            None
+        };
+        if let Some(k) = k {
+            map.push(clamp_j(k));
+            j = k.saturating_add(1);
+        } else {
+            // If we can't find it, stay at current j (common for soft-wrapped paragraphs merged into one line)
+            map.push(clamp_j(j));
+        }
+        i += 1;
+    }
+
+    if map.is_empty() && pl > 0 {
+        map.push(0);
+    }
+    // Ensure non-decreasing mapping to avoid backwards jumps that can cause jitter
+    let mut last = 0usize;
+    for v in map.iter_mut() {
+        if *v < last {
+            *v = last;
+        }
+        last = *v;
+    }
+    map
+}
+
+fn find_forward(hay: &[String], start: usize, needle: &str, max_scan: usize) -> Option<usize> {
+    hay.iter()
+        .enumerate()
+        .skip(start)
+        .take(max_scan.min(hay.len().saturating_sub(start)))
+        .find(|(_i, s)| s.as_str() == needle)
+        .map(|(i, _)| i)
+}
+
+fn find_contains_forward(
+    hay: &[String],
+    start: usize,
+    needle: &str,
+    max_scan: usize,
+) -> Option<usize> {
+    if needle.is_empty() {
+        return None;
+    }
+    hay.iter()
+        .enumerate()
+        .skip(start)
+        .take(max_scan.min(hay.len().saturating_sub(start)))
+        .find(|(_i, s)| s.contains(needle))
+        .map(|(i, _)| i)
 }
