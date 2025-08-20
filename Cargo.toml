@@ -8,7 +8,7 @@ edition = "2024"
 crossterm = "0.29.0"
 # JSON-RPC for LSP
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = "1.0.143"
 # Configuration parsing
 toml = "0.9.5"
 # Regex support
@@ -36,7 +36,7 @@ tracing-appender = "0.2"
 pulldown-cmark = { version = "0.13", default-features = false, features = [
     "simd",
 ] }
-thiserror = "2.0.14"
+thiserror = "2.0.16"
 anyhow = "1.0.99"
 unicode-segmentation = "1.11"
 unicode-width = "0.2"
@@ -49,7 +49,7 @@ tokio = { version = "1.47.1", default-features = false, features = [
     "rt-multi-thread",
 ] }
 # Temporary directory creation for tests
-tempfile = "3.0"
+tempfile = "3.21.0"
 # Benchmarking
 criterion = { version = "0.7", features = ["html_reports"] }
 
