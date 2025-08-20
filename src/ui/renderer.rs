@@ -508,6 +508,16 @@ impl UI {
             && (editor_state.mode == Mode::Command || editor_state.mode == Mode::Search)
         {
             self.render_command_line(terminal, editor_state, width, height)?;
+        } else if editor_state.config.interface.show_command {
+            // Command line is enabled but we're not in command/search mode.
+            // Ensure the bottom row is cleared so stale input doesn't persist after ESC.
+            let command_row = height.saturating_sub(1);
+            terminal.queue_move_cursor(Position::new(command_row as usize, 0))?;
+            terminal.queue_set_bg_color(self.theme.background)?;
+            terminal.queue_clear_line()?;
+            // Normalize background across terminals by printing spaces to full width
+            terminal.queue_print(&" ".repeat(width as usize))?;
+            terminal.queue_reset_color()?;
         }
 
         // Render command completion popup if enabled and active
