@@ -1,4 +1,4 @@
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use std::collections::HashMap;
 
 use crate::features::syntax::SemanticCategory;
@@ -33,7 +33,6 @@ fn flush_current_line(
     *line_index += 1;
 }
 
-/// Render markdown into formatted lines + semantic spans.
 pub fn render_markdown(
     src_lines: &[String],
     math_mode: &str,
@@ -41,8 +40,38 @@ pub fn render_markdown(
 ) -> MarkdownRender {
     let source = src_lines.join("\n");
 
+    // Naive scanner for the next markdown table header from the original source.
+    // Advances the provided cursor to just after the separator line when found.
+    fn scan_next_table_header(src: &[String], cursor: &mut usize) -> Option<Vec<String>> {
+        let n = src.len();
+        let mut i = (*cursor).min(n);
+        while i + 1 < n {
+            let line = src[i].trim();
+            let next = src[i + 1].trim();
+            // Quick shape check: both lines contain pipes and the second has dashes/colons
+            if line.contains('|')
+                && next.contains('|')
+                && next.chars().any(|c| c == '-' || c == ':')
+            {
+                // Split header cells by '|' and trim, ignore empties from leading/trailing pipes
+                let cells: Vec<String> = line
+                    .split('|')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if !cells.is_empty() {
+                    *cursor = i + 2; // move past header+separator
+                    return Some(cells);
+                }
+            }
+            i += 1;
+        }
+        None
+    }
+
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_TASKLISTS);
+    opts.insert(Options::ENABLE_TABLES);
     let parser = Parser::new_ext(&source, opts);
 
     let mut out: Vec<String> = Vec::new();
@@ -71,9 +100,62 @@ pub fn render_markdown(
     let mut heading_emphasis_stack: Vec<usize> = Vec::new();
     let mut heading_strong_stack: Vec<usize> = Vec::new();
 
+    // Lightweight table state
+    #[derive(Default)]
+    struct TableState {
+        alignments: Vec<Alignment>,
+        head_rows: Vec<Vec<String>>, // header rows (usually 1)
+        body_rows: Vec<Vec<String>>, // body rows
+        current_row: Vec<String>,
+        current_cell: String,
+        in_head: bool,
+        // Fallback header parsed from original source if parser doesn't provide one
+        fallback_header: Option<Vec<String>>,
+    }
+    let mut table: Option<TableState> = None;
+    // Cursor for scanning source tables sequentially as a fallback
+    let mut table_scan_cursor: usize = 0;
+
     for event in parser {
         match event {
             Event::Start(tag) => match tag {
+                // Tables
+                Tag::Table(aligns) => {
+                    if !current_line.is_empty() {
+                        flush_current_line(
+                            &mut out,
+                            &mut spans,
+                            &mut current_line,
+                            &mut current_spans,
+                            &mut line_index,
+                        );
+                    }
+                    if out.last().map(|l| !l.is_empty()).unwrap_or(false) {
+                        out.push(String::new());
+                        line_index += 1;
+                    }
+                    let fallback = scan_next_table_header(src_lines, &mut table_scan_cursor);
+                    table = Some(TableState {
+                        alignments: aligns.to_vec(),
+                        fallback_header: fallback,
+                        ..Default::default()
+                    });
+                }
+                Tag::TableHead => {
+                    if let Some(t) = table.as_mut() {
+                        t.in_head = true;
+                    }
+                }
+                Tag::TableRow => {
+                    if let Some(t) = table.as_mut() {
+                        t.current_row.clear();
+                    }
+                }
+                Tag::TableCell => {
+                    if let Some(t) = table.as_mut() {
+                        t.current_cell.clear();
+                    }
+                }
                 Tag::Paragraph => {}
                 Tag::List(start) => {
                     list_stack.push((start.is_some(), start.unwrap_or(1) as usize));
@@ -100,7 +182,6 @@ pub fn render_markdown(
                 }
                 Tag::BlockQuote(_) => {
                     in_blockquote += 1;
-                    // Add breathing room before the first (outermost) blockquote
                     if in_blockquote == 1 {
                         if (!out.is_empty() && out.last().map(|l| !l.is_empty()).unwrap_or(false))
                             || (!current_line.is_empty())
@@ -225,6 +306,186 @@ pub fn render_markdown(
                 _ => {}
             },
             Event::End(tag) => match tag {
+                // Tables
+                TagEnd::TableCell => {
+                    if let Some(t) = table.as_mut() {
+                        t.current_row.push(std::mem::take(&mut t.current_cell));
+                    }
+                }
+                TagEnd::TableRow => {
+                    if let Some(t) = table.as_mut() {
+                        let row = std::mem::take(&mut t.current_row);
+                        if t.in_head {
+                            t.head_rows.push(row);
+                        } else {
+                            t.body_rows.push(row);
+                        }
+                    }
+                }
+                TagEnd::TableHead => {
+                    if let Some(t) = table.as_mut() {
+                        t.in_head = false;
+                    }
+                }
+                TagEnd::Table => {
+                    if let Some(t) = table.take() {
+                        use unicode_width::UnicodeWidthStr;
+                        // Compose rows: use header if provided, otherwise try fallback header from source
+                        let mut rows: Vec<Vec<String>> = Vec::new();
+                        if let Some(h) = t.head_rows.first() {
+                            rows.push(h.clone());
+                        } else if let Some(h) = t.fallback_header.as_ref() {
+                            rows.push(h.clone());
+                        }
+                        rows.extend(t.body_rows.into_iter());
+                        if !rows.is_empty() {
+                            let cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+                            let mut widths = vec![0usize; cols];
+                            for r in &rows {
+                                for (i, cell) in r.iter().enumerate() {
+                                    widths[i] =
+                                        widths[i].max(UnicodeWidthStr::width(cell.as_str()));
+                                }
+                            }
+
+                            let prefix = if in_blockquote > 0 {
+                                "▎ ".repeat(in_blockquote)
+                            } else {
+                                String::new()
+                            };
+                            let render_row = |cells: &Vec<String>| -> String {
+                                let mut line = String::new();
+                                line.push_str(&prefix);
+                                line.push('|');
+                                for (i, &col_width) in widths.iter().enumerate() {
+                                    line.push(' ');
+                                    let content = cells.get(i).map(|s| s.as_str()).unwrap_or("");
+                                    let width = UnicodeWidthStr::width(content);
+                                    let pad = col_width.saturating_sub(width);
+                                    let align =
+                                        t.alignments.get(i).cloned().unwrap_or(Alignment::Left);
+                                    match align {
+                                        Alignment::Left | Alignment::None => {
+                                            line.push_str(content);
+                                            for _ in 0..pad {
+                                                line.push(' ');
+                                            }
+                                        }
+                                        Alignment::Center => {
+                                            let left = pad / 2;
+                                            let right = pad - left;
+                                            for _ in 0..left {
+                                                line.push(' ');
+                                            }
+                                            line.push_str(content);
+                                            for _ in 0..right {
+                                                line.push(' ');
+                                            }
+                                        }
+                                        Alignment::Right => {
+                                            for _ in 0..pad {
+                                                line.push(' ');
+                                            }
+                                            line.push_str(content);
+                                        }
+                                    }
+                                    line.push(' ');
+                                    line.push('|');
+                                }
+                                line
+                            };
+
+                            // Always render a header line and alignment separator using the
+                            // first row as header (synthetic if no explicit header present).
+                            if !rows.is_empty() {
+                                let header_line = render_row(&rows[0]);
+                                if !prefix.is_empty() {
+                                    current_spans.push(MarkdownSpan {
+                                        start: 0,
+                                        end: prefix.len(),
+                                        category: SemanticCategory::Comment,
+                                    });
+                                }
+                                current_line = header_line;
+                                flush_current_line(
+                                    &mut out,
+                                    &mut spans,
+                                    &mut current_line,
+                                    &mut current_spans,
+                                    &mut line_index,
+                                );
+
+                                let mut sep = String::new();
+                                sep.push_str(&prefix);
+                                sep.push('|');
+                                for (i, w) in widths.iter().enumerate() {
+                                    sep.push(' ');
+                                    match t.alignments.get(i).cloned().unwrap_or(Alignment::Left) {
+                                        Alignment::Left | Alignment::None => {
+                                            sep.push_str(&"-".repeat((*w).max(3)))
+                                        }
+                                        Alignment::Center => {
+                                            sep.push(':');
+                                            if *w > 1 {
+                                                sep.push_str(
+                                                    &"-".repeat((*w).saturating_sub(2).max(1)),
+                                                );
+                                            }
+                                            sep.push(':');
+                                        }
+                                        Alignment::Right => {
+                                            sep.push_str(
+                                                &"-".repeat((*w).saturating_sub(1).max(1)),
+                                            );
+                                            sep.push(':');
+                                        }
+                                    }
+                                    sep.push(' ');
+                                    sep.push('|');
+                                }
+                                if !prefix.is_empty() {
+                                    current_spans.push(MarkdownSpan {
+                                        start: 0,
+                                        end: prefix.len(),
+                                        category: SemanticCategory::Comment,
+                                    });
+                                }
+                                current_line = sep;
+                                flush_current_line(
+                                    &mut out,
+                                    &mut spans,
+                                    &mut current_line,
+                                    &mut current_spans,
+                                    &mut line_index,
+                                );
+                            }
+
+                            // Body rows (skip the first row which acted as header)
+                            let start_idx = 1;
+                            for r in rows.iter().skip(start_idx) {
+                                let line = render_row(r);
+                                if !prefix.is_empty() {
+                                    current_spans.push(MarkdownSpan {
+                                        start: 0,
+                                        end: prefix.len(),
+                                        category: SemanticCategory::Comment,
+                                    });
+                                }
+                                current_line = line;
+                                flush_current_line(
+                                    &mut out,
+                                    &mut spans,
+                                    &mut current_line,
+                                    &mut current_spans,
+                                    &mut line_index,
+                                );
+                            }
+
+                            out.push(String::new());
+                            line_index += 1;
+                        }
+                    }
+                }
                 TagEnd::Heading(_) => {
                     // Build heading from captured buffer to avoid duplicate text
                     in_heading = false;
@@ -631,6 +892,10 @@ pub fn render_markdown(
                 _ => {}
             },
             Event::Text(text) => {
+                if let Some(t) = table.as_mut() {
+                    t.current_cell.push_str(&text);
+                    continue;
+                }
                 if in_code_block.is_some() {
                     // Code block: indent lines by 4 spaces, no closing fence
                     for line in text.lines() {
@@ -668,6 +933,10 @@ pub fn render_markdown(
                 }
             }
             Event::Code(code) => {
+                if let Some(t) = table.as_mut() {
+                    t.current_cell.push_str(&code);
+                    continue;
+                }
                 // Inline code: no backticks, highlight content as Comment per request
                 if in_heading {
                     let start = heading_buf.len();
@@ -690,6 +959,10 @@ pub fn render_markdown(
                 }
             }
             Event::SoftBreak => {
+                if let Some(t) = table.as_mut() {
+                    t.current_cell.push(' ');
+                    continue;
+                }
                 // In blockquotes, preserve source line boundaries: break the line
                 // so each quoted source line gets its own prefixed preview line.
                 if in_blockquote > 0 {
@@ -705,6 +978,10 @@ pub fn render_markdown(
                 }
             }
             Event::HardBreak => {
+                if let Some(t) = table.as_mut() {
+                    t.current_cell.push(' ');
+                    continue;
+                }
                 flush_current_line(
                     &mut out,
                     &mut spans,
