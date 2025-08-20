@@ -5,6 +5,7 @@ use log::{debug, error, info, trace, warn};
 
 use crate::core::editor::Editor;
 use crate::core::mode::Mode;
+use std::path::{Path, PathBuf};
 
 pub struct Command {
     pub name: String,
@@ -179,16 +180,41 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
 
         _ => {
             // Handle parameterized commands
-            if let Some(filename) = command.strip_prefix("e ") {
+            if let Some(filename) = command
+                .strip_prefix("e ")
+                .or_else(|| command.strip_prefix("edit "))
+            {
                 let filename = filename.trim();
-                match editor.open_file(filename) {
-                    Ok(msg) => {
-                        info!("Opened file '{}'", filename);
-                        editor.set_status_message(msg)
+                let path = Path::new(filename);
+                if path.exists() {
+                    match editor.open_file(filename) {
+                        Ok(msg) => {
+                            info!("Opened file '{}'", filename);
+                            editor.set_status_message(msg)
+                        }
+                        Err(e) => {
+                            error!("Open file '{}' failed: {}", filename, e);
+                            editor.set_status_message(format!("Error opening file: {}", e))
+                        }
                     }
-                    Err(e) => {
-                        error!("Open file '{}' failed: {}", filename, e);
-                        editor.set_status_message(format!("Error opening file: {}", e))
+                } else {
+                    // Create a new, named empty buffer like Vim's :e on non-existent files
+                    match editor.create_buffer(None) {
+                        Ok(_id) => {
+                            if let Some(buf) = editor.current_buffer_mut() {
+                                buf.file_path = Some(PathBuf::from(filename));
+                                // Newly created buffer is empty and unmodified by default
+                            }
+                            info!("New file (buffer) created: '{}'", filename);
+                            editor.set_status_message(format!("New file: '{}'", filename));
+                        }
+                        Err(e) => {
+                            error!("Failed to create new buffer for '{}': {}", filename, e);
+                            editor.set_status_message(format!(
+                                "Error creating buffer for '{}': {}",
+                                filename, e
+                            ));
+                        }
                     }
                 }
             } else if let Some(filename) = command.strip_prefix("w ") {
