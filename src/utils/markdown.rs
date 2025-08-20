@@ -690,7 +690,19 @@ pub fn render_markdown(
                 }
             }
             Event::SoftBreak => {
-                current_line.push(' ');
+                // In blockquotes, preserve source line boundaries: break the line
+                // so each quoted source line gets its own prefixed preview line.
+                if in_blockquote > 0 {
+                    flush_current_line(
+                        &mut out,
+                        &mut spans,
+                        &mut current_line,
+                        &mut current_spans,
+                        &mut line_index,
+                    );
+                } else {
+                    current_line.push(' ');
+                }
             }
             Event::HardBreak => {
                 flush_current_line(
