@@ -373,6 +373,11 @@ leader = "Space"
 "c" = "change_entire_line"  # cc - change current line  
 "y" = "yank_line"           # yy - yank current line
 
+# Motions for operators (enable dw/de/db)
+"w" = "word_forward_motion"     # dw - delete to start of next word
+"e" = "word_end_motion"         # de - delete to end of word (inclusive)
+"b" = "word_backward_motion"    # db - delete to start of previous word
+
 # Text objects for operators
 # Word text objects
 "iw" = "text_object_iw" # inner word

@@ -1180,6 +1180,20 @@ impl KeyHandler {
             "operator_unindent" => self.action_operator_unindent(editor)?,
             "operator_toggle_case" => self.action_operator_toggle_case(editor)?,
 
+            // Operator + motion actions (dw/de/db)
+            "word_forward_motion" => {
+                used_count = true;
+                self.action_word_forward_motion(editor, count)?;
+            }
+            "word_end_motion" => {
+                used_count = true;
+                self.action_word_end_motion(editor, count)?;
+            }
+            "word_backward_motion" => {
+                used_count = true;
+                self.action_word_backward_motion(editor, count)?;
+            }
+
             // Text object actions (for operator-pending mode)
             action if action.starts_with("text_object_") => {
                 let text_object_str = action.strip_prefix("text_object_").unwrap_or("");
@@ -2815,6 +2829,114 @@ impl KeyHandler {
 
     fn action_operator_toggle_case(&self, editor: &mut Editor) -> Result<()> {
         editor.set_pending_operator(crate::core::editor::PendingOperator::ToggleCase);
+        Ok(())
+    }
+
+    // Operator + motion helpers (dw/de/db)
+    fn operator_apply_range(
+        &self,
+        editor: &mut Editor,
+        start: crate::core::mode::Position,
+        end: crate::core::mode::Position,
+    ) -> Result<()> {
+        use crate::core::editor::PendingOperator;
+        if start == end {
+            // Nothing to do; just clear state
+            editor.clear_pending_operator();
+            return Ok(());
+        }
+        let Some(op) = editor.get_pending_operator().cloned() else {
+            return Ok(());
+        };
+        // Normalize range order
+        let (range_start, range_end) =
+            if (end.row < start.row) || (end.row == start.row && end.col < start.col) {
+                (end, start)
+            } else {
+                (start, end)
+            };
+        // Execute via editor helper to reuse registers/undo behavior
+        let range = crate::features::text_objects::TextObjectRange::new(
+            range_start,
+            range_end,
+            crate::features::text_objects::TextObjectType::Word,
+            crate::features::text_objects::TextObjectMode::Inner,
+        );
+        match op {
+            PendingOperator::Delete => {
+                editor.execute_operator_on_range(op, range)?;
+            }
+            PendingOperator::Change => {
+                editor.execute_operator_on_range(op, range)?;
+            }
+            PendingOperator::Yank => {
+                editor.execute_operator_on_range(op, range)?;
+            }
+            PendingOperator::Indent | PendingOperator::Unindent | PendingOperator::ToggleCase => {
+                editor.execute_operator_on_range(op, range)?;
+            }
+        }
+        editor.clear_pending_operator();
+        Ok(())
+    }
+
+    fn action_word_forward_motion(&self, editor: &mut Editor, count: usize) -> Result<()> {
+        if editor.get_pending_operator().is_none() {
+            return Ok(());
+        }
+        if let Some(buffer) = editor.current_buffer_mut() {
+            let start = buffer.cursor;
+            // Compute target like 'w': start of next word, honoring count
+            let mut temp = buffer.clone();
+            for _ in 0..count.max(1) {
+                temp.move_to_next_word();
+            }
+            let end = temp.cursor;
+            drop(temp);
+            return self.operator_apply_range(editor, start, end);
+        }
+        Ok(())
+    }
+
+    fn action_word_end_motion(&self, editor: &mut Editor, count: usize) -> Result<()> {
+        if editor.get_pending_operator().is_none() {
+            return Ok(());
+        }
+        if let Some(buffer) = editor.current_buffer_mut() {
+            let start = buffer.cursor;
+            // Compute target like 'e': end of current/next word (inclusive), honoring count. Make end exclusive by +1 column if possible.
+            let mut temp = buffer.clone();
+            for _ in 0..count.max(1) {
+                temp.move_to_word_end();
+            }
+            let mut end = temp.cursor;
+            // Make range end exclusive by moving one past if within line
+            if let Some(line) = buffer.get_line(end.row)
+                && !line.is_empty()
+                && end.col < line.len()
+            {
+                end.col += 1;
+            }
+            drop(temp);
+            return self.operator_apply_range(editor, start, end);
+        }
+        Ok(())
+    }
+
+    fn action_word_backward_motion(&self, editor: &mut Editor, count: usize) -> Result<()> {
+        if editor.get_pending_operator().is_none() {
+            return Ok(());
+        }
+        if let Some(buffer) = editor.current_buffer_mut() {
+            let start = buffer.cursor;
+            let mut temp = buffer.clone();
+            for _ in 0..count.max(1) {
+                temp.move_to_previous_word();
+            }
+            let end = temp.cursor;
+            drop(temp);
+            return self.operator_apply_range(editor, start, end);
+        }
         Ok(())
     }
 
