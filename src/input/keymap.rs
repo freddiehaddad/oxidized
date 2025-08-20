@@ -1194,6 +1194,12 @@ impl KeyHandler {
                 self.action_word_backward_motion(editor, count)?;
             }
 
+            // Operator + motion action: $ (line end)
+            "line_end_motion" => {
+                used_count = true;
+                self.action_line_end_motion(editor, count)?;
+            }
+
             // Text object actions (for operator-pending mode)
             action if action.starts_with("text_object_") => {
                 let text_object_str = action.strip_prefix("text_object_").unwrap_or("");
@@ -2935,6 +2941,28 @@ impl KeyHandler {
             }
             let end = temp.cursor;
             drop(temp);
+            return self.operator_apply_range(editor, start, end);
+        }
+        Ok(())
+    }
+
+    // Operator-pending motion: $ (to end of line), with count extending to
+    // the end of the (count-1) subsequent line, like Vim's [count]$.
+    fn action_line_end_motion(&self, editor: &mut Editor, count: usize) -> Result<()> {
+        if editor.get_pending_operator().is_none() {
+            return Ok(());
+        }
+        if let Some(buffer) = editor.current_buffer_mut() {
+            let start = buffer.cursor;
+            let count = count.max(1);
+            let start_row = start.row;
+            let last_row = buffer.lines.len().saturating_sub(1);
+            let target_row = (start_row + (count - 1)).min(last_row);
+
+            let mut end = Position::new(target_row, 0);
+            if let Some(line) = buffer.get_line(target_row) {
+                end.col = line.len();
+            }
             return self.operator_apply_range(editor, start, end);
         }
         Ok(())

@@ -85,7 +85,6 @@ leader = "Space"
 # Delete operations
 "x" = "delete_char_at_cursor"     # Delete character under cursor
 "X" = "delete_char_before_cursor" # Delete character before cursor
-"dd" = "delete_line"              # Delete current line
 "D" = "delete_to_end_of_line"     # Delete from cursor to end of line
 
 # Line operations
@@ -122,11 +121,6 @@ leader = "Space"
 
 # Registers prefix
 "\"" = "register_prefix"            # '"{register}' prefix to select register
-
-# Yank (copy) operations
-"yy" = "yank_line"                 # Yank (copy) current line
-"yw" = "yank_word"                 # Yank word
-"y$" = "yank_to_end_of_line"       # Yank to end of line
 
 # Put (paste) operations
 "p" = "put_after"                  # Paste after cursor/line
@@ -377,6 +371,9 @@ leader = "Space"
 "w" = "word_forward_motion"     # dw - delete to start of next word
 "e" = "word_end_motion"         # de - delete to end of word (inclusive)
 "b" = "word_backward_motion"    # db - delete to start of previous word
+
+# Line-end motion for operators (y$, d$, c$)
+"$" = "line_end_motion"
 
 # Text objects for operators
 # Word text objects
