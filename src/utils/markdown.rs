@@ -257,6 +257,16 @@ pub fn render_markdown(
                 }
                 Tag::Link { .. } => {
                     // Start a bracketed link: remember start and emit opening bracket
+                    // Ensure quote prefix is present if we're at the start of a quoted line
+                    if !in_heading && in_blockquote > 0 && current_line.is_empty() {
+                        let prefix = "▎ ".repeat(in_blockquote);
+                        current_line.push_str(&prefix);
+                        current_spans.push(MarkdownSpan {
+                            start: 0,
+                            end: current_line.len(),
+                            category: SemanticCategory::Comment,
+                        });
+                    }
                     if in_heading {
                         let start = heading_buf.len();
                         heading_buf.push('[');
@@ -271,6 +281,16 @@ pub fn render_markdown(
                     if in_heading {
                         heading_emphasis_stack.push(heading_buf.len());
                     } else {
+                        // Ensure quote prefix exists at line start inside blockquote before marking span start
+                        if in_blockquote > 0 && current_line.is_empty() {
+                            let prefix = "▎ ".repeat(in_blockquote);
+                            current_line.push_str(&prefix);
+                            current_spans.push(MarkdownSpan {
+                                start: 0,
+                                end: current_line.len(),
+                                category: SemanticCategory::Comment,
+                            });
+                        }
                         emphasis_stack.push(current_line.len());
                     }
                 }
@@ -278,11 +298,30 @@ pub fn render_markdown(
                     if in_heading {
                         heading_strong_stack.push(heading_buf.len());
                     } else {
+                        // Ensure quote prefix exists at line start inside blockquote before marking span start
+                        if in_blockquote > 0 && current_line.is_empty() {
+                            let prefix = "▎ ".repeat(in_blockquote);
+                            current_line.push_str(&prefix);
+                            current_spans.push(MarkdownSpan {
+                                start: 0,
+                                end: current_line.len(),
+                                category: SemanticCategory::Comment,
+                            });
+                        }
                         strong_stack.push(current_line.len());
                     }
                 }
                 Tag::Image { dest_url, .. } => {
                     // Render a light-weight image indicator + url
+                    if in_blockquote > 0 && current_line.is_empty() {
+                        let prefix = "▎ ".repeat(in_blockquote);
+                        current_line.push_str(&prefix);
+                        current_spans.push(MarkdownSpan {
+                            start: 0,
+                            end: current_line.len(),
+                            category: SemanticCategory::Comment,
+                        });
+                    }
                     let start = current_line.len();
                     current_line.push_str("[img]");
                     let end = current_line.len();
@@ -948,6 +987,15 @@ pub fn render_markdown(
                         category: SemanticCategory::Comment,
                     });
                 } else {
+                    if in_blockquote > 0 && current_line.is_empty() {
+                        let prefix = "▎ ".repeat(in_blockquote);
+                        current_line.push_str(&prefix);
+                        current_spans.push(MarkdownSpan {
+                            start: 0,
+                            end: current_line.len(),
+                            category: SemanticCategory::Comment,
+                        });
+                    }
                     let start = current_line.len();
                     current_line.push_str(&code);
                     let end = current_line.len();
