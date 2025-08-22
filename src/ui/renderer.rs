@@ -455,47 +455,18 @@ impl UI {
         // Start double buffering - queue all operations without immediate display
         terminal.queue_hide_cursor()?;
 
-        // Only clear the whole screen on a full redraw; otherwise redraw in-place
+        // Force a full repaint on demand by invalidating previous frame instead of issuing a terminal clear.
         if full_redraw {
-            terminal.queue_set_bg_color(self.theme.background)?;
-            terminal.queue_clear_screen()?;
+            terminal.invalidate_previous_frame();
         }
 
         // Determine reserved rows from config flags
         let reserved_rows: u16 = (editor_state.config.interface.show_status_line as u16)
             + (editor_state.config.interface.show_command as u16);
 
-        // If the completion popup is not being shown this frame, proactively clear the
-        // potential popup region above the command line BEFORE rendering windows. This
-        // ensures any leftover characters/colors from a prior popup are erased and the
-        // subsequent window render will repaint content cleanly.
-        let popup_showing = editor_state.config.interface.show_command
-            && editor_state.mode == Mode::Command
-            && editor_state.command_completion.should_show();
-        if !popup_showing {
-            // Compute the maximum popup height we might have drawn previously
-            const MIN_MENU_HEIGHT: u16 = 3;
-            let max_menu_height = editor_state
-                .config
-                .interface
-                .completion_menu_height
-                .max(MIN_MENU_HEIGHT);
-            // Limit by available space: keep 2 rows for status+command lines and at least 1 for content
-            let max_rows = (height.saturating_sub(3)).min(max_menu_height);
-            if max_rows > 0 {
-                let top_row = height.saturating_sub(2).saturating_sub(max_rows);
-                for i in 0..max_rows {
-                    let row = top_row + i;
-                    terminal.queue_move_cursor(Position::new(row as usize, 0))?;
-                    terminal.queue_set_bg_color(self.theme.background)?;
-                    terminal.queue_clear_line()?;
-                    // Also write spaces to full width to normalize background where clear_line
-                    // may be terminal-dependent
-                    terminal.queue_print(&" ".repeat(width as usize))?;
-                    terminal.queue_reset_color()?;
-                }
-            }
-        }
+        // Popup area is no longer proactively cleared; underlying window content is always rendered
+        // earlier in the frame, and diffing restores it automatically when the popup disappears.
+        // (popup visibility computed on demand where needed; previous proactive clearing removed)
 
         // Render all windows
         self.render_windows(terminal, editor_state, reserved_rows)?;
@@ -511,13 +482,10 @@ impl UI {
         {
             self.render_command_line(terminal, editor_state, width, height)?;
         } else if editor_state.config.interface.show_command {
-            // Command line is enabled but we're not in command/search mode.
-            // Ensure the bottom row is cleared so stale input doesn't persist after ESC.
+            // Draw an empty command line row without issuing clear_line; we fully overwrite the row.
             let command_row = height.saturating_sub(1);
             terminal.queue_move_cursor(Position::new(command_row as usize, 0))?;
             terminal.queue_set_bg_color(self.theme.background)?;
-            terminal.queue_clear_line()?;
-            // Normalize background across terminals by printing spaces to full width
             terminal.queue_print(&" ".repeat(width as usize))?;
             terminal.queue_reset_color()?;
         }
@@ -1633,8 +1601,7 @@ impl UI {
         let status_row = height.saturating_sub(reserved_cmd + 1);
         terminal.queue_move_cursor(Position::new(status_row as usize, 0))?;
 
-        // Clear the status line first
-        terminal.queue_clear_line()?;
+        // No explicit clear: we overwrite the entire status line each frame.
 
         // Build layout parts for colorized output
         let layout = self.compute_status_line_layout(editor_state, width);
@@ -1766,8 +1733,7 @@ impl UI {
         let command_row = height.saturating_sub(1);
         terminal.queue_move_cursor(Position::new(command_row as usize, 0))?;
 
-        // Clear the command line first and set theme colors
-        terminal.queue_clear_line()?;
+        // Overwrite the entire command line (no explicit clear needed)
         terminal.queue_set_bg_color(self.theme.command_line_bg)?;
         terminal.queue_set_fg_color(self.theme.command_line_fg)?;
 
