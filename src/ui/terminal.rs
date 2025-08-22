@@ -536,6 +536,89 @@ impl Terminal {
         self.prev_frame = None;
     }
 
+    /// Attempt to logically scroll the previous frame contents within a rectangular region
+    /// before rendering a new frame, so that diffing will treat scrolled lines as unchanged.
+    /// This reduces repaint cost for simple viewport scrolls. Only applies if not capturing
+    /// (i.e. between frames) and a previous frame exists. `delta > 0` means content moved up
+    /// by `delta` rows (new blank rows at bottom). `delta < 0` means content moved down.
+    pub fn scroll_prev_frame_region(
+        &mut self,
+        top: u16,
+        height: u16,
+        delta: i16,
+        blank_bg: Option<Color>,
+    ) {
+        if self.capturing || delta == 0 {
+            return;
+        }
+        let Some(prev) = self.prev_frame.as_mut() else {
+            return;
+        };
+        if top >= prev.height {
+            return;
+        }
+        let h = height.min(prev.height - top);
+        if h == 0 {
+            return;
+        }
+        // Ensure delta magnitude < h to have effect
+        let ad = delta.unsigned_abs();
+        if ad >= h {
+            return;
+        }
+        let width = prev.width as usize;
+        // Working buffer moves within same vector; copy direction aware to avoid overlap issues.
+        if delta > 0 {
+            // scroll up: row top+delta becomes top
+            let d = delta as u16;
+            for row in 0..(h - d) {
+                // copy each source row upward
+                let src = (top + d + row) as usize * width;
+                let dst = (top + row) as usize * width;
+                let (src_slice, dst_slice) = unsafe {
+                    let ptr = prev.cells.as_mut_ptr();
+                    (
+                        std::slice::from_raw_parts(ptr.add(src), width),
+                        std::slice::from_raw_parts_mut(ptr.add(dst), width),
+                    )
+                };
+                dst_slice.copy_from_slice(src_slice);
+            }
+            // Blank bottom d rows
+            for row in (h - d)..h {
+                let start = (top + row) as usize * width;
+                for cell in &mut prev.cells[start..start + width] {
+                    *cell = Cell::blank(blank_bg);
+                }
+            }
+        } else {
+            // delta < 0, scroll down
+            let d = (-delta) as u16;
+            for row in (0..(h - d)).rev() {
+                // copy from bottom to avoid overwrite
+                let src_row = top + row;
+                let dst_row = top + row + d;
+                let src = src_row as usize * width;
+                let dst = dst_row as usize * width;
+                let (src_slice, dst_slice) = unsafe {
+                    let ptr = prev.cells.as_mut_ptr();
+                    (
+                        std::slice::from_raw_parts(ptr.add(src), width),
+                        std::slice::from_raw_parts_mut(ptr.add(dst), width),
+                    )
+                };
+                dst_slice.copy_from_slice(src_slice);
+            }
+            // Blank top d rows
+            for row in 0..d {
+                let start = (top + row) as usize * width;
+                for cell in &mut prev.cells[start..start + width] {
+                    *cell = Cell::blank(blank_bg);
+                }
+            }
+        }
+    }
+
     /// Diff current captured frame with previous and emit minimal updates.
     pub fn flush_frame(&mut self) -> io::Result<()> {
         if self.is_headless() || !self.capturing {

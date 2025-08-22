@@ -446,7 +446,27 @@ impl UI {
         editor_state: &EditorRenderState,
         full_redraw: bool,
     ) -> io::Result<()> {
-        // Start shadow frame capture (double buffering) with background color.
+        // Attempt scroll optimization: if a single primary window scrolled by small delta, shift prev frame rows.
+        if !full_redraw && let Some(win) = editor_state.window_manager.current_window() {
+            // Use UI's stored viewport_top (for current active view) as previous value
+            let old_top = self.viewport_top;
+            let new_top = win.viewport_top;
+            let delta = new_top as i32 - old_top as i32;
+            if delta != 0 && delta.unsigned_abs() <= (win.height / 2) as u32 {
+                let top = win.y; // already u16
+                let height = win.content_height() as u16;
+                terminal.scroll_prev_frame_region(
+                    top,
+                    height,
+                    delta as i16,
+                    Some(self.theme.background),
+                );
+            }
+            // Update stored viewport_top for next frame
+            self.viewport_top = new_top;
+        }
+
+        // Start shadow frame capture (double buffering) with background color AFTER possible scroll shift.
         terminal.begin_frame(self.theme.background);
         // Refresh terminal size to reflect any recent resize events
         terminal.update_size()?;
