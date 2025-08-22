@@ -398,12 +398,15 @@ impl UI {
             debug!("Successfully loaded theme: '{}'", theme_name);
             self.theme = complete_theme.ui;
             self.syntax_theme = complete_theme.syntax;
+            // Invalidate popup cache so colors refresh under new theme
+            self.popup_cache = None;
         } else {
             warn!("Theme '{}' not found, using default theme", theme_name);
             // Fallback to default theme if theme not found
             let default_theme = theme_config.get_current_theme();
             self.theme = default_theme.ui;
             self.syntax_theme = default_theme.syntax;
+            self.popup_cache = None;
         }
     }
 
