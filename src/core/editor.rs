@@ -153,6 +153,8 @@ pub struct Editor {
     markdown_preview_parent_window_id: Option<usize>,
     // Window to return focus to after closing preview (the one active when toggle/open was invoked)
     markdown_preview_restore_window_id: Option<usize>,
+    /// Cached per-line hashes for current markdown preview render (for incremental diffs)
+    markdown_preview_line_hashes: Option<Vec<u64>>,
 }
 
 impl Editor {
@@ -255,6 +257,7 @@ impl Editor {
             markdown_preview_source_buffer_id: None,
             markdown_preview_parent_window_id: None,
             markdown_preview_restore_window_id: None,
+            markdown_preview_line_hashes: None,
         };
         // Initialize reserved rows for status/command lines based on config
         let reserved_rows = editor.reserved_rows_from_config();
@@ -2821,6 +2824,55 @@ impl Editor {
         }
     }
 
+    /// Incremental variant: only (re)build highlights for lines with changed hashes.
+    fn build_preview_highlights_incremental(
+        &mut self,
+        buffer_id: usize,
+        render: &crate::utils::markdown::MarkdownRender,
+        old_hashes: &[u64],
+        new_hashes: &[u64],
+    ) {
+        let theme = self.theme_config.get_current_theme();
+        let make_style =
+            |cat: &crate::features::syntax::SemanticCategory| -> Option<HighlightStyle> {
+                let key = cat.as_str();
+                theme
+                    .syntax
+                    .tree_sitter_mappings
+                    .get(key)
+                    .map(|color| HighlightStyle::from_color(*color))
+            };
+        for (line_idx, line) in render.lines.iter().enumerate() {
+            if old_hashes.get(line_idx) == new_hashes.get(line_idx) {
+                continue; // unchanged
+            }
+            if let Some(spans) = render.spans.get(&line_idx) {
+                let mut ranges: Vec<HighlightRange> = Vec::with_capacity(spans.len());
+                for sp in spans {
+                    if sp.start < sp.end
+                        && sp.end <= line.len()
+                        && let Some(style) = make_style(&sp.category)
+                    {
+                        ranges.push(HighlightRange {
+                            start: sp.start,
+                            end: sp.end,
+                            style,
+                        });
+                    }
+                }
+                if ranges.is_empty() {
+                    self.preview_highlights.remove(&(buffer_id, line_idx));
+                } else {
+                    self.preview_highlights
+                        .insert((buffer_id, line_idx), ranges);
+                }
+            } else {
+                // No spans now -> remove if previously existed
+                self.preview_highlights.remove(&(buffer_id, line_idx));
+            }
+        }
+    }
+
     /// Get highlighted text for a specific line in the current buffer
     pub fn get_line_highlights(
         &mut self,
@@ -3067,19 +3119,81 @@ impl Editor {
                 (false, 0, Vec::new())
             };
             if is_md {
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
                 let render = crate::utils::markdown::render_markdown(
                     &src_lines,
                     &self.config.markdown_preview.math,
                     &self.config.markdown_preview.large_file_mode,
                 );
-                let src_to_preview_map = render.src_to_preview.clone();
+                let new_lines = &render.lines;
+                let mut new_hashes: Vec<u64> = Vec::with_capacity(new_lines.len());
+                for l in new_lines {
+                    let mut h = DefaultHasher::new();
+                    l.hash(&mut h);
+                    new_hashes.push(h.finish());
+                }
+
+                let incremental = if let Some(old_hashes) = &self.markdown_preview_line_hashes {
+                    // Only attempt incremental if length delta is small and same ordering baseline
+                    // (simple heuristic: no huge structural change)
+                    !old_hashes.is_empty()
+                        && old_hashes.len() == new_hashes.len()
+                        && old_hashes.iter().zip(&new_hashes).any(|(a, b)| a != b)
+                } else {
+                    false
+                };
+
                 if let Some(preview) = self.buffers.get_mut(&preview_id) {
-                    preview.lines = render.lines.clone();
+                    if incremental {
+                        // Update only changed lines in place
+                        if preview.lines.len() != new_lines.len() {
+                            preview.lines = new_lines.clone();
+                        } else {
+                            for (i, (old_h, new_h)) in self
+                                .markdown_preview_line_hashes
+                                .as_ref()
+                                .unwrap()
+                                .iter()
+                                .zip(&new_hashes)
+                                .enumerate()
+                            {
+                                if old_h != new_h {
+                                    preview.lines[i] = new_lines[i].clone();
+                                }
+                            }
+                        }
+                    } else {
+                        preview.lines = new_lines.clone();
+                    }
                     preview.modified = false;
                     preview.cursor.row = 0;
                     preview.cursor.col = 0;
                 }
-                self.build_preview_highlights(preview_id, render);
+
+                // Incremental highlight rebuild: only recompute for lines whose hash changed
+                if incremental {
+                    let old_hashes_vec =
+                        self.markdown_preview_line_hashes.as_ref().unwrap().clone();
+                    // Remove highlights for changed lines first
+                    for (i, (old_h, new_h)) in old_hashes_vec.iter().zip(&new_hashes).enumerate() {
+                        if old_h != new_h {
+                            self.preview_highlights.remove(&(preview_id, i));
+                        }
+                    }
+                    // Build highlights only for changed lines (using cloned old hashes to avoid borrow conflict)
+                    self.build_preview_highlights_incremental(
+                        preview_id,
+                        &render,
+                        &old_hashes_vec,
+                        &new_hashes,
+                    );
+                } else {
+                    self.build_preview_highlights(preview_id, render.clone());
+                }
+
+                self.markdown_preview_line_hashes = Some(new_hashes);
+                let src_to_preview_map = render.src_to_preview.clone();
                 self.markdown_src_to_preview = src_to_preview_map;
                 if self.markdown_src_to_preview.len() < src_lines_len {
                     self.markdown_src_to_preview.resize(src_lines_len, 0usize);
@@ -3113,6 +3227,8 @@ impl Editor {
                 "Open or switch to a .md file to render preview.".into(),
             ];
         }
+        // Placeholder resets cached hashes
+        self.markdown_preview_line_hashes = None;
     }
 
     /// Internal: lightweight check if buffer id is markdown by extension.
