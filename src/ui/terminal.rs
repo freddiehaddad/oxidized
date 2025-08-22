@@ -46,29 +46,10 @@ impl FrameBuffer {
             cursor_style: None,
         }
     }
-    #[inline]
-    fn idx(&self, r: u16, c: u16) -> usize {
-        r as usize * self.width as usize + c as usize
-    }
     fn set_char(&mut self, r: u16, c: u16, ch: char, fg: Option<Color>, bg: Option<Color>) {
         if r < self.height && c < self.width {
             let idx = r as usize * self.width as usize + c as usize;
             self.cells[idx] = Cell { ch, fg, bg };
-        }
-    }
-    fn fill_row_from(&mut self, r: u16, start: u16, fg: Option<Color>, bg: Option<Color>) {
-        if r >= self.height || start >= self.width {
-            return;
-        }
-        let s = self.idx(r, start);
-        let e = self.idx(r, self.width - 1) + 1;
-        for cell in &mut self.cells[s..e] {
-            *cell = Cell { ch: ' ', fg, bg };
-        }
-    }
-    fn clear_all(&mut self, bg: Option<Color>) {
-        for cell in &mut self.cells {
-            *cell = Cell::blank(bg);
         }
     }
 }
@@ -161,34 +142,6 @@ impl Terminal {
                     old_size.0, old_size.1, self.size.0, self.size.1
                 );
             }
-        }
-        Ok(())
-    }
-
-    pub fn clear_screen(&mut self) -> io::Result<()> {
-        if self.is_headless() {
-            return Ok(());
-        }
-        if self.capturing {
-            if let Some(f) = self.cur_frame.as_mut() {
-                f.clear_all(self.cap_bg);
-            }
-        } else {
-            self.stdout.execute(Clear(ClearType::All))?;
-        }
-        Ok(())
-    }
-
-    pub fn clear_line(&mut self) -> io::Result<()> {
-        if self.is_headless() {
-            return Ok(());
-        }
-        if self.capturing {
-            if let Some(f) = self.cur_frame.as_mut() {
-                f.fill_row_from(self.cap_cursor.0, 0, self.cap_fg, self.cap_bg);
-            }
-        } else {
-            self.stdout.execute(Clear(ClearType::CurrentLine))?;
         }
         Ok(())
     }
@@ -420,36 +373,6 @@ impl Terminal {
             self.cap_bg = None;
         } else {
             self.stdout.queue(ResetColor)?;
-        }
-        Ok(())
-    }
-
-    pub fn queue_clear_line(&mut self) -> io::Result<()> {
-        self.ops_debug += 1;
-        if self.is_headless() {
-            return Ok(());
-        }
-        if self.capturing {
-            if let Some(f) = self.cur_frame.as_mut() {
-                f.fill_row_from(self.cap_cursor.0, 0, self.cap_fg, self.cap_bg);
-            }
-        } else {
-            self.stdout.queue(Clear(ClearType::CurrentLine))?;
-        }
-        Ok(())
-    }
-
-    pub fn queue_clear_screen(&mut self) -> io::Result<()> {
-        self.ops_debug += 1;
-        if self.is_headless() {
-            return Ok(());
-        }
-        if self.capturing {
-            if let Some(f) = self.cur_frame.as_mut() {
-                f.clear_all(self.cap_bg);
-            }
-        } else {
-            self.stdout.queue(Clear(ClearType::All))?;
         }
         Ok(())
     }
