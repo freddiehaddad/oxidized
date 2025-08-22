@@ -145,6 +145,14 @@ pub struct Editor {
     preview_highlights: HashMap<(usize, usize), Vec<HighlightRange>>,
     /// Mapping from source line index to preview line index for scroll sync
     markdown_src_to_preview: Vec<usize>,
+    /// The buffer id of the last markdown buffer that was active (for preview fallback)
+    last_markdown_buffer_id: Option<usize>,
+    /// Source buffer currently rendered into the preview (may differ from current buffer)
+    markdown_preview_source_buffer_id: Option<usize>,
+    /// The window id that was split to create the preview (to restore focus on close)
+    markdown_preview_parent_window_id: Option<usize>,
+    // Window to return focus to after closing preview (the one active when toggle/open was invoked)
+    markdown_preview_restore_window_id: Option<usize>,
 }
 
 impl Editor {
@@ -243,6 +251,10 @@ impl Editor {
             last_markdown_preview_refresh: None,
             preview_highlights: HashMap::new(),
             markdown_src_to_preview: Vec::new(),
+            last_markdown_buffer_id: None,
+            markdown_preview_source_buffer_id: None,
+            markdown_preview_parent_window_id: None,
+            markdown_preview_restore_window_id: None,
         };
         // Initialize reserved rows for status/command lines based on config
         let reserved_rows = editor.reserved_rows_from_config();
@@ -282,11 +294,31 @@ impl Editor {
             Buffer::new(id, self.config.editing.undo_levels)
         };
 
+        let is_markdown = {
+            let path = buffer.file_path.clone();
+            if let Some(path) = path {
+                let path_cow = path.as_os_str().to_string_lossy();
+                if let Some(lang) = self
+                    .config
+                    .languages
+                    .detect_language_from_extension(&path_cow)
+                {
+                    lang.eq_ignore_ascii_case("markdown") || lang.eq_ignore_ascii_case("md")
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        };
         self.buffers.insert(id, buffer);
         if self.current_buffer_id != Some(id) {
             self.last_buffer_id = self.current_buffer_id;
         }
         self.current_buffer_id = Some(id);
+        if is_markdown {
+            self.last_markdown_buffer_id = Some(id);
+        }
         debug!("Buffer {} created and set as current", id);
 
         // Assign buffer to current window
@@ -325,6 +357,17 @@ impl Editor {
                 self.last_buffer_id = self.current_buffer_id;
             }
             self.current_buffer_id = Some(id);
+            // Track last markdown buffer
+            if let Some(buf) = self.buffers.get(&id)
+                && let Some(path) = &buf.file_path
+                && let Some(lang) = self
+                    .config
+                    .languages
+                    .detect_language_from_extension(&path.as_os_str().to_string_lossy())
+                && (lang.eq_ignore_ascii_case("markdown") || lang.eq_ignore_ascii_case("md"))
+            {
+                self.last_markdown_buffer_id = Some(id);
+            }
             // Apply to current window and preserve cursor position
             if let Some(win) = self.window_manager.current_window_mut()
                 && let Some(buf) = self.buffers.get(&id)
@@ -398,6 +441,16 @@ impl Editor {
             self.last_buffer_id = self.current_buffer_id;
         }
         self.current_buffer_id = Some(new_id);
+        if let Some(buf) = self.buffers.get(&new_id)
+            && let Some(path) = &buf.file_path
+            && let Some(lang) = self
+                .config
+                .languages
+                .detect_language_from_extension(&path.as_os_str().to_string_lossy())
+            && (lang.eq_ignore_ascii_case("markdown") || lang.eq_ignore_ascii_case("md"))
+        {
+            self.last_markdown_buffer_id = Some(new_id);
+        }
         // Apply to current window and preserve cursor position
         if let Some(win) = self.window_manager.current_window_mut()
             && let Some(buf) = self.buffers.get(&new_id)
@@ -2804,16 +2857,47 @@ impl Editor {
 
     // ---------- Markdown Preview MVP ----------
     pub fn open_markdown_preview(&mut self) -> String {
-        if self.markdown_preview_open {
-            return "Markdown preview already open".to_string();
+        // Record window to restore focus to (active before opening preview)
+        if !self.markdown_preview_open {
+            self.markdown_preview_restore_window_id = self.window_manager.current_window_id();
         }
-        // Capture the source buffer context before creating any new buffers
-        let source_window_id = self.window_manager.current_window_id();
-        let source_buffer_id = self.current_buffer_id;
-        let src_lines: Option<Vec<String>> = source_buffer_id
-            .and_then(|src_id| self.buffers.get(&src_id).map(|src| src.lines.clone()));
+        // Identify or remember the source buffer we want to preview.
+        let current_is_md = self.is_current_buffer_markdown();
+        if current_is_md {
+            self.last_markdown_buffer_id = self.current_buffer_id;
+        }
+        let source_buffer_id = if current_is_md {
+            self.current_buffer_id
+        } else {
+            self.last_markdown_buffer_id
+        };
 
-        // Create a vertical split to the right
+        // Reuse existing preview buffer/window if already open
+        if self.markdown_preview_open {
+            // Just re-render if source changed (or placeholder needed)
+            self.render_markdown_preview_from_source(source_buffer_id);
+            self.status_message = "Markdown preview updated".to_string();
+            self.request_redraw();
+            return self.status_message.clone();
+        }
+
+        // Capture original focus to restore after creating preview
+        let original_window_id = self.window_manager.current_window_id();
+        let original_buffer_id = self.current_buffer_id;
+
+        // Always split the global right-most window so the preview is guaranteed to be right-most.
+        let mut parent_window_before_split: Option<usize> = None;
+        if let Some((right_most_id, _)) = self
+            .window_manager
+            .all_windows()
+            .values()
+            .map(|w| (w.id, w.x + w.width))
+            .max_by_key(|(_, right)| *right)
+        {
+            // Temporarily focus right-most window for splitting
+            let _ = self.window_manager.set_current_window(right_most_id);
+            parent_window_before_split = Some(right_most_id);
+        }
         let new_window_id = match self
             .window_manager
             .split_current_window(SplitDirection::VerticalRight)
@@ -2821,88 +2905,108 @@ impl Editor {
             Some(id) => id,
             None => return "Failed to create split for preview".to_string(),
         };
-
-        // Temporarily focus the new window so buffer creation attaches to it
         let _ = self.window_manager.set_current_window(new_window_id);
 
-        // Create a new buffer for the preview content (attaches to right window)
+        // Create (or reuse) preview buffer
         let preview_buffer_id = match self.create_buffer(None) {
             Ok(id) => id,
             Err(_) => return "Failed to create preview buffer".to_string(),
         };
+        self.markdown_preview_buffer_id = Some(preview_buffer_id);
+        self.markdown_preview_window_id = Some(new_window_id);
+        self.markdown_preview_open = true;
+        self.markdown_preview_parent_window_id = parent_window_before_split;
 
-        // Populate preview buffer with rendered markdown (if available)
-        if let Some(collected) = src_lines {
-            let render = crate::utils::markdown::render_markdown(
-                &collected,
-                &self.config.markdown_preview.math,
-                &self.config.markdown_preview.large_file_mode,
-            );
-            // Keep a copy of the src->preview line map before moving render
-            let src_to_preview_map = render.src_to_preview.clone();
-            if let Some(preview) = self.buffers.get_mut(&preview_buffer_id) {
-                preview.lines = render.lines.clone();
-                preview.modified = false;
-                preview.cursor.row = 0;
-                preview.cursor.col = 0;
-            }
-            // Build preview highlights with current theme
-            self.build_preview_highlights(preview_buffer_id, render);
-            // Save src->preview line map for scroll sync
-            if let Some(src_id) = source_buffer_id
-                && let Some(src_buf) = self.buffers.get(&src_id)
-            {
-                self.markdown_src_to_preview = src_to_preview_map;
-                if self.markdown_src_to_preview.len() < src_buf.lines.len() {
-                    self.markdown_src_to_preview
-                        .resize(src_buf.lines.len(), 0usize);
-                }
-            }
+        // Give the preview buffer a pseudo path for easier identification in logs/layout dumps
+        if let Some(pb) = self.buffers.get_mut(&preview_buffer_id)
+            && pb.file_path.is_none()
+        {
+            pb.file_path = Some(std::path::PathBuf::from("[MarkdownPreview]"));
         }
 
-        // Ensure the right window points at the preview buffer
+        // Render preview (or placeholder)
+        self.render_markdown_preview_from_source(source_buffer_id);
+
+        // Ensure window shows the preview buffer
         if let Some(win) = self.window_manager.get_window_mut(new_window_id) {
             win.set_buffer(preview_buffer_id);
             win.save_cursor_position(0, 0);
         }
 
-        // Restore focus and current buffer to the original source window/buffer
-        if let Some(src_wid) = source_window_id {
-            let _ = self.window_manager.set_current_window(src_wid);
+        // Restore original focus and buffer
+        if let Some(ow) = original_window_id {
+            let _ = self.window_manager.set_current_window(ow);
         }
-        if let Some(src_bid) = source_buffer_id {
-            self.current_buffer_id = Some(src_bid);
+        if let Some(ob) = original_buffer_id {
+            self.current_buffer_id = Some(ob);
             if let Some(win) = self.window_manager.current_window_mut() {
-                win.set_buffer(src_bid);
-                if let Some(buf) = self.buffers.get(&src_bid) {
+                win.set_buffer(ob);
+                if let Some(buf) = self.buffers.get(&ob) {
                     win.save_cursor_position(buf.cursor.row, buf.cursor.col);
                 }
             }
         }
 
-        self.markdown_preview_open = true;
-        self.markdown_preview_buffer_id = Some(preview_buffer_id);
-        self.markdown_preview_window_id = Some(new_window_id);
-        // Align preview viewport with current source position if enabled
         self.maybe_sync_markdown_preview_viewport();
+        // Preview opened
         self.status_message = "Markdown preview opened".to_string();
         self.request_redraw();
         self.status_message.clone()
     }
 
     pub fn close_markdown_preview(&mut self) -> String {
-        if !self.markdown_preview_open {
+        // Determine real open state by window content
+        let mut real_open_bid = None;
+        if let Some(bid) = self.markdown_preview_buffer_id
+            && self
+                .window_manager
+                .all_windows()
+                .values()
+                .any(|w| w.buffer_id == Some(bid))
+        {
+            real_open_bid = Some(bid);
+        }
+        if !self.markdown_preview_open && real_open_bid.is_none() {
             return "Markdown preview already closed".to_string();
         }
-        if let Some(wid) = self.markdown_preview_window_id.take() {
-            let _ = self.window_manager.set_current_window(wid);
-            let _ = self.close_window();
+        let parent_to_restore = self.markdown_preview_parent_window_id.take();
+        // Close all windows that display the preview buffer
+        if let Some(bid) = self.markdown_preview_buffer_id {
+            let windows_with_preview: Vec<usize> = self
+                .window_manager
+                .all_windows()
+                .values()
+                .filter(|w| w.buffer_id == Some(bid))
+                .map(|w| w.id)
+                .collect();
+            for wid in windows_with_preview {
+                let _ = self.window_manager.close_window_by_id(wid);
+            }
+            // Reclaim any freed horizontal space for cleaner layout
+            self.window_manager.fill_horizontal_gaps();
         }
+        self.markdown_preview_window_id = None;
         if let Some(bid) = self.markdown_preview_buffer_id.take() {
             let _ = self.close_buffer(bid);
-            // Drop any cached preview highlights for this buffer
             self.preview_highlights
                 .retain(|(buf_id, _line), _| *buf_id != bid);
+        }
+        if let Some(pid) = parent_to_restore
+            && self.window_manager.get_window(pid).is_some()
+        {
+            let _ = self.window_manager.set_current_window(pid);
+            if let Some(win) = self.window_manager.get_window(pid) {
+                self.current_buffer_id = win.buffer_id;
+            }
+        }
+        // Prefer restoring focus to the original window active when preview opened
+        if let Some(restore_wid) = self.markdown_preview_restore_window_id.take()
+            && self.window_manager.get_window(restore_wid).is_some()
+        {
+            let _ = self.window_manager.set_current_window(restore_wid);
+            if let Some(win) = self.window_manager.get_window(restore_wid) {
+                self.current_buffer_id = win.buffer_id;
+            }
         }
         self.markdown_src_to_preview.clear();
         self.markdown_preview_open = false;
@@ -2912,11 +3016,110 @@ impl Editor {
     }
 
     pub fn toggle_markdown_preview(&mut self) -> String {
-        if self.markdown_preview_open {
+        let mut real_open = false;
+        if let Some(bid) = self.markdown_preview_buffer_id {
+            real_open = self
+                .window_manager
+                .all_windows()
+                .values()
+                .any(|w| w.buffer_id == Some(bid));
+        }
+        if self.markdown_preview_open && !real_open {
+            self.markdown_preview_open = false;
+        }
+        if self.markdown_preview_open || real_open {
             self.close_markdown_preview()
         } else {
             self.open_markdown_preview()
         }
+    }
+
+    /// Public helper for tests/UI to know if preview is open
+    pub fn is_markdown_preview_open(&self) -> bool {
+        self.markdown_preview_open
+    }
+
+    /// Helper to render the preview buffer from an optional markdown source buffer.
+    /// When no markdown source buffer is available, shows a placeholder.
+    fn render_markdown_preview_from_source(&mut self, source_buffer_id: Option<usize>) {
+        let preview_id = match self.markdown_preview_buffer_id {
+            Some(id) => id,
+            None => return,
+        };
+
+        // Determine content: render markdown lines or placeholder
+        if let Some(src_id) = source_buffer_id {
+            let (is_md, src_lines_len, src_lines) = if let Some(src_buf) = self.buffers.get(&src_id)
+            {
+                (
+                    self.is_buffer_markdown(src_id),
+                    src_buf.lines.len(),
+                    src_buf.lines.clone(),
+                )
+            } else {
+                (false, 0, Vec::new())
+            };
+            if is_md {
+                let render = crate::utils::markdown::render_markdown(
+                    &src_lines,
+                    &self.config.markdown_preview.math,
+                    &self.config.markdown_preview.large_file_mode,
+                );
+                let src_to_preview_map = render.src_to_preview.clone();
+                if let Some(preview) = self.buffers.get_mut(&preview_id) {
+                    preview.lines = render.lines.clone();
+                    preview.modified = false;
+                    preview.cursor.row = 0;
+                    preview.cursor.col = 0;
+                }
+                self.build_preview_highlights(preview_id, render);
+                self.markdown_src_to_preview = src_to_preview_map;
+                if self.markdown_src_to_preview.len() < src_lines_len {
+                    self.markdown_src_to_preview.resize(src_lines_len, 0usize);
+                }
+                self.markdown_preview_source_buffer_id = Some(src_id);
+                return;
+            }
+            // fall through to placeholder if not markdown
+        } else {
+            // Placeholder
+            if let Some(preview) = self.buffers.get_mut(&preview_id) {
+                preview.lines = vec![
+                    "(No markdown buffer active)".into(),
+                    "Open or switch to a .md file to render preview.".into(),
+                ];
+                preview.modified = false;
+                preview.cursor.row = 0;
+                preview.cursor.col = 0;
+            }
+            self.preview_highlights
+                .retain(|(bid, _), _| *bid != preview_id);
+            self.markdown_src_to_preview.clear();
+            self.markdown_preview_source_buffer_id = None;
+        }
+        // Reaching here means placeholder scenario
+        if let Some(preview) = self.buffers.get_mut(&preview_id)
+            && preview.lines.is_empty()
+        {
+            preview.lines = vec![
+                "(No markdown buffer active)".into(),
+                "Open or switch to a .md file to render preview.".into(),
+            ];
+        }
+    }
+
+    /// Internal: lightweight check if buffer id is markdown by extension.
+    fn is_buffer_markdown(&self, buffer_id: usize) -> bool {
+        if let Some(buf) = self.buffers.get(&buffer_id)
+            && let Some(path) = &buf.file_path
+            && let Some(lang) = self
+                .config
+                .languages
+                .detect_language_from_extension(&path.as_os_str().to_string_lossy())
+        {
+            return lang.eq_ignore_ascii_case("markdown") || lang.eq_ignore_ascii_case("md");
+        }
+        false
     }
 
     /// Determine if the current buffer is Markdown based only on file extension
@@ -2949,46 +3152,19 @@ impl Editor {
         if !self.markdown_preview_open {
             return "Markdown preview is not open".to_string();
         }
-        if !self.is_current_buffer_markdown() {
-            return "Current buffer is not markdown".to_string();
+        // Re-evaluate source buffer
+        if self.is_current_buffer_markdown() {
+            self.last_markdown_buffer_id = self.current_buffer_id;
         }
-
-        let (src_lines_opt, preview_buffer_id_opt) = (
-            self.current_buffer().map(|b| b.lines.clone()),
-            self.markdown_preview_buffer_id,
-        );
-
-        if let (Some(src_lines), Some(preview_id)) = (src_lines_opt, preview_buffer_id_opt) {
-            // Render formatted markdown to preview lines
-            let render = crate::utils::markdown::render_markdown(
-                &src_lines,
-                &self.config.markdown_preview.math,
-                &self.config.markdown_preview.large_file_mode,
-            );
-            if let Some(preview) = self.buffers.get_mut(&preview_id) {
-                preview.lines = render.lines.clone();
-                preview.modified = false;
-                // Keep cursor at top of preview on refresh for now
-                preview.cursor.row = 0;
-                preview.cursor.col = 0;
-            }
-            // Rebuild preview highlights
-            self.build_preview_highlights(preview_id, render);
-            // Update src->preview map
-            self.markdown_src_to_preview = crate::utils::markdown::render_markdown(
-                &src_lines,
-                &self.config.markdown_preview.math,
-                &self.config.markdown_preview.large_file_mode,
-            )
-            .src_to_preview;
-            // Also request a redraw so UI updates
-            // Try to keep preview viewport aligned after content changes
-            self.maybe_sync_markdown_preview_viewport();
-            self.request_redraw();
-            self.status_message = "Markdown preview refreshed".to_string();
+        let source_buffer_id = if self.is_current_buffer_markdown() {
+            self.current_buffer_id
         } else {
-            self.status_message = "No preview buffer to refresh".to_string();
-        }
+            self.last_markdown_buffer_id
+        };
+        self.render_markdown_preview_from_source(source_buffer_id);
+        self.maybe_sync_markdown_preview_viewport();
+        self.request_redraw();
+        self.status_message = "Markdown preview refreshed".to_string();
         self.status_message.clone()
     }
 

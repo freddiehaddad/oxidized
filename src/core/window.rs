@@ -284,6 +284,29 @@ impl WindowManager {
         }
     }
 
+    /// Close a specific window by id. Returns true if closed.
+    pub fn close_window_by_id(&mut self, id: usize) -> bool {
+        if !self.windows.contains_key(&id) {
+            return false;
+        }
+        if self.windows.len() <= 1 {
+            return false;
+        }
+        self.windows.remove(&id);
+        if self.current_window_id == Some(id) {
+            if let Some(&next_id) = self.windows.keys().next() {
+                self.current_window_id = Some(next_id);
+            } else {
+                self.current_window_id = None;
+            }
+        }
+        self.resize_windows_to_fill_space();
+        self.fill_horizontal_gaps();
+        true
+    }
+
+    // layout_summary removed (was for debug :Windows command)
+
     pub fn move_to_window_left(&mut self) -> bool {
         let current_window = match self.current_window() {
             Some(window) => window.clone(),
@@ -626,6 +649,30 @@ impl WindowManager {
             window.height = self.terminal_height.saturating_sub(self.reserved_rows);
         }
         // TODO: More sophisticated window management for multiple windows
+    }
+
+    /// Expand the right-most window to reclaim any horizontal gap left after a window was removed.
+    pub fn fill_horizontal_gaps(&mut self) {
+        if self.windows.is_empty() {
+            return;
+        }
+        // Find maximum right edge among existing windows
+        let mut right_most_id = None;
+        let mut max_right: u16 = 0;
+        for w in self.windows.values() {
+            let right_edge = w.x.saturating_add(w.width);
+            if right_edge > max_right {
+                max_right = right_edge;
+                right_most_id = Some(w.id);
+            }
+        }
+        if max_right < self.terminal_width
+            && let Some(rid) = right_most_id
+            && let Some(w) = self.windows.get_mut(&rid)
+        {
+            let delta = self.terminal_width.saturating_sub(max_right);
+            w.width = w.width.saturating_add(delta);
+        }
     }
 
     pub fn window_count(&self) -> usize {

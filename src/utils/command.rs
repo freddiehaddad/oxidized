@@ -155,6 +155,7 @@ pub fn execute_ex_command(editor: &mut Editor, raw: &str) {
             info!("Closed window");
             editor.set_status_message(message);
         }
+        // (Removed debug :Windows command)
         // Registers view
         "registers" | "reg" => {
             let msg = editor.open_registers_view();
