@@ -82,6 +82,14 @@ pub struct EditorRenderState {
     pub search_index: Option<usize>,
 }
 
+/// Cursor behavior policy during scrolling operations.
+/// PreserveOnScreen: keep cursor if still visible; clamp only if it would move outside the viewport.
+/// MoveWithViewport: shift cursor by the scroll delta, then enforce scroll_off margins.
+enum ScrollCursorMode {
+    PreserveOnScreen,
+    MoveWithViewport,
+}
+
 pub struct Editor {
     /// All open buffers
     buffers: HashMap<usize, Buffer>,
@@ -3464,247 +3472,134 @@ impl Editor {
     }
 
     // Scrolling methods
-    pub fn scroll_down_line(&mut self) {
-        // Ctrl+e: Scroll down one line (content moves up). Cursor stays on screen if possible.
-        if let Some(current_window) = self.window_manager.current_window_mut()
-            && let Some(buffer_id) = current_window.buffer_id
-            && let Some(buffer) = self.buffers.get_mut(&buffer_id)
-        {
-            let content_height = current_window.content_height();
+
+    /// Core scroll helper shared by single-line, half-page and full-page scroll commands.
+    fn scroll_by(&mut self, delta: isize, cursor_mode: ScrollCursorMode) {
+        if delta == 0 {
+            return;
+        }
+        // Acquire current window and buffer
+        let (window_id, content_height, buffer_id, old_top) =
+            if let Some(w) = self.window_manager.current_window() {
+                if let Some(bid) = w.buffer_id {
+                    (w.id, w.content_height(), bid, w.viewport_top)
+                } else {
+                    return;
+                }
+            } else {
+                return;
+            };
+
+        // Mutable access
+        if let (Some(window), Some(buffer)) = (
+            self.window_manager.get_window_mut(window_id),
+            self.buffers.get_mut(&buffer_id),
+        ) {
             let max_top = buffer.lines.len().saturating_sub(content_height);
-            let old_top = current_window.viewport_top;
-            if old_top < max_top {
-                current_window.viewport_top = (old_top + 1).min(max_top);
-                // Adjust cursor row only if it scrolled off the top
-                if buffer.cursor.row < current_window.viewport_top {
-                    buffer.cursor.row = current_window.viewport_top;
-                    if let Some(line) = buffer.get_line(buffer.cursor.row) {
-                        buffer.cursor.col = buffer.cursor.col.min(line.len());
+            // Compute new viewport top within bounds
+            let target_top_signed = old_top as isize + delta;
+            let clamped_top_signed = target_top_signed.clamp(0, max_top as isize);
+            let new_top = clamped_top_signed as usize;
+            let applied_delta = new_top as isize - old_top as isize;
+            if applied_delta == 0 {
+                // Nothing changed
+                return;
+            }
+            window.viewport_top = new_top;
+
+            match cursor_mode {
+                ScrollCursorMode::PreserveOnScreen => {
+                    // Keep cursor if still visible, else clamp into new viewport
+                    let bottom = new_top + content_height.saturating_sub(1);
+                    if buffer.cursor.row < new_top {
+                        buffer.cursor.row = new_top;
+                    } else if buffer.cursor.row > bottom {
+                        buffer.cursor.row = bottom.min(buffer.lines.len().saturating_sub(1));
+                    }
+                    // Prevent scroll_off logic from undoing explicit scroll this frame
+                    self.suppress_scrolloff_once = true;
+                }
+                ScrollCursorMode::MoveWithViewport => {
+                    // Shift cursor by actual applied delta
+                    if applied_delta > 0 {
+                        buffer.cursor.row =
+                            buffer.cursor.row.saturating_add(applied_delta as usize);
+                    } else if applied_delta < 0 {
+                        buffer.cursor.row =
+                            buffer.cursor.row.saturating_sub((-applied_delta) as usize);
+                    }
+                    // Clamp to buffer end
+                    buffer.cursor.row = buffer.cursor.row.min(buffer.lines.len().saturating_sub(1));
+
+                    // Enforce scroll_off margins
+                    let scroll_off = self.config.interface.scroll_off;
+                    let min_cursor_row = new_top + scroll_off;
+                    let max_cursor_row = new_top + content_height.saturating_sub(scroll_off + 1);
+                    if buffer.cursor.row < min_cursor_row {
+                        buffer.cursor.row =
+                            min_cursor_row.min(buffer.lines.len().saturating_sub(1));
+                    } else if buffer.cursor.row > max_cursor_row {
+                        buffer.cursor.row =
+                            max_cursor_row.min(buffer.lines.len().saturating_sub(1));
                     }
                 }
-                // Prevent scroll_off logic from immediately undoing this explicit scroll
-                self.suppress_scrolloff_once = true;
+            }
+
+            // Ensure cursor column valid
+            if let Some(line) = buffer.get_line(buffer.cursor.row) {
+                buffer.cursor.col = buffer.cursor.col.min(line.len());
             }
         }
+
+        // Highlight & sync preview
         self.request_visible_line_highlighting();
         self.maybe_sync_markdown_preview_viewport();
+    }
+
+    pub fn scroll_down_line(&mut self) {
+        // Ctrl+e: Scroll down one line (content moves up). Cursor preserved on screen.
+        self.scroll_by(1, ScrollCursorMode::PreserveOnScreen);
     }
 
     pub fn scroll_up_line(&mut self) {
-        // Ctrl+y: Scroll up one line (content moves down). Cursor stays on screen if possible.
-        if let Some(current_window) = self.window_manager.current_window_mut()
-            && let Some(buffer_id) = current_window.buffer_id
-            && let Some(buffer) = self.buffers.get_mut(&buffer_id)
-        {
-            let old_top = current_window.viewport_top;
-            if old_top > 0 {
-                current_window.viewport_top = old_top.saturating_sub(1);
-                // Adjust cursor row if it would fall below bottom after scroll (rare for single line but symmetric)
-                let bottom =
-                    current_window.viewport_top + current_window.content_height().saturating_sub(1);
-                if buffer.cursor.row > bottom {
-                    buffer.cursor.row = bottom.min(buffer.lines.len().saturating_sub(1));
-                    if let Some(line) = buffer.get_line(buffer.cursor.row) {
-                        buffer.cursor.col = buffer.cursor.col.min(line.len());
-                    }
-                }
-                self.suppress_scrolloff_once = true;
-            }
-        }
-        self.request_visible_line_highlighting();
-        self.maybe_sync_markdown_preview_viewport();
+        // Ctrl+y: Scroll up one line (content moves down). Cursor preserved on screen.
+        self.scroll_by(-1, ScrollCursorMode::PreserveOnScreen);
     }
 
     pub fn scroll_down_page(&mut self) {
-        // Ctrl+f: Scroll down one page using current window height
-        let (old_viewport_top, new_viewport_top, content_height, scroll_off) = {
-            if let Some(current_window) = self.window_manager.current_window_mut() {
-                let page_size = current_window.content_height().saturating_sub(1); // Leave 1 line for overlap
-                let old_viewport_top = current_window.viewport_top;
-                current_window.viewport_top = current_window.viewport_top.saturating_add(page_size);
-                let new_viewport_top = current_window.viewport_top;
-                let content_height = current_window.content_height();
-                (
-                    old_viewport_top,
-                    new_viewport_top,
-                    content_height,
-                    self.config.interface.scroll_off,
-                )
-            } else {
-                return;
-            }
-        };
-
-        // Move cursor down by the same amount as viewport
-        if let Some(buffer) = self.current_buffer_mut() {
-            let scroll_amount = new_viewport_top - old_viewport_top;
-            buffer.cursor.row = buffer.cursor.row.saturating_add(scroll_amount);
-            buffer.cursor.row = buffer.cursor.row.min(buffer.lines.len().saturating_sub(1));
-
-            // Apply scroll_off to keep cursor within visible bounds
-            let min_cursor_row = new_viewport_top + scroll_off;
-            let max_cursor_row = new_viewport_top + content_height.saturating_sub(scroll_off + 1);
-
-            if buffer.cursor.row < min_cursor_row {
-                buffer.cursor.row = min_cursor_row.min(buffer.lines.len().saturating_sub(1));
-            } else if buffer.cursor.row > max_cursor_row {
-                buffer.cursor.row = max_cursor_row.min(buffer.lines.len().saturating_sub(1));
-            }
-
-            // Ensure cursor column is valid for the new line
-            if let Some(line) = buffer.get_line(buffer.cursor.row) {
-                buffer.cursor.col = buffer.cursor.col.min(line.len());
+        // Ctrl+f: Scroll down one page (leave one line overlap)
+        if let Some(w) = self.window_manager.current_window() {
+            let page = w.content_height().saturating_sub(1) as isize;
+            if page > 0 {
+                self.scroll_by(page, ScrollCursorMode::MoveWithViewport);
             }
         }
-
-        // Request highlighting for newly visible lines after scrolling
-        self.request_visible_line_highlighting();
-        // Sync preview viewport if enabled
-        self.maybe_sync_markdown_preview_viewport();
     }
 
     pub fn scroll_up_page(&mut self) {
-        // Ctrl+b: Scroll up one page using current window height
-        let (old_viewport_top, new_viewport_top, content_height, scroll_off) = {
-            if let Some(current_window) = self.window_manager.current_window_mut() {
-                let page_size = current_window.content_height().saturating_sub(1); // Leave 1 line for overlap
-                let old_viewport_top = current_window.viewport_top;
-                current_window.viewport_top = current_window.viewport_top.saturating_sub(page_size);
-                let new_viewport_top = current_window.viewport_top;
-                let content_height = current_window.content_height();
-                (
-                    old_viewport_top,
-                    new_viewport_top,
-                    content_height,
-                    self.config.interface.scroll_off,
-                )
-            } else {
-                return;
-            }
-        };
-
-        // Move cursor up by the same amount as viewport
-        if let Some(buffer) = self.current_buffer_mut() {
-            let scroll_amount = old_viewport_top - new_viewport_top;
-            buffer.cursor.row = buffer.cursor.row.saturating_sub(scroll_amount);
-
-            // Apply scroll_off to keep cursor within visible bounds
-            let min_cursor_row = new_viewport_top + scroll_off;
-            let max_cursor_row = new_viewport_top + content_height.saturating_sub(scroll_off + 1);
-
-            if buffer.cursor.row < min_cursor_row {
-                buffer.cursor.row = min_cursor_row.min(buffer.lines.len().saturating_sub(1));
-            } else if buffer.cursor.row > max_cursor_row {
-                buffer.cursor.row = max_cursor_row.min(buffer.lines.len().saturating_sub(1));
-            }
-
-            // Ensure cursor column is valid for the new line
-            if let Some(line) = buffer.get_line(buffer.cursor.row) {
-                buffer.cursor.col = buffer.cursor.col.min(line.len());
+        // Ctrl+b: Scroll up one page (leave one line overlap)
+        if let Some(w) = self.window_manager.current_window() {
+            let page = w.content_height().saturating_sub(1) as isize;
+            if page > 0 {
+                self.scroll_by(-page, ScrollCursorMode::MoveWithViewport);
             }
         }
-
-        // Request highlighting for newly visible lines after scrolling
-        self.request_visible_line_highlighting();
-        // Sync preview viewport if enabled
-        self.maybe_sync_markdown_preview_viewport();
     }
 
     pub fn scroll_down_half_page(&mut self) {
-        // Ctrl+d: Scroll down half page using current window height
-        let (old_viewport_top, new_viewport_top, content_height, scroll_off) = {
-            if let Some(current_window) = self.window_manager.current_window_mut() {
-                let half_page_size = (current_window.content_height() / 2).max(1);
-                let old_viewport_top = current_window.viewport_top;
-                current_window.viewport_top =
-                    current_window.viewport_top.saturating_add(half_page_size);
-                let new_viewport_top = current_window.viewport_top;
-                let content_height = current_window.content_height();
-                (
-                    old_viewport_top,
-                    new_viewport_top,
-                    content_height,
-                    self.config.interface.scroll_off,
-                )
-            } else {
-                return;
-            }
-        };
-
-        // Move cursor down by the same amount as viewport
-        if let Some(buffer) = self.current_buffer_mut() {
-            let scroll_amount = new_viewport_top - old_viewport_top;
-            buffer.cursor.row = buffer.cursor.row.saturating_add(scroll_amount);
-            buffer.cursor.row = buffer.cursor.row.min(buffer.lines.len().saturating_sub(1));
-
-            // Apply scroll_off to keep cursor within visible bounds
-            let min_cursor_row = new_viewport_top + scroll_off;
-            let max_cursor_row = new_viewport_top + content_height.saturating_sub(scroll_off + 1);
-
-            if buffer.cursor.row < min_cursor_row {
-                buffer.cursor.row = min_cursor_row.min(buffer.lines.len().saturating_sub(1));
-            } else if buffer.cursor.row > max_cursor_row {
-                buffer.cursor.row = max_cursor_row.min(buffer.lines.len().saturating_sub(1));
-            }
-
-            // Ensure cursor column is valid for the new line
-            if let Some(line) = buffer.get_line(buffer.cursor.row) {
-                buffer.cursor.col = buffer.cursor.col.min(line.len());
-            }
+        // Ctrl+d: Scroll down half page
+        if let Some(w) = self.window_manager.current_window() {
+            let half = (w.content_height() / 2).max(1) as isize;
+            self.scroll_by(half, ScrollCursorMode::MoveWithViewport);
         }
-
-        // Request highlighting for newly visible lines after scrolling
-        self.request_visible_line_highlighting();
-        // Sync preview viewport if enabled
-        self.maybe_sync_markdown_preview_viewport();
     }
 
     pub fn scroll_up_half_page(&mut self) {
-        // Ctrl+u: Scroll up half page using current window height
-        let (old_viewport_top, new_viewport_top, content_height, scroll_off) = {
-            if let Some(current_window) = self.window_manager.current_window_mut() {
-                let half_page_size = (current_window.content_height() / 2).max(1);
-                let old_viewport_top = current_window.viewport_top;
-                current_window.viewport_top =
-                    current_window.viewport_top.saturating_sub(half_page_size);
-                let new_viewport_top = current_window.viewport_top;
-                let content_height = current_window.content_height();
-                (
-                    old_viewport_top,
-                    new_viewport_top,
-                    content_height,
-                    self.config.interface.scroll_off,
-                )
-            } else {
-                return;
-            }
-        };
-
-        // Move cursor up by the same amount as viewport
-        if let Some(buffer) = self.current_buffer_mut() {
-            let scroll_amount = old_viewport_top - new_viewport_top;
-            buffer.cursor.row = buffer.cursor.row.saturating_sub(scroll_amount);
-
-            // Apply scroll_off to keep cursor within visible bounds
-            let min_cursor_row = new_viewport_top + scroll_off;
-            let max_cursor_row = new_viewport_top + content_height.saturating_sub(scroll_off + 1);
-
-            if buffer.cursor.row < min_cursor_row {
-                buffer.cursor.row = min_cursor_row.min(buffer.lines.len().saturating_sub(1));
-            } else if buffer.cursor.row > max_cursor_row {
-                buffer.cursor.row = max_cursor_row.min(buffer.lines.len().saturating_sub(1));
-            }
-
-            // Ensure cursor column is valid for the new line
-            if let Some(line) = buffer.get_line(buffer.cursor.row) {
-                buffer.cursor.col = buffer.cursor.col.min(line.len());
-            }
+        // Ctrl+u: Scroll up half page
+        if let Some(w) = self.window_manager.current_window() {
+            let half = (w.content_height() / 2).max(1) as isize;
+            self.scroll_by(-half, ScrollCursorMode::MoveWithViewport);
         }
-
-        // Request highlighting for newly visible lines after scrolling
-        self.request_visible_line_highlighting();
-        // Sync preview viewport if enabled
-        self.maybe_sync_markdown_preview_viewport();
     }
 
     // Centering methods (z commands in Vim)
