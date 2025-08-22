@@ -479,17 +479,49 @@ See diagrams:
 
 ### Diagrams index
 
-- [Event-driven threads and event bus](#event-driven-threads-and-event-bus)
-- [Async syntax highlighting pipeline (with versioning and cache)](#async-syntax-highlighting-pipeline-with-versioning-and-cache)
-- [Window layout and splits (example)](#window-layout-and-splits-example)
-- [Rendering: gutter, wrapping, and highlights](#rendering-gutter-wrapping-and-highlights)
-- [LRU cache behavior (per-line highlights)](#lru-cache-behavior-per-line-highlights)
-- [Buffer close (MRU fallback) sequence](#buffer-close-mru-fallback-sequence)
-- [RenderState diff and redraw decision (hybrid strategy)](#renderstate-diff-and-redraw-decision-hybrid-strategy)
-- [Buffer switch/bind flow](#buffer-switchbind-flow)
-- [Viewport motions (zz / zt / zb)](#viewport-motions-zz--zt--zb)
-- [Ex command pipeline with completion](#ex-command-pipeline-with-completion)
-- [Config hot-reload path](#config-hot-reload-path)
+- [Oxidized Architecture Guide](#oxidized-architecture-guide)
+  - [Top-level Modules](#top-level-modules)
+    - [Component responsibilities (quick map)](#component-responsibilities-quick-map)
+  - [Key Runtime Flow](#key-runtime-flow)
+    - [Timing and Cadence](#timing-and-cadence)
+  - [Data Model](#data-model)
+  - [Rendering and Cursor](#rendering-and-cursor)
+  - [Undo/Redo and Redraws](#undoredo-and-redraws)
+  - [Config \& Hot Reload](#config--hot-reload)
+  - [Syntax Highlighting (async pipeline)](#syntax-highlighting-async-pipeline)
+    - [End-to-end flow (code pointers)](#end-to-end-flow-code-pointers)
+    - [Why Tree-sitter per-line?](#why-tree-sitter-per-line)
+    - [LRU cache purpose and behavior](#lru-cache-purpose-and-behavior)
+  - [Windows and Viewports](#windows-and-viewports)
+  - [Testing](#testing)
+    - [Layout \& Categories](#layout--categories)
+    - [Style \& Conventions](#style--conventions)
+    - [Adding New Tests](#adding-new-tests)
+    - [Running Tests](#running-tests)
+    - [Future Enhancements](#future-enhancements)
+    - [Guiding Principle](#guiding-principle)
+  - [Alternatives and trade-offs](#alternatives-and-trade-offs)
+  - [Next Steps for Contributors](#next-steps-for-contributors)
+  - [Editor internals (deeper dive)](#editor-internals-deeper-dive)
+  - [Buffer Lifecycle and MRU Fallback](#buffer-lifecycle-and-mru-fallback)
+  - [Operational tips](#operational-tips)
+  - [Diagrams (visual overview)](#diagrams-visual-overview)
+    - [Diagrams index](#diagrams-index)
+    - [Event-driven threads and event bus](#event-driven-threads-and-event-bus)
+    - [Async syntax highlighting pipeline (with versioning and cache)](#async-syntax-highlighting-pipeline-with-versioning-and-cache)
+    - [Window layout and splits (example)](#window-layout-and-splits-example)
+    - [Rendering: gutter, wrapping, and highlights](#rendering-gutter-wrapping-and-highlights)
+    - [LRU cache behavior (per-line highlights)](#lru-cache-behavior-per-line-highlights)
+    - [Buffer close (MRU fallback) sequence](#buffer-close-mru-fallback-sequence)
+    - [RenderState diff and redraw decision (hybrid strategy)](#renderstate-diff-and-redraw-decision-hybrid-strategy)
+    - [Terminal frame diff engine invariants](#terminal-frame-diff-engine-invariants)
+    - [Buffer switch/bind flow](#buffer-switchbind-flow)
+    - [Viewport motions (zz / zt / zb)](#viewport-motions-zz--zt--zb)
+    - [Ex command pipeline with completion](#ex-command-pipeline-with-completion)
+      - [Component overview (completion)](#component-overview-completion)
+    - [Config hot-reload path](#config-hot-reload-path)
+  - [FAQs](#faqs)
+  - [Glossary](#glossary)
 
 ### Event-driven threads and event bus
 
@@ -636,6 +668,107 @@ flowchart TB
   Delta -- yes --> Redraw[RedrawRequest to UI render]
   Delta -- no --> Idle[[idle]]
 ```
+
+### Terminal frame diff engine invariants
+
+The on-screen rendering path is unified behind a shadow frame diff engine. Understanding
+its invariants is important when adding new UI elements or terminal operations.
+
+Core concepts:
+
+- FrameBuffer: fixed-size (w x h) array of `Cell { ch, fg: Option<Color>, bg: Option<Color> }`.
+  Each frame capture starts with a new buffer cleared to the editor background.
+- Double buffering: `begin_frame()` allocates the current frame and toggles the terminal into
+  capture mode. All subsequent "queue" APIs mutate the frame (cells + cursor meta) instead of
+  writing escape sequences. `flush_frame()` diffs against the previous frame and emits the minimal
+  set of changes, then stores the finished buffer as `prev_frame`.
+- Logical scroll optimization: before a new capture begins, `scroll_prev_frame_region` can shift a
+  rectangular region of the previous frame up or down, blanking the exposed rows. This preserves
+  cell equality for scrolled lines so the diff treats them as unchanged.
+
+Mermaid (rendered):
+
+```mermaid
+flowchart TD
+%% Legend: { } decision, [ ] action, (( )) terminal state
+subgraph PreFrame[Between Frames]
+  A{Prev frame exists?} -->|no| NeedFull[need_full = true]
+  A -->|yes| B{Size changed?}
+  B -->|yes| NeedFull
+  B -->|no| C{Scroll delta?}
+  C -->|yes_small| S[scroll_prev_frame_region]
+  C -->|no| D[No logical scroll]
+  S --> D
+end
+D --> BF[begin_frame bg]
+BF --> RWin[render windows]
+RWin --> RStatus[render status/command rows]
+RStatus --> PC{completion popup active?}
+PC -->|no| CursorPos[position final cursor]
+PC -->|yes| CacheHit{popup cache hit?}
+CacheHit -->|yes| CursorPos
+CacheHit -->|no| RPopup[render popup]
+RPopup --> CursorPos
+CursorPos --> Flush[flush_frame]
+Flush --> DiffType{need_full?}
+DiffType -->|yes| Full[clear + full repaint]
+DiffType -->|no| Diff[diff changed runs]
+Full --> Store[store as prev_frame]
+Diff --> Store
+Store --> End[(frame complete)]
+```
+
+Note: Edge label `yes_small` represents the branch where a scroll delta exists and is within the small-threshold heuristic for logical row shifting.
+
+Invariants (must hold to guarantee flicker-free, minimal rendering):
+
+1. Single writer: Only the renderer (via queue_* APIs) mutates frame contents between `begin_frame`
+   and `flush_frame`. Direct terminal writes during capture are forbidden (APIs are crate-private).
+2. Deterministic full coverage: Every visible UI element overdraws its region each frame capture.
+   No reliance on implicit previous contents (except via explicit scroll shifting step which is
+   performed before capture). When an element disappears (e.g. popup), underlying window content
+   has already been rendered in the current frame, so diff restores it without clears.
+3. No proactive clears: Terminal clear / clear line escape sequences are only issued in a forced
+   full repaint path (initial frame, resize, or explicit `invalidate_previous_frame`). Regular
+   updates rely solely on cell diffs. Adding new code must not call raw clear operations.
+4. Color stability: The diff engine tracks the active fg/bg and only emits `ResetColor` + new fg/bg
+   when a run's attributes differ, reducing attribute churn. Any direct color escape outside this
+   pattern would desynchronize the tracker.
+5. Cursor atomicity: Cursor is hidden at diff start and only shown (and style changed) after all
+   cell updates are flushed, preventing partial-frame cursor flicker.
+6. Full repaint trigger: A change in terminal dimensions or explicit invalidation sets `need_full`.
+   A full repaint starts with a single `ClearType::All` followed by grouped runs; subsequent frames
+   revert to diffs automatically once dimensions stabilize.
+7. Headless mode: When `is_headless()` (tests), queue APIs become no-ops while still updating the
+   FrameBuffer so logic (layout, caching decisions) can be validated without terminal side-effects.
+8. Popup caching: Transient overlays (e.g. completion popup) may short-circuit rendering if a hash
+   of (content, geometry, theme version) matches previous frame. Skipping a popup draw MUST still
+   allow underlying content to appear correctly; thus the popup is always rendered after windows.
+
+Extension guidelines:
+
+- New transient UI (tooltips, registers, etc.) should either: (a) fully overdraw their region every
+  frame capture, or (b) implement a cache with an early return using immutable inputs hash. Never
+  partially rely on previous frame cells unless using the sanctioned scroll shifting API.
+- If adding new cell attributes (e.g., underline), extend `Cell` plus diff run grouping; avoid ad-hoc
+  escape writes inside rendering loops.
+- For animations, prefer mutating cells over intermittent clears; let diff handle minimal updates.
+
+Failure modes & detection:
+
+- Visual flicker: usually indicates a rogue clear or direct stdout write during capture.
+- Color bleeding: typically caused by emitting SetForeground/Background outside diff's state
+  machine without resetting tracked `active_fg/bg`.
+- Missing restored content after popup dismiss: implies popup was drawn before underlying windows
+  or windows skipped painting that region.
+
+Testing hooks:
+
+- `debug_ops()` instrumentation counts queued escape ops (approximate). Cache effectiveness tests
+  assert a second identical frame produces fewer ops.
+- Headless mode in tests ensures logical equality/diff correctness without terminal interaction.
+
+These invariants aim to keep the renderer predictable, minimal, and flicker-free.
 
 ### Buffer switch/bind flow
 
