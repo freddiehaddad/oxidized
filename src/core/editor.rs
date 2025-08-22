@@ -1057,6 +1057,13 @@ impl Editor {
         self.command_line = text;
     }
 
+    pub fn debug_terminal_ops(&self) -> usize {
+        self.terminal.debug_ops()
+    }
+    pub fn reset_debug_terminal_ops(&mut self) {
+        self.terminal.reset_debug_ops();
+    }
+
     pub fn status_message(&self) -> &str {
         &self.status_message
     }

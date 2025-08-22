@@ -84,6 +84,7 @@ pub struct Terminal {
     cap_cursor: (u16, u16),
     cap_fg: Option<Color>,
     cap_bg: Option<Color>,
+    ops_debug: usize,
 }
 
 impl Terminal {
@@ -124,6 +125,7 @@ impl Terminal {
                 cap_cursor: (0, 0),
                 cap_fg: None,
                 cap_bg: None,
+                ops_debug: 0,
             })
         } else {
             // Headless/CI environment: skip TTY-dependent setup
@@ -139,6 +141,7 @@ impl Terminal {
                 cap_cursor: (0, 0),
                 cap_fg: None,
                 cap_bg: None,
+                ops_debug: 0,
             })
         }
     }
@@ -351,6 +354,7 @@ impl Terminal {
     }
 
     pub fn queue_print(&mut self, text: &str) -> io::Result<()> {
+        self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
         }
@@ -364,6 +368,7 @@ impl Terminal {
     }
 
     pub fn queue_move_cursor(&mut self, pos: Position) -> io::Result<()> {
+        self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
         }
@@ -380,6 +385,7 @@ impl Terminal {
     }
 
     pub fn queue_set_fg_color(&mut self, color: Color) -> io::Result<()> {
+        self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
         }
@@ -392,6 +398,7 @@ impl Terminal {
     }
 
     pub fn queue_set_bg_color(&mut self, color: Color) -> io::Result<()> {
+        self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
         }
@@ -404,6 +411,7 @@ impl Terminal {
     }
 
     pub fn queue_reset_color(&mut self) -> io::Result<()> {
+        self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
         }
@@ -417,6 +425,7 @@ impl Terminal {
     }
 
     pub fn queue_clear_line(&mut self) -> io::Result<()> {
+        self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
         }
@@ -431,6 +440,7 @@ impl Terminal {
     }
 
     pub fn queue_clear_screen(&mut self) -> io::Result<()> {
+        self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
         }
@@ -445,6 +455,7 @@ impl Terminal {
     }
 
     pub fn queue_hide_cursor(&mut self) -> io::Result<()> {
+        self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
         }
@@ -459,6 +470,7 @@ impl Terminal {
     }
 
     pub fn queue_show_cursor(&mut self) -> io::Result<()> {
+        self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
         }
@@ -474,6 +486,7 @@ impl Terminal {
 
     /// Queue cursor to block shape (normal mode)
     pub fn queue_cursor_block(&mut self) -> io::Result<()> {
+        self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
         }
@@ -489,6 +502,7 @@ impl Terminal {
 
     /// Queue cursor to vertical line shape (insert mode)
     pub fn queue_cursor_line(&mut self) -> io::Result<()> {
+        self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
         }
@@ -504,6 +518,7 @@ impl Terminal {
 
     /// Queue cursor to underline shape (replace mode)
     pub fn queue_cursor_underline(&mut self) -> io::Result<()> {
+        self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
         }
@@ -515,6 +530,13 @@ impl Terminal {
             self.stdout.queue(SetCursorStyle::SteadyUnderScore)?;
         }
         Ok(())
+    }
+
+    pub fn debug_ops(&self) -> usize {
+        self.ops_debug
+    }
+    pub fn reset_debug_ops(&mut self) {
+        self.ops_debug = 0;
     }
 
     /// Begin a new shadow frame capture. Any queued operations mutate the frame instead
