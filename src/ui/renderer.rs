@@ -446,6 +446,8 @@ impl UI {
         editor_state: &EditorRenderState,
         full_redraw: bool,
     ) -> io::Result<()> {
+        // Start shadow frame capture (double buffering) with background color.
+        terminal.begin_frame(self.theme.background);
         // Refresh terminal size to reflect any recent resize events
         terminal.update_size()?;
         let (width, height) = terminal.size();
@@ -535,7 +537,7 @@ impl UI {
 
         // End double buffering - flush all queued operations at once
         // This eliminates flicker by making all changes appear atomically
-        terminal.flush()?;
+        terminal.flush_frame()?;
 
         Ok(())
     }

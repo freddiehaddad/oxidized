@@ -9,10 +9,81 @@ use crossterm::{
 use log::{debug, trace, warn};
 use std::io::{self, Stdout, Write};
 
+// -------- Shadow Frame Types --------
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Cell {
+    ch: char,
+    fg: Option<Color>,
+    bg: Option<Color>,
+}
+impl Cell {
+    fn blank(bg: Option<Color>) -> Self {
+        Self {
+            ch: ' ',
+            fg: None,
+            bg,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct FrameBuffer {
+    width: u16,
+    height: u16,
+    cells: Vec<Cell>,
+    cursor_visible: bool,
+    cursor_pos: (u16, u16),
+    cursor_style: Option<SetCursorStyle>,
+}
+impl FrameBuffer {
+    fn new(w: u16, h: u16, bg: Option<Color>) -> Self {
+        Self {
+            width: w,
+            height: h,
+            cells: vec![Cell::blank(bg); w as usize * h as usize],
+            cursor_visible: true,
+            cursor_pos: (0, 0),
+            cursor_style: None,
+        }
+    }
+    #[inline]
+    fn idx(&self, r: u16, c: u16) -> usize {
+        r as usize * self.width as usize + c as usize
+    }
+    fn set_char(&mut self, r: u16, c: u16, ch: char, fg: Option<Color>, bg: Option<Color>) {
+        if r < self.height && c < self.width {
+            let idx = r as usize * self.width as usize + c as usize;
+            self.cells[idx] = Cell { ch, fg, bg };
+        }
+    }
+    fn fill_row_from(&mut self, r: u16, start: u16, fg: Option<Color>, bg: Option<Color>) {
+        if r >= self.height || start >= self.width {
+            return;
+        }
+        let s = self.idx(r, start);
+        let e = self.idx(r, self.width - 1) + 1;
+        for cell in &mut self.cells[s..e] {
+            *cell = Cell { ch: ' ', fg, bg };
+        }
+    }
+    fn clear_all(&mut self, bg: Option<Color>) {
+        for cell in &mut self.cells {
+            *cell = Cell::blank(bg);
+        }
+    }
+}
+
+// -------- Terminal --------
 pub struct Terminal {
     stdout: Stdout,
-    size: (u16, u16), // (width, height)
+    size: (u16, u16),
     is_tty: bool,
+    prev_frame: Option<FrameBuffer>,
+    cur_frame: Option<FrameBuffer>,
+    capturing: bool,
+    cap_cursor: (u16, u16),
+    cap_fg: Option<Color>,
+    cap_bg: Option<Color>,
 }
 
 impl Terminal {
@@ -47,6 +118,12 @@ impl Terminal {
                 stdout,
                 size,
                 is_tty,
+                prev_frame: None,
+                cur_frame: None,
+                capturing: false,
+                cap_cursor: (0, 0),
+                cap_fg: None,
+                cap_bg: None,
             })
         } else {
             // Headless/CI environment: skip TTY-dependent setup
@@ -56,6 +133,12 @@ impl Terminal {
                 stdout,
                 size,
                 is_tty,
+                prev_frame: None,
+                cur_frame: None,
+                capturing: false,
+                cap_cursor: (0, 0),
+                cap_fg: None,
+                cap_bg: None,
             })
         }
     }
@@ -83,7 +166,13 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.execute(Clear(ClearType::All))?;
+        if self.capturing {
+            if let Some(f) = self.cur_frame.as_mut() {
+                f.clear_all(self.cap_bg);
+            }
+        } else {
+            self.stdout.execute(Clear(ClearType::All))?;
+        }
         Ok(())
     }
 
@@ -91,7 +180,13 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.execute(Clear(ClearType::CurrentLine))?;
+        if self.capturing {
+            if let Some(f) = self.cur_frame.as_mut() {
+                f.fill_row_from(self.cap_cursor.0, 0, self.cap_fg, self.cap_bg);
+            }
+        } else {
+            self.stdout.execute(Clear(ClearType::CurrentLine))?;
+        }
         Ok(())
     }
 
@@ -99,8 +194,15 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout
-            .execute(cursor::MoveTo(pos.col as u16, pos.row as u16))?;
+        if self.capturing {
+            self.cap_cursor = (pos.row as u16, pos.col as u16);
+            if let Some(f) = self.cur_frame.as_mut() {
+                f.cursor_pos = self.cap_cursor;
+            }
+        } else {
+            self.stdout
+                .execute(cursor::MoveTo(pos.col as u16, pos.row as u16))?;
+        }
         Ok(())
     }
 
@@ -108,7 +210,13 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.execute(cursor::Hide)?;
+        if self.capturing {
+            if let Some(f) = self.cur_frame.as_mut() {
+                f.cursor_visible = false;
+            }
+        } else {
+            self.stdout.execute(cursor::Hide)?;
+        }
         Ok(())
     }
 
@@ -116,7 +224,13 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.execute(cursor::Show)?;
+        if self.capturing {
+            if let Some(f) = self.cur_frame.as_mut() {
+                f.cursor_visible = true;
+            }
+        } else {
+            self.stdout.execute(cursor::Show)?;
+        }
         Ok(())
     }
 
@@ -164,7 +278,11 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.execute(SetForegroundColor(color))?;
+        if self.capturing {
+            self.cap_fg = Some(color);
+        } else {
+            self.stdout.execute(SetForegroundColor(color))?;
+        }
         Ok(())
     }
 
@@ -172,7 +290,11 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.execute(SetBackgroundColor(color))?;
+        if self.capturing {
+            self.cap_bg = Some(color);
+        } else {
+            self.stdout.execute(SetBackgroundColor(color))?;
+        }
         Ok(())
     }
 
@@ -180,7 +302,12 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.execute(ResetColor)?;
+        if self.capturing {
+            self.cap_fg = None;
+            self.cap_bg = None;
+        } else {
+            self.stdout.execute(ResetColor)?;
+        }
         Ok(())
     }
 
@@ -188,7 +315,22 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.execute(Print(text))?;
+        if self.capturing {
+            if let Some(f) = self.cur_frame.as_mut() {
+                let (row, mut col) = self.cap_cursor;
+                for ch in text.chars() {
+                    if col >= f.width {
+                        break;
+                    }
+                    f.set_char(row, col, ch, self.cap_fg, self.cap_bg);
+                    col += 1;
+                }
+                self.cap_cursor = (row, col);
+                f.cursor_pos = self.cap_cursor;
+            }
+        } else {
+            self.stdout.execute(Print(text))?;
+        }
         Ok(())
     }
 
@@ -212,7 +354,12 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.queue(Print(text))?;
+        if self.capturing {
+            // Reuse print logic to keep behavior consistent
+            self.print(text)?;
+        } else {
+            self.stdout.queue(Print(text))?;
+        }
         Ok(())
     }
 
@@ -220,8 +367,15 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout
-            .queue(cursor::MoveTo(pos.col as u16, pos.row as u16))?;
+        if self.capturing {
+            self.cap_cursor = (pos.row as u16, pos.col as u16);
+            if let Some(f) = self.cur_frame.as_mut() {
+                f.cursor_pos = self.cap_cursor;
+            }
+        } else {
+            self.stdout
+                .queue(cursor::MoveTo(pos.col as u16, pos.row as u16))?;
+        }
         Ok(())
     }
 
@@ -229,7 +383,11 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.queue(SetForegroundColor(color))?;
+        if self.capturing {
+            self.cap_fg = Some(color);
+        } else {
+            self.stdout.queue(SetForegroundColor(color))?;
+        }
         Ok(())
     }
 
@@ -237,7 +395,11 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.queue(SetBackgroundColor(color))?;
+        if self.capturing {
+            self.cap_bg = Some(color);
+        } else {
+            self.stdout.queue(SetBackgroundColor(color))?;
+        }
         Ok(())
     }
 
@@ -245,7 +407,12 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.queue(ResetColor)?;
+        if self.capturing {
+            self.cap_fg = None;
+            self.cap_bg = None;
+        } else {
+            self.stdout.queue(ResetColor)?;
+        }
         Ok(())
     }
 
@@ -253,7 +420,13 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.queue(Clear(ClearType::CurrentLine))?;
+        if self.capturing {
+            if let Some(f) = self.cur_frame.as_mut() {
+                f.fill_row_from(self.cap_cursor.0, 0, self.cap_fg, self.cap_bg);
+            }
+        } else {
+            self.stdout.queue(Clear(ClearType::CurrentLine))?;
+        }
         Ok(())
     }
 
@@ -261,7 +434,13 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.queue(Clear(ClearType::All))?;
+        if self.capturing {
+            if let Some(f) = self.cur_frame.as_mut() {
+                f.clear_all(self.cap_bg);
+            }
+        } else {
+            self.stdout.queue(Clear(ClearType::All))?;
+        }
         Ok(())
     }
 
@@ -269,7 +448,13 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.queue(cursor::Hide)?;
+        if self.capturing {
+            if let Some(f) = self.cur_frame.as_mut() {
+                f.cursor_visible = false;
+            }
+        } else {
+            self.stdout.queue(cursor::Hide)?;
+        }
         Ok(())
     }
 
@@ -277,7 +462,13 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.queue(cursor::Show)?;
+        if self.capturing {
+            if let Some(f) = self.cur_frame.as_mut() {
+                f.cursor_visible = true;
+            }
+        } else {
+            self.stdout.queue(cursor::Show)?;
+        }
         Ok(())
     }
 
@@ -286,7 +477,13 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.queue(SetCursorStyle::SteadyBlock)?;
+        if self.capturing {
+            if let Some(f) = self.cur_frame.as_mut() {
+                f.cursor_style = Some(SetCursorStyle::SteadyBlock);
+            }
+        } else {
+            self.stdout.queue(SetCursorStyle::SteadyBlock)?;
+        }
         Ok(())
     }
 
@@ -295,7 +492,13 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.queue(SetCursorStyle::SteadyBar)?;
+        if self.capturing {
+            if let Some(f) = self.cur_frame.as_mut() {
+                f.cursor_style = Some(SetCursorStyle::SteadyBar);
+            }
+        } else {
+            self.stdout.queue(SetCursorStyle::SteadyBar)?;
+        }
         Ok(())
     }
 
@@ -304,7 +507,167 @@ impl Terminal {
         if self.is_headless() {
             return Ok(());
         }
-        self.stdout.queue(SetCursorStyle::SteadyUnderScore)?;
+        if self.capturing {
+            if let Some(f) = self.cur_frame.as_mut() {
+                f.cursor_style = Some(SetCursorStyle::SteadyUnderScore);
+            }
+        } else {
+            self.stdout.queue(SetCursorStyle::SteadyUnderScore)?;
+        }
+        Ok(())
+    }
+
+    /// Begin a new shadow frame capture. Any queued operations mutate the frame instead
+    /// of emitting escape sequences. Call `flush_frame` to diff & display.
+    pub fn begin_frame(&mut self, bg: Color) {
+        if self.is_headless() {
+            return;
+        }
+        let (w, h) = self.size;
+        self.cur_frame = Some(FrameBuffer::new(w, h, Some(bg)));
+        self.capturing = true;
+        self.cap_cursor = (0, 0);
+        self.cap_fg = None;
+        self.cap_bg = Some(bg);
+    }
+
+    /// Invalidate previous frame forcing next flush to repaint all cells.
+    pub fn invalidate_previous_frame(&mut self) {
+        self.prev_frame = None;
+    }
+
+    /// Diff current captured frame with previous and emit minimal updates.
+    pub fn flush_frame(&mut self) -> io::Result<()> {
+        if self.is_headless() || !self.capturing {
+            return self.flush(); // fallback
+        }
+        let Some(cur) = self.cur_frame.take() else {
+            return Ok(());
+        };
+        let mut need_full = false;
+        if let Some(prev) = &self.prev_frame {
+            if prev.width != cur.width || prev.height != cur.height {
+                need_full = true;
+            }
+        } else {
+            need_full = true;
+        }
+
+        // Hide cursor during diff to avoid artifacts
+        self.stdout.queue(cursor::Hide)?;
+
+        let mut active_fg: Option<Color> = None;
+        let mut active_bg: Option<Color> = None;
+
+        if need_full {
+            // Full repaint with run grouping for accurate colors
+            self.stdout.queue(cursor::MoveTo(0, 0))?;
+            self.stdout.queue(Clear(ClearType::All))?;
+            for row in 0..cur.height {
+                let mut col: u16 = 0;
+                while col < cur.width {
+                    let idx = (row * cur.width + col) as usize;
+                    let cell = cur.cells[idx];
+                    let run_fg = cell.fg;
+                    let run_bg = cell.bg;
+                    let mut run_end = col + 1;
+                    while run_end < cur.width {
+                        let c2 = cur.cells[(row * cur.width + run_end) as usize];
+                        if c2.fg != run_fg || c2.bg != run_bg {
+                            break;
+                        }
+                        run_end += 1;
+                    }
+                    self.stdout.queue(cursor::MoveTo(col, row))?;
+                    if run_fg != active_fg || run_bg != active_bg {
+                        self.stdout.queue(ResetColor)?; // reset ensures clean state before applying new fg/bg
+                        if let Some(bg) = run_bg {
+                            self.stdout.queue(SetBackgroundColor(bg))?;
+                        }
+                        if let Some(fg) = run_fg {
+                            self.stdout.queue(SetForegroundColor(fg))?;
+                        }
+                        active_fg = run_fg;
+                        active_bg = run_bg;
+                    }
+                    let mut s = String::with_capacity((run_end - col) as usize);
+                    for ccol in col..run_end {
+                        s.push(cur.cells[(row * cur.width + ccol) as usize].ch);
+                    }
+                    self.stdout.queue(Print(s))?;
+                    col = run_end;
+                }
+            }
+        } else if let Some(prev) = &self.prev_frame {
+            // Diff pass: iterate cells, group contiguous runs of changed cells sharing fg/bg
+            let mut row: u16 = 0;
+            while row < cur.height {
+                let mut col: u16 = 0;
+                while col < cur.width {
+                    let idx = (row * cur.width + col) as usize;
+                    let new_cell = cur.cells[idx];
+                    let old_cell = prev.cells[idx];
+                    if new_cell == old_cell {
+                        col += 1;
+                        continue;
+                    }
+                    // Start run
+                    let run_fg = new_cell.fg;
+                    let run_bg = new_cell.bg;
+                    let mut run_end = col + 1;
+                    while run_end < cur.width {
+                        let j = (row * cur.width + run_end) as usize;
+                        let nc = cur.cells[j];
+                        let oc = prev.cells[j];
+                        if nc == oc {
+                            break;
+                        }
+                        if nc.fg != run_fg || nc.bg != run_bg {
+                            break;
+                        }
+                        run_end += 1;
+                    }
+                    // Move & set colors
+                    self.stdout.queue(cursor::MoveTo(col, row))?;
+                    if run_fg != active_fg || run_bg != active_bg {
+                        self.stdout.queue(ResetColor)?;
+                        if let Some(bg) = run_bg {
+                            self.stdout.queue(SetBackgroundColor(bg))?;
+                        }
+                        if let Some(fg) = run_fg {
+                            self.stdout.queue(SetForegroundColor(fg))?;
+                        }
+                        active_fg = run_fg;
+                        active_bg = run_bg;
+                    }
+                    // Build run string
+                    let mut s = String::with_capacity((run_end - col) as usize);
+                    for ccol in col..run_end {
+                        s.push(cur.cells[(row * cur.width + ccol) as usize].ch);
+                    }
+                    self.stdout.queue(Print(s))?;
+                    col = run_end;
+                }
+                row += 1;
+            }
+        }
+
+        // Restore cursor visibility and position
+        if cur.cursor_visible {
+            self.stdout
+                .queue(cursor::MoveTo(cur.cursor_pos.1, cur.cursor_pos.0))?;
+            self.stdout.queue(cursor::Show)?;
+        } else {
+            self.stdout.queue(cursor::Hide)?; // keep hidden
+        }
+        // Cursor style if set
+        if let Some(style) = cur.cursor_style {
+            self.stdout.queue(style)?;
+        }
+
+        self.stdout.flush()?;
+        self.prev_frame = Some(cur);
+        self.capturing = false;
         Ok(())
     }
 }
@@ -313,19 +676,11 @@ impl Drop for Terminal {
     fn drop(&mut self) {
         debug!("Cleaning up terminal: restoring cursor and colors");
         if !self.is_headless() {
-            // Restore cursor visibility, shape, and colors
             let _ = self.stdout.execute(cursor::Show);
             let _ = self.stdout.execute(SetCursorStyle::DefaultUserShape);
             let _ = self.stdout.execute(ResetColor);
-
-            debug!("Disabling raw terminal mode");
-            // Disable raw mode before leaving alternate screen
             let _ = terminal::disable_raw_mode();
-
-            debug!("Leaving alternate screen mode");
-            // Leave alternate screen to restore original terminal content
             let _ = self.stdout.execute(LeaveAlternateScreen);
-            debug!("Terminal cleanup completed");
         }
     }
 }
