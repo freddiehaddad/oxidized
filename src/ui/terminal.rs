@@ -306,7 +306,7 @@ impl Terminal {
         self.stdout.flush()
     }
 
-    pub fn queue_print(&mut self, text: &str) -> io::Result<()> {
+    pub(crate) fn queue_print(&mut self, text: &str) -> io::Result<()> {
         self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
@@ -320,7 +320,7 @@ impl Terminal {
         Ok(())
     }
 
-    pub fn queue_move_cursor(&mut self, pos: Position) -> io::Result<()> {
+    pub(crate) fn queue_move_cursor(&mut self, pos: Position) -> io::Result<()> {
         self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
@@ -337,7 +337,7 @@ impl Terminal {
         Ok(())
     }
 
-    pub fn queue_set_fg_color(&mut self, color: Color) -> io::Result<()> {
+    pub(crate) fn queue_set_fg_color(&mut self, color: Color) -> io::Result<()> {
         self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
@@ -350,7 +350,7 @@ impl Terminal {
         Ok(())
     }
 
-    pub fn queue_set_bg_color(&mut self, color: Color) -> io::Result<()> {
+    pub(crate) fn queue_set_bg_color(&mut self, color: Color) -> io::Result<()> {
         self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
@@ -363,7 +363,7 @@ impl Terminal {
         Ok(())
     }
 
-    pub fn queue_reset_color(&mut self) -> io::Result<()> {
+    pub(crate) fn queue_reset_color(&mut self) -> io::Result<()> {
         self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
@@ -377,7 +377,7 @@ impl Terminal {
         Ok(())
     }
 
-    pub fn queue_hide_cursor(&mut self) -> io::Result<()> {
+    pub(crate) fn queue_hide_cursor(&mut self) -> io::Result<()> {
         self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
@@ -392,7 +392,7 @@ impl Terminal {
         Ok(())
     }
 
-    pub fn queue_show_cursor(&mut self) -> io::Result<()> {
+    pub(crate) fn queue_show_cursor(&mut self) -> io::Result<()> {
         self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
@@ -408,7 +408,7 @@ impl Terminal {
     }
 
     /// Queue cursor to block shape (normal mode)
-    pub fn queue_cursor_block(&mut self) -> io::Result<()> {
+    pub(crate) fn queue_cursor_block(&mut self) -> io::Result<()> {
         self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
@@ -424,7 +424,7 @@ impl Terminal {
     }
 
     /// Queue cursor to vertical line shape (insert mode)
-    pub fn queue_cursor_line(&mut self) -> io::Result<()> {
+    pub(crate) fn queue_cursor_line(&mut self) -> io::Result<()> {
         self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
@@ -440,7 +440,7 @@ impl Terminal {
     }
 
     /// Queue cursor to underline shape (replace mode)
-    pub fn queue_cursor_underline(&mut self) -> io::Result<()> {
+    pub(crate) fn queue_cursor_underline(&mut self) -> io::Result<()> {
         self.ops_debug += 1;
         if self.is_headless() {
             return Ok(());
