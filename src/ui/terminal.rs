@@ -564,6 +564,49 @@ impl Terminal {
         }
     }
 
+    /// Physically scroll a rectangular region on the real terminal (outside frame capture)
+    /// so that subsequent diffing can treat scrolled lines as unchanged. We rely on DECSTBM
+    /// (set top/bottom margins) + CSI S / CSI T to perform the scroll, then reset margins.
+    /// Only invoked between frames (not capturing). New rows are filled with spaces using
+    /// the provided background color by issuing an explicit background set before scroll.
+    pub fn scroll_region_physical(
+        &mut self,
+        top: u16,
+        height: u16,
+        delta: i16,
+        bg: Color,
+    ) -> io::Result<()> {
+        if self.is_headless() || self.capturing || delta == 0 {
+            return Ok(());
+        }
+        let bottom = top.saturating_add(height.saturating_sub(1));
+        if bottom >= self.size.1 {
+            return Ok(());
+        }
+        // Save cursor position
+        self.stdout.queue(cursor::SavePosition)?;
+        // Set background (so newly exposed lines get correct bg)
+        self.stdout.queue(SetBackgroundColor(bg))?;
+        // Set scroll region (1-based coordinates)
+        self.stdout
+            .queue(Print(format!("\x1b[{};{}r", top + 1, bottom + 1)))?;
+        // Move cursor to a safe position inside region
+        self.stdout.queue(cursor::MoveTo(0, top))?;
+        if delta > 0 {
+            // Scroll up delta lines
+            self.stdout.queue(Print(format!("\x1b[{}S", delta)))?;
+        } else {
+            // Scroll down -delta lines
+            let d = -delta; // delta < 0, so -delta is positive
+            self.stdout.queue(Print(format!("\x1b[{}T", d)))?;
+        }
+        // Reset scroll region to full screen
+        self.stdout.queue(Print("\x1b[r"))?;
+        // Restore cursor position
+        self.stdout.queue(cursor::RestorePosition)?;
+        Ok(())
+    }
+
     /// Diff current captured frame with previous and emit minimal updates.
     pub fn flush_frame(&mut self) -> io::Result<()> {
         if self.is_headless() || !self.capturing {

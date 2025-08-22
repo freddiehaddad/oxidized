@@ -471,20 +471,34 @@ impl UI {
             let old_top = self.viewport_top;
             let new_top = win.viewport_top;
             let delta = new_top as i32 - old_top as i32;
-            // Disable optimization for single-line scroll (delta.abs() == 1) so gutters & wrapped
-            // segments fully repaint; optimization caused stale intermediate lines with Ctrl+e/Ctrl+y.
-            if delta != 0
-                && delta.unsigned_abs() <= (win.height / 2) as u32
-                && delta.unsigned_abs() > 1
-            {
+            if delta != 0 && delta.unsigned_abs() <= (win.height / 2) as u32 {
                 let top = win.y;
                 let height = win.content_height() as u16;
-                terminal.scroll_prev_frame_region(
-                    top,
-                    height,
-                    delta as i16,
-                    Some(self.theme.background),
-                );
+                if delta.unsigned_abs() == 1 {
+                    // Use physical scroll for single-line viewport movement to shift existing
+                    // content including gutter, then repaint gutters & the newly exposed line.
+                    let _ = terminal.scroll_region_physical(
+                        top,
+                        height,
+                        delta as i16,
+                        self.theme.background,
+                    );
+                    // Also update logical previous frame for diff so only gutter differences show.
+                    terminal.scroll_prev_frame_region(
+                        top,
+                        height,
+                        delta as i16,
+                        Some(self.theme.background),
+                    );
+                } else {
+                    // Multi-line small scroll: logical optimization only.
+                    terminal.scroll_prev_frame_region(
+                        top,
+                        height,
+                        delta as i16,
+                        Some(self.theme.background),
+                    );
+                }
             }
             self.viewport_top = new_top;
         }
