@@ -746,7 +746,6 @@ Invariants (must hold to guarantee flicker-free, minimal rendering):
    allow underlying content to appear correctly; thus the popup is always rendered after windows.
 9. Markdown preview incremental diff: Per-line content hashes enable in-place line replacement and
   selective highlight regeneration. Structural changes (length mismatch) fall back to full rebuild.
- 
 
 Extension guidelines:
 

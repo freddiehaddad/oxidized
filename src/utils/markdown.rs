@@ -1011,19 +1011,9 @@ pub fn render_markdown(
                     t.current_cell.push(' ');
                     continue;
                 }
-                // In blockquotes, preserve source line boundaries: break the line
-                // so each quoted source line gets its own prefixed preview line.
-                if in_blockquote > 0 {
-                    flush_current_line(
-                        &mut out,
-                        &mut spans,
-                        &mut current_line,
-                        &mut current_spans,
-                        &mut line_index,
-                    );
-                } else {
-                    current_line.push(' ');
-                }
+                // Treat soft breaks uniformly: join with a space even inside blockquotes
+                // so short quoted lines collapse onto a single wrapped preview row.
+                current_line.push(' ');
             }
             Event::HardBreak => {
                 if let Some(t) = table.as_mut() {

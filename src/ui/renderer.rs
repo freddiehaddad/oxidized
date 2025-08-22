@@ -65,6 +65,7 @@ impl UI {
     fn preview_hanging_indent_cols(&self, line: &str) -> usize {
         let mut i = 0usize;
         let mut cols = 0usize;
+        let mut saw_blockquote = false;
 
         // Consume any number of blockquote prefixes: "▎ "
         while i < line.len() {
@@ -72,6 +73,7 @@ impl UI {
             if s.starts_with("▎ ") {
                 cols += UnicodeWidthStr::width("▎ ");
                 i += "▎ ".len();
+                saw_blockquote = true;
             } else {
                 break;
             }
@@ -105,8 +107,9 @@ impl UI {
             }
         }
 
-        // No recognized prefix -> no hanging indent
-        0
+        // If we saw only blockquote prefix(es) return their width so continuation rows can
+        // re-render the prefix instead of shifting text left.
+        if saw_blockquote { cols } else { 0 }
     }
 
     pub fn new() -> Self {
@@ -674,6 +677,33 @@ impl UI {
                         } else {
                             0
                         };
+                    // Capture blockquote prefix string (one or more "▎ ") for possible re-render
+                    let mut bqi = 0usize; // byte index after blockquote prefixes
+                    while bqi < line.len() && line[bqi..].starts_with("▎ ") {
+                        bqi += "▎ ".len();
+                    }
+                    let blockquote_prefix = &line[..bqi];
+                    let line_body = &line[bqi..];
+                    let quote_color = self
+                        .syntax_theme
+                        .tree_sitter_mappings
+                        .get("comment")
+                        .copied()
+                        .unwrap_or_else(|| self.syntax_theme.get_default_text_color());
+                    // Determine if only blockquote (no bullet / number marker) so we repeat prefix
+                    let remainder = &line[bqi..];
+                    let blockquote_only =
+                        !(blockquote_prefix.is_empty() || remainder.starts_with("• ") || {
+                            // ordered list detection: digits + ". "
+                            let bytes = remainder.as_bytes();
+                            let mut j = 0;
+                            let mut any_digit = false;
+                            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                                any_digit = true;
+                                j += 1;
+                            }
+                            any_digit && remainder[j..].starts_with(". ")
+                        });
                     let mut start = 0usize;
                     loop {
                         // Determine the end of this segment using UTF-8 safe wrapping
@@ -684,13 +714,13 @@ impl UI {
                             text_width.saturating_sub(hanging_indent_cols)
                         };
                         let (end, _seg_count) =
-                            self.wrap_next_end_byte(line, start, avail_width, word_break);
-                        let display_slice = &line[start..end];
+                            self.wrap_next_end_byte(line_body, start, avail_width, word_break);
+                        let display_slice = &line_body[start..end];
                         // Measure visual columns of this slice for correct padding
                         let display_slice_cols = UnicodeWidthStr::width(display_slice);
 
                         // Compute base offset in character columns for selection math up to start
-                        let base_offset_chars = line[..start].chars().count();
+                        let base_offset_chars = line_body[..start].chars().count();
 
                         if let Some(highlights) =
                             editor_state.syntax_highlights.get(&(buffer.id, buf_row))
@@ -713,7 +743,14 @@ impl UI {
                                 total_line_chars: line.chars().count(),
                             };
                             // Print hanging indent for continuation rows (preview only)
-                            if start > 0 && hanging_indent_cols > 0 {
+                            // Always print prefix (first or continuation) for blockquote-only lines
+                            if blockquote_only {
+                                terminal.queue_reset_color()?;
+                                terminal.queue_set_fg_color(quote_color)?;
+                                self.set_background_color(terminal, is_cursor_line)?;
+                                terminal.queue_print(blockquote_prefix)?;
+                            } else if start > 0 && hanging_indent_cols > 0 {
+                                // non-blockquote indent
                                 terminal.queue_print(&" ".repeat(hanging_indent_cols))?;
                             }
                             let _rendered_cols = self.render_highlighted_line(
@@ -722,11 +759,7 @@ impl UI {
                                 &shifted,
                                 &context,
                             )?;
-                            let padded_width = if start == 0 {
-                                text_width
-                            } else {
-                                text_width.saturating_sub(hanging_indent_cols)
-                            };
+                            let padded_width = text_width.saturating_sub(0); // prefix printed separately
                             if display_slice_cols < padded_width {
                                 // Ensure filler uses the row background, not selection bg
                                 if is_cursor_line && self.show_cursor_line {
@@ -739,7 +772,12 @@ impl UI {
                             }
                         } else {
                             // Print hanging indent for continuation rows (preview only)
-                            if start > 0 && hanging_indent_cols > 0 {
+                            if blockquote_only {
+                                terminal.queue_reset_color()?;
+                                terminal.queue_set_fg_color(quote_color)?;
+                                self.set_background_color(terminal, is_cursor_line)?;
+                                terminal.queue_print(blockquote_prefix)?;
+                            } else if start > 0 && hanging_indent_cols > 0 {
                                 terminal.queue_print(&" ".repeat(hanging_indent_cols))?;
                             }
                             self.render_plain_text_line(
@@ -752,11 +790,7 @@ impl UI {
                                 base_offset_chars,
                                 line.chars().count(),
                             )?;
-                            let padded_width = if start == 0 {
-                                text_width
-                            } else {
-                                text_width.saturating_sub(hanging_indent_cols)
-                            };
+                            let padded_width = text_width;
                             if display_slice_cols < padded_width {
                                 // Ensure filler uses the row background, not selection bg
                                 if is_cursor_line && self.show_cursor_line {
@@ -776,13 +810,13 @@ impl UI {
                         }
 
                         // If end of line reached, advance to next buffer line
-                        if end >= line.len() {
+                        if end >= line_body.len() {
                             buf_row += 1;
                             break;
                         }
 
                         // Otherwise, continue with next wrapped segment on the next screen row
-                        start = end;
+                        start = end; // continue within line_body
 
                         // Prepare next visual row: move to beginning of the next row area
                         let next_screen_row = window.y as usize + screen_rows_rendered;
@@ -2472,15 +2506,16 @@ mod preview_hanging_indent_tests {
     }
 
     #[test]
-    fn blockquote_only_has_no_indent_and_accumulates_with_list() {
+    fn blockquote_only_indents_and_accumulates_with_list() {
         let ui = UI::new();
         let q = "▎ ";
         let w_q = UnicodeWidthStr::width(q);
-        // Quote prefix alone does not trigger hanging indent
-        assert_eq!(ui.preview_hanging_indent_cols("▎ hello"), 0);
-        // Multiple quote prefixes alone also do not trigger indent
-        assert_eq!(ui.preview_hanging_indent_cols("▎ ▎ nested"), 0);
-        // Blockquote followed by bullet accumulates both
+        // Quote prefix alone now triggers hanging indent equal to its width so continuation
+        // rows re-render the prefix glyph(s).
+        assert_eq!(ui.preview_hanging_indent_cols("▎ hello"), w_q);
+        // Multiple nested blockquotes accumulate width
+        assert_eq!(ui.preview_hanging_indent_cols("▎ ▎ nested"), w_q * 2);
+        // Blockquote followed by bullet accumulates both widths
         let w_bullet = UnicodeWidthStr::width("• ");
         assert_eq!(ui.preview_hanging_indent_cols("▎ • item"), w_q + w_bullet);
     }
