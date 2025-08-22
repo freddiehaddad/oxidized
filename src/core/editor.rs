@@ -155,6 +155,10 @@ pub struct Editor {
     markdown_preview_restore_window_id: Option<usize>,
     /// Cached per-line hashes for current markdown preview render (for incremental diffs)
     markdown_preview_line_hashes: Option<Vec<u64>>,
+    /// One-shot flag: if set, the next viewport update will skip vertical scroll_off enforcement.
+    /// Used by explicit scrolling commands (Ctrl+e / Ctrl+y) so that they can scroll even when
+    /// the cursor is within the scroll_off margin at the top/bottom of the screen (matching Vim).
+    suppress_scrolloff_once: bool,
 }
 
 impl Editor {
@@ -231,6 +235,7 @@ impl Editor {
             key_handler,
             config,
             search_engine: SearchEngine::new(),
+            suppress_scrolloff_once: false,
             search_results: Vec::new(),
             current_search_index: None,
             should_quit: false,
@@ -845,18 +850,24 @@ impl Editor {
             let cursor_row = buffer.cursor.row;
             let scroll_off = self.config.interface.scroll_off;
 
-            // Calculate effective scroll boundaries considering scroll_off
-            let scroll_off_top = current_window.viewport_top + scroll_off;
-            let scroll_off_bottom =
-                current_window.viewport_top + content_height.saturating_sub(scroll_off + 1);
+            // Only enforce scroll_off if not explicitly suppressed this frame (single-line scroll)
+            if !self.suppress_scrolloff_once {
+                // Calculate effective scroll boundaries considering scroll_off
+                let scroll_off_top = current_window.viewport_top + scroll_off;
+                let scroll_off_bottom =
+                    current_window.viewport_top + content_height.saturating_sub(scroll_off + 1);
 
-            if cursor_row < scroll_off_top {
-                // Cursor is too close to top of viewport - scroll up
-                current_window.viewport_top = cursor_row.saturating_sub(scroll_off);
-            } else if cursor_row > scroll_off_bottom {
-                // Cursor is too close to bottom of viewport - scroll down
-                current_window.viewport_top =
-                    cursor_row.saturating_sub(content_height.saturating_sub(scroll_off + 1));
+                if cursor_row < scroll_off_top {
+                    // Cursor is too close to top of viewport - scroll up
+                    current_window.viewport_top = cursor_row.saturating_sub(scroll_off);
+                } else if cursor_row > scroll_off_bottom {
+                    // Cursor is too close to bottom of viewport - scroll down
+                    current_window.viewport_top =
+                        cursor_row.saturating_sub(content_height.saturating_sub(scroll_off + 1));
+                }
+            } else {
+                // Clear one-shot flag after honoring explicit scroll command
+                self.suppress_scrolloff_once = false;
             }
 
             // Ensure viewport doesn't go below zero or beyond buffer end
@@ -3454,24 +3465,53 @@ impl Editor {
 
     // Scrolling methods
     pub fn scroll_down_line(&mut self) {
-        // Ctrl+e: Scroll down one line using current window viewport
-        if let Some(current_window) = self.window_manager.current_window_mut() {
-            current_window.viewport_top = current_window.viewport_top.saturating_add(1);
+        // Ctrl+e: Scroll down one line (content moves up). Cursor stays on screen if possible.
+        if let Some(current_window) = self.window_manager.current_window_mut()
+            && let Some(buffer_id) = current_window.buffer_id
+            && let Some(buffer) = self.buffers.get_mut(&buffer_id)
+        {
+            let content_height = current_window.content_height();
+            let max_top = buffer.lines.len().saturating_sub(content_height);
+            let old_top = current_window.viewport_top;
+            if old_top < max_top {
+                current_window.viewport_top = (old_top + 1).min(max_top);
+                // Adjust cursor row only if it scrolled off the top
+                if buffer.cursor.row < current_window.viewport_top {
+                    buffer.cursor.row = current_window.viewport_top;
+                    if let Some(line) = buffer.get_line(buffer.cursor.row) {
+                        buffer.cursor.col = buffer.cursor.col.min(line.len());
+                    }
+                }
+                // Prevent scroll_off logic from immediately undoing this explicit scroll
+                self.suppress_scrolloff_once = true;
+            }
         }
-        // Request highlighting for newly visible lines
         self.request_visible_line_highlighting();
-        // Sync preview viewport if enabled
         self.maybe_sync_markdown_preview_viewport();
     }
 
     pub fn scroll_up_line(&mut self) {
-        // Ctrl+y: Scroll up one line using current window viewport
-        if let Some(current_window) = self.window_manager.current_window_mut() {
-            current_window.viewport_top = current_window.viewport_top.saturating_sub(1);
+        // Ctrl+y: Scroll up one line (content moves down). Cursor stays on screen if possible.
+        if let Some(current_window) = self.window_manager.current_window_mut()
+            && let Some(buffer_id) = current_window.buffer_id
+            && let Some(buffer) = self.buffers.get_mut(&buffer_id)
+        {
+            let old_top = current_window.viewport_top;
+            if old_top > 0 {
+                current_window.viewport_top = old_top.saturating_sub(1);
+                // Adjust cursor row if it would fall below bottom after scroll (rare for single line but symmetric)
+                let bottom =
+                    current_window.viewport_top + current_window.content_height().saturating_sub(1);
+                if buffer.cursor.row > bottom {
+                    buffer.cursor.row = bottom.min(buffer.lines.len().saturating_sub(1));
+                    if let Some(line) = buffer.get_line(buffer.cursor.row) {
+                        buffer.cursor.col = buffer.cursor.col.min(line.len());
+                    }
+                }
+                self.suppress_scrolloff_once = true;
+            }
         }
-        // Request highlighting for newly visible lines
         self.request_visible_line_highlighting();
-        // Sync preview viewport if enabled
         self.maybe_sync_markdown_preview_viewport();
     }
 
