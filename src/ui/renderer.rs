@@ -5,6 +5,8 @@ use crate::core::mode::{Mode, Position};
 use crate::features::syntax::HighlightRange;
 use crate::ui::terminal::Terminal;
 use log::{debug, warn};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::io;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -19,6 +21,16 @@ struct LineRenderContext {
     base_offset: usize,
     /// Total character count of the full logical line (for selection math)
     total_line_chars: usize,
+}
+
+// Cache metadata for completion popup to avoid redundant redraws
+#[derive(Clone)]
+pub struct PopupCache {
+    pub row: u16,
+    pub col: u16,
+    pub width: u16,
+    pub height: u16,
+    pub hash: u64,
 }
 
 pub struct UI {
@@ -36,6 +48,7 @@ pub struct UI {
     theme: UITheme,
     /// Current syntax theme from themes.toml
     syntax_theme: SyntaxTheme,
+    popup_cache: Option<PopupCache>,
 }
 
 impl Default for UI {
@@ -109,6 +122,7 @@ impl UI {
             show_marks: true,                   // Default to on per request
             theme: current_theme.ui,            // Use theme from themes.toml
             syntax_theme: current_theme.syntax, // Use syntax theme from themes.toml
+            popup_cache: None,
         }
     }
 
@@ -1773,7 +1787,7 @@ impl UI {
     }
 
     fn render_completion_popup(
-        &self,
+        &mut self,
         terminal: &mut Terminal,
         editor_state: &EditorRenderState,
         width: u16,
@@ -2293,6 +2307,33 @@ impl UI {
             out
         };
 
+        // Compute content hash for redraw minimization (rows already contain derived display content)
+        let mut hasher = DefaultHasher::new();
+        for r in &rows {
+            r.key.hash(&mut hasher);
+            r.alias.hash(&mut hasher);
+            r.value.hash(&mut hasher);
+            r.desc.hash(&mut hasher);
+            r.is_columnar.hash(&mut hasher);
+        }
+        selected_index.hash(&mut hasher);
+        key_w_used.hash(&mut hasher);
+        alias_w_used.hash(&mut hasher);
+        value_w_used.hash(&mut hasher);
+        desc_w_used.hash(&mut hasher);
+        let content_hash = hasher.finish();
+
+        // Early exit if geometry and content unchanged
+        if let Some(cache) = &self.popup_cache {
+            let same_pos = cache.row == popup_row && cache.col == popup_col;
+            let same_size =
+                cache.width as usize == menu_width && cache.height as usize == menu_height;
+            let same_hash = cache.hash == content_hash;
+            if same_pos && same_size && same_hash {
+                return Ok(());
+            }
+        }
+
         // Render the popup background and rows
         for i in 0..menu_height {
             let row = popup_row.saturating_sub(menu_height as u16) + i as u16;
@@ -2371,6 +2412,15 @@ impl UI {
                 terminal.queue_reset_color()?;
             }
         }
+
+        // Update popup cache
+        self.popup_cache = Some(PopupCache {
+            row: popup_row,
+            col: popup_col,
+            width: menu_width as u16,
+            height: menu_height as u16,
+            hash: content_hash,
+        });
 
         // Final color reset to ensure no artifacts
         terminal.queue_reset_color()?;
