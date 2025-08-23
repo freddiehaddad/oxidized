@@ -170,6 +170,24 @@ pub struct Editor {
 }
 
 impl Editor {
+    pub fn tab_width(&self) -> usize {
+        self.config.behavior.tab_width
+    }
+    pub fn soft_tab_stop(&self) -> usize {
+        self.config.behavior.soft_tab_stop
+    }
+    pub fn shift_width(&self) -> usize {
+        self.config.behavior.shift_width
+    }
+    pub fn expand_tabs(&self) -> bool {
+        self.config.behavior.expand_tabs
+    }
+    pub fn smart_tab(&self) -> bool {
+        self.config.behavior.smart_tab
+    }
+    pub fn smart_indent(&self) -> bool {
+        self.config.behavior.smart_indent
+    }
     pub fn new() -> Result<Self> {
         info!("Initializing editor");
 
@@ -1817,6 +1835,7 @@ impl Editor {
                 showmarks: self.config.display.show_marks,
                 expandtab: self.config.behavior.expand_tabs,
                 autoindent: self.config.behavior.auto_indent,
+                smartindent: self.config.behavior.smart_indent,
                 ignorecase: self.config.behavior.ignore_case,
                 smartcase: self.config.behavior.smart_case,
                 hlsearch: self.config.behavior.highlight_search,
@@ -2037,12 +2056,15 @@ impl Editor {
         &mut self,
         range: crate::features::text_objects::TextObjectRange,
     ) -> Result<()> {
+        // Capture config values before mutable buffer borrow
+        let shift_width = self.shift_width().max(1);
+        let expand_tabs = self.expand_tabs();
         let Some(buffer) = self.current_buffer_mut() else {
             return Ok(());
         };
 
         for row in range.start.row..=range.end.row.min(buffer.lines.len().saturating_sub(1)) {
-            let _ = buffer.indent_line(row);
+            let _ = buffer.indent_line(row, shift_width, expand_tabs);
         }
 
         Ok(())
@@ -2052,12 +2074,14 @@ impl Editor {
         &mut self,
         range: crate::features::text_objects::TextObjectRange,
     ) -> Result<()> {
+        let shift_width = self.shift_width().max(1);
+        let expand_tabs = self.expand_tabs();
         let Some(buffer) = self.current_buffer_mut() else {
             return Ok(());
         };
 
         for row in range.start.row..=range.end.row.min(buffer.lines.len().saturating_sub(1)) {
-            let _ = buffer.unindent_line(row);
+            let _ = buffer.unindent_line(row, shift_width, expand_tabs);
         }
 
         Ok(())
@@ -2551,6 +2575,10 @@ impl Editor {
             "ignorecase" | "ic" | "smartcase" | "scs" => {
                 self.apply_search_settings();
             }
+            "tabstop" | "ts" | "softtabstop" | "sts" | "shiftwidth" | "sw" | "expandtab" | "et"
+            | "smarttab" | "smartindent" | "si" => {
+                self.apply_tab_settings();
+            }
             "autosave" | "aw" => {
                 // Auto save setting changed, check if we should save now
                 self.check_auto_save();
@@ -2605,8 +2633,12 @@ impl Editor {
             "cursorline" | "cul" => Some(self.config.display.show_cursor_line.to_string()),
             "showmarks" | "smk" => Some(self.config.display.show_marks.to_string()),
             "tabstop" | "ts" => Some(self.config.behavior.tab_width.to_string()),
+            "softtabstop" | "sts" => Some(self.config.behavior.soft_tab_stop.to_string()),
+            "shiftwidth" | "sw" => Some(self.config.behavior.shift_width.to_string()),
             "expandtab" | "et" => Some(self.config.behavior.expand_tabs.to_string()),
+            "smarttab" => Some(self.config.behavior.smart_tab.to_string()),
             "autoindent" | "ai" => Some(self.config.behavior.auto_indent.to_string()),
+            "smartindent" | "si" => Some(self.config.behavior.smart_indent.to_string()),
             "ignorecase" | "ic" => Some(self.config.behavior.ignore_case.to_string()),
             "smartcase" | "scs" => Some(self.config.behavior.smart_case.to_string()),
             "hlsearch" | "hls" => Some(self.config.behavior.highlight_search.to_string()),
@@ -3509,9 +3541,14 @@ impl Editor {
 
             match cursor_mode {
                 ScrollCursorMode::PreserveOnScreen => {
-                    // Keep cursor if still visible, else clamp into new viewport
+                    // Keep cursor if still visible, else clamp into new viewport.
+                    // Additionally, if cursor was at old_top (top visual line) and we scrolled down (applied_delta>0),
+                    // move it down by same delta so it stays at same screen row (Vim behavior for Ctrl+e when cursor on top line).
                     let bottom = new_top + content_height.saturating_sub(1);
-                    if buffer.cursor.row < new_top {
+                    if applied_delta > 0 && buffer.cursor.row == old_top {
+                        buffer.cursor.row = (buffer.cursor.row + applied_delta as usize)
+                            .min(buffer.lines.len().saturating_sub(1));
+                    } else if buffer.cursor.row < new_top {
                         buffer.cursor.row = new_top;
                     } else if buffer.cursor.row > bottom {
                         buffer.cursor.row = bottom.min(buffer.lines.len().saturating_sub(1));
@@ -3557,8 +3594,13 @@ impl Editor {
     }
 
     pub fn scroll_down_line(&mut self) {
-        // Ctrl+e: Scroll down one line (content moves up). Cursor preserved on screen.
+        // Ctrl+e: Scroll down one line (content moves up). Cursor preserved; if it would be scrolled off at top, advance it.
+        // We emulate Vim: if cursor is at top line of screen and you scroll down one line, cursor stays put (still row 0 w.r.t viewport)
+        // which means its absolute buffer row increases by 1 along with viewport move. Our scroll helper with PreserveOnScreen
+        // clamps into new viewport top already, so behavior matches expectation that cursor row increments when it was at old_top.
         self.scroll_by(1, ScrollCursorMode::PreserveOnScreen);
+        // Additional adjustment: if viewport moved and cursor equals old top (now new_top), we bump cursor to stay visually stationary.
+        // However scroll_by already set cursor to new_top, which equals old_top+1; that's desired so no extra logic needed.
     }
 
     pub fn scroll_up_line(&mut self) {

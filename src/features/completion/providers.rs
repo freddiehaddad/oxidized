@@ -495,6 +495,26 @@ pub fn static_commands() -> Vec<CompletionItem> {
             description: "Disable automatic indentation (short)".into(),
             category: "set".into(),
         },
+        CompletionItem {
+            text: "set smartindent".into(),
+            description: "Enable smart block indentation".into(),
+            category: "set".into(),
+        },
+        CompletionItem {
+            text: "set si".into(),
+            description: "Enable smart block indentation (short)".into(),
+            category: "set".into(),
+        },
+        CompletionItem {
+            text: "set nosmartindent".into(),
+            description: "Disable smart block indentation".into(),
+            category: "set".into(),
+        },
+        CompletionItem {
+            text: "set nosi".into(),
+            description: "Disable smart block indentation (short)".into(),
+            category: "set".into(),
+        },
     ]);
 
     // Set commands - files/persistence

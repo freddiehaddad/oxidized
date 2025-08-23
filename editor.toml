@@ -14,9 +14,13 @@ syntax_highlighting = true   # Enable syntax highlighting
 show_marks = true            # Show marks in gutter
 
 [behavior]
-tab_width = 4             # Display width of a tab
-expand_tabs = false       # Insert spaces instead of tab chars
-auto_indent = true        # Maintain indentation on new lines
+tab_width = 4             # Display width of a tab (:set tabstop=4)
+soft_tab_stop = 4         # Spaces inserted/removed by <Tab>/<BS> in insert mode (:set softtabstop=4)
+shift_width = 4           # Indent size used by >> << and = (:set shiftwidth=4)
+expand_tabs = true        # Insert spaces instead of tab chars (:set expandtab / :set noexpandtab)
+smart_tab = true          # Use shiftwidth at line start, softtabstop elsewhere (:set smarttab)
+auto_indent = true        # Maintain indentation on new lines (:set autoindent / :set noautoindent)
+smart_indent = true       # Extra indent after simple block openers like '{' (:set smartindent / :set nosmartindent)
 ignore_case = false       # Case-insensitive search by default
 smart_case = false        # Override ignore_case when pattern has capitals
 highlight_search = true   # Highlight matches after a search

@@ -31,8 +31,12 @@ pub struct DisplayConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BehaviorConfig {
     pub tab_width: usize,
+    pub soft_tab_stop: usize,
+    pub shift_width: usize,
     pub expand_tabs: bool,
+    pub smart_tab: bool,
     pub auto_indent: bool,
+    pub smart_indent: bool,
     pub ignore_case: bool,
     pub smart_case: bool,
     pub highlight_search: bool,
@@ -241,15 +245,33 @@ impl EditorConfig {
 
                 // Behavior
                 "tabstop" | "ts" => Some(("behavior", "tab_width", Kind::Int, val.to_string())),
+                "softtabstop" | "sts" => {
+                    Some(("behavior", "soft_tab_stop", Kind::Int, val.to_string()))
+                }
+                "shiftwidth" | "sw" => {
+                    Some(("behavior", "shift_width", Kind::Int, val.to_string()))
+                }
                 "expandtab" | "et" => Some((
                     "behavior",
                     "expand_tabs",
                     Kind::Bool,
                     if b(val) { "true" } else { "false" }.to_string(),
                 )),
+                "smarttab" => Some((
+                    "behavior",
+                    "smart_tab",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
                 "autoindent" | "ai" => Some((
                     "behavior",
                     "auto_indent",
+                    Kind::Bool,
+                    if b(val) { "true" } else { "false" }.to_string(),
+                )),
+                "smartindent" | "si" => Some((
+                    "behavior",
+                    "smart_indent",
                     Kind::Bool,
                     if b(val) { "true" } else { "false" }.to_string(),
                 )),
@@ -550,6 +572,22 @@ impl EditorConfig {
                     }
                 ))
             }
+            "softtabstop" | "sts" => {
+                if let Ok(width) = value.parse::<usize>() {
+                    self.behavior.soft_tab_stop = width;
+                    Ok(format!("Soft tab stop: {}", width))
+                } else {
+                    Err("Invalid soft tab stop".to_string())
+                }
+            }
+            "shiftwidth" | "sw" => {
+                if let Ok(width) = value.parse::<usize>() {
+                    self.behavior.shift_width = width;
+                    Ok(format!("Shift width: {}", width))
+                } else {
+                    Err("Invalid shift width".to_string())
+                }
+            }
             "tabstop" | "ts" => {
                 if let Ok(width) = value.parse::<usize>() {
                     self.behavior.tab_width = width;
@@ -558,11 +596,33 @@ impl EditorConfig {
                     Err("Invalid tab width".to_string())
                 }
             }
+            "smarttab" => {
+                self.behavior.smart_tab = value.parse().unwrap_or(false);
+                Ok(format!(
+                    "Smart tab: {}",
+                    if self.behavior.smart_tab {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                ))
+            }
             "autoindent" | "ai" => {
                 self.behavior.auto_indent = value.parse().unwrap_or(true);
                 Ok(format!(
                     "Auto indent: {}",
                     if self.behavior.auto_indent {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                ))
+            }
+            "smartindent" | "si" => {
+                self.behavior.smart_indent = value.parse().unwrap_or(true);
+                Ok(format!(
+                    "Smart indent: {}",
+                    if self.behavior.smart_indent {
                         "enabled"
                     } else {
                         "disabled"

@@ -470,11 +470,25 @@ pub fn handle_set_command(editor: &mut Editor, args: &str, persist: bool) {
                     editor.set_config_setting_ephemeral("expandtab", "false")
                 }
             }
+            "smarttab" => {
+                if persist {
+                    editor.set_config_setting("smarttab", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("smarttab", "false")
+                }
+            }
             "autoindent" | "ai" => {
                 if persist {
                     editor.set_config_setting("autoindent", "false")
                 } else {
                     editor.set_config_setting_ephemeral("autoindent", "false")
+                }
+            }
+            "smartindent" | "si" => {
+                if persist {
+                    editor.set_config_setting("smartindent", "false")
+                } else {
+                    editor.set_config_setting_ephemeral("smartindent", "false")
                 }
             }
             "incsearch" | "is" => {
@@ -585,6 +599,40 @@ pub fn handle_set_command(editor: &mut Editor, args: &str, persist: bool) {
             editor.set_status_message(format!("Tab width set to {}", val));
         } else {
             editor.set_status_message("Invalid tab width value".to_string());
+        }
+        return;
+    }
+    if let Some(value) = args
+        .strip_prefix("softtabstop ")
+        .or_else(|| args.strip_prefix("sts "))
+    {
+        let val = value.trim();
+        if val.parse::<usize>().is_ok() {
+            if persist {
+                editor.set_config_setting("softtabstop", val);
+            } else {
+                editor.set_config_setting_ephemeral("softtabstop", val);
+            }
+            editor.set_status_message(format!("Soft tab stop set to {}", val));
+        } else {
+            editor.set_status_message("Invalid soft tab stop value".to_string());
+        }
+        return;
+    }
+    if let Some(value) = args
+        .strip_prefix("shiftwidth ")
+        .or_else(|| args.strip_prefix("sw "))
+    {
+        let val = value.trim();
+        if val.parse::<usize>().is_ok() {
+            if persist {
+                editor.set_config_setting("shiftwidth", val);
+            } else {
+                editor.set_config_setting_ephemeral("shiftwidth", val);
+            }
+            editor.set_status_message(format!("Shift width set to {}", val));
+        } else {
+            editor.set_status_message("Invalid shift width value".to_string());
         }
         return;
     }
@@ -794,11 +842,25 @@ pub fn handle_set_command(editor: &mut Editor, args: &str, persist: bool) {
                 editor.set_config_setting_ephemeral("expandtab", "true")
             }
         }
+        "smarttab" => {
+            if persist {
+                editor.set_config_setting("smarttab", "true")
+            } else {
+                editor.set_config_setting_ephemeral("smarttab", "true")
+            }
+        }
         "autoindent" | "ai" => {
             if persist {
                 editor.set_config_setting("autoindent", "true")
             } else {
                 editor.set_config_setting_ephemeral("autoindent", "true")
+            }
+        }
+        "smartindent" | "si" => {
+            if persist {
+                editor.set_config_setting("smartindent", "true")
+            } else {
+                editor.set_config_setting_ephemeral("smartindent", "true")
             }
         }
         "incsearch" | "is" => {

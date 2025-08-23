@@ -41,6 +41,7 @@ fn builder_can_register_custom_provider() {
         showmarks: false,
         expandtab: false,
         autoindent: false,
+        smartindent: false,
         ignorecase: false,
         smartcase: false,
         hlsearch: false,

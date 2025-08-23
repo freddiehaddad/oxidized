@@ -15,6 +15,7 @@ fn completes_directories_with_trailing_separator_and_parent() {
         showmarks: false,
         expandtab: false,
         autoindent: false,
+        smartindent: false,
         ignorecase: false,
         smartcase: false,
         hlsearch: false,
@@ -61,6 +62,7 @@ fn supports_percent_root_for_current_buffer_dir() {
         showmarks: false,
         expandtab: false,
         autoindent: false,
+        smartindent: false,
         ignorecase: false,
         smartcase: false,
         hlsearch: false,
@@ -99,6 +101,7 @@ fn buffer_and_numeric_hints_present() {
         showmarks: false,
         expandtab: false,
         autoindent: false,
+        smartindent: false,
         ignorecase: false,
         smartcase: false,
         hlsearch: false,
@@ -213,6 +216,7 @@ fn accept_toggles_boolean_for_set_and_setp() {
         showmarks: false,
         expandtab: false,
         autoindent: false,
+        smartindent: false,
         ignorecase: false,
         smartcase: false,
         hlsearch: false,
@@ -235,7 +239,7 @@ fn accept_toggles_boolean_for_set_and_setp() {
     let idx = cc
         .matches
         .iter()
-        .position(|i| i.category == "set" && i.text.starts_with("set "))
+        .position(|i| i.category == "set" && i.text == "set wrap")
         .unwrap();
     cc.selected_index = idx;
     let out = cc.accept().unwrap();
@@ -247,7 +251,7 @@ fn accept_toggles_boolean_for_set_and_setp() {
     let idx = cc
         .matches
         .iter()
-        .position(|i| i.category == "set" && i.text.starts_with("setp "))
+        .position(|i| i.category == "set" && i.text == "setp wrap")
         .unwrap();
     cc.selected_index = idx;
     let out = cc.accept().unwrap();
@@ -265,6 +269,7 @@ fn accept_toggles_boolean_for_set_and_setp() {
         showmarks: false,
         expandtab: false,
         autoindent: false,
+        smartindent: false,
         ignorecase: false,
         smartcase: false,
         hlsearch: false,
@@ -285,7 +290,7 @@ fn accept_toggles_boolean_for_set_and_setp() {
     let idx = cc
         .matches
         .iter()
-        .position(|i| i.category == "set" && i.text.starts_with("set "))
+        .position(|i| i.category == "set" && i.text == "set wrap")
         .unwrap();
     cc.selected_index = idx;
     let out = cc.accept().unwrap();
@@ -296,7 +301,7 @@ fn accept_toggles_boolean_for_set_and_setp() {
     let idx = cc
         .matches
         .iter()
-        .position(|i| i.category == "set" && i.text.starts_with("setp "))
+        .position(|i| i.category == "set" && i.text == "setp wrap")
         .unwrap();
     cc.selected_index = idx;
     let out = cc.accept().unwrap();

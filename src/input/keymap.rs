@@ -1371,14 +1371,106 @@ impl KeyHandler {
     }
 
     fn action_new_line(&self, editor: &mut Editor) -> Result<()> {
+        // Capture config before mutable borrow
+        let auto_indent = editor
+            .get_config_value("autoindent")
+            .map(|v| v == "true")
+            .unwrap_or(false);
+        let smart_indent = editor
+            .get_config_value("smartindent")
+            .map(|v| v == "true")
+            .unwrap_or(true);
+        let expand_tabs = editor.expand_tabs();
+        let shift_width = editor.shift_width().max(1);
         if let Some(buffer) = editor.current_buffer_mut() {
+            // Gather previous line context before inserting newline
+            let (prev_indent, add_block_indent) =
+                if auto_indent && buffer.cursor.row < buffer.lines.len() {
+                    if let Some(line) = buffer.lines.get(buffer.cursor.row) {
+                        let mut indent = String::new();
+                        for ch in line.chars() {
+                            if ch == ' ' || ch == '\t' {
+                                indent.push(ch);
+                            } else {
+                                break;
+                            }
+                        }
+                        let trimmed = line.trim_end();
+                        let add_block = smart_indent && trimmed.ends_with('{');
+                        (indent, add_block)
+                    } else {
+                        (String::new(), false)
+                    }
+                } else {
+                    (String::new(), false)
+                };
+
             buffer.insert_line_break();
+
+            if auto_indent && let Some(line) = buffer.lines.get_mut(buffer.cursor.row) {
+                // Apply previous indentation
+                if !prev_indent.is_empty() {
+                    line.insert_str(0, &prev_indent);
+                    buffer.cursor.col += prev_indent.len();
+                }
+                // Simple block opener rule: extra indent after '{'
+                if add_block_indent {
+                    if expand_tabs {
+                        let extra = " ".repeat(shift_width);
+                        line.insert_str(buffer.cursor.col, &extra);
+                        buffer.cursor.col += extra.len();
+                    } else {
+                        line.insert(buffer.cursor.col, '\t');
+                        buffer.cursor.col += 1;
+                    }
+                }
+            }
         }
         Ok(())
     }
 
     fn action_delete_char(&self, editor: &mut Editor) -> Result<()> {
+        // Capture config before mutable borrow
+        let in_insert = matches!(editor.mode(), Mode::Insert);
+        let expand_tabs = editor.expand_tabs();
+        let sts = editor.soft_tab_stop().max(1);
+        let tab_w_cfg = editor.tab_width().max(1);
         if let Some(buffer) = editor.current_buffer_mut() {
+            // Soft tab stop handling only in insert mode
+            if in_insert
+                && expand_tabs
+                && let Some(line) = buffer.lines.get(buffer.cursor.row)
+            {
+                let col = buffer.cursor.col.min(line.len());
+                if col > 0 {
+                    // Compute visual column accounting for tabs
+                    let tab_w = tab_w_cfg;
+                    let mut visual = 0usize;
+                    let mut only_indent = true;
+                    for ch in line[..col].chars() {
+                        match ch {
+                            ' ' => visual += 1,
+                            '\t' => {
+                                let next = ((visual / tab_w) + 1) * tab_w;
+                                visual = next;
+                            }
+                            _ => {
+                                only_indent = false;
+                                break;
+                            }
+                        }
+                    }
+                    if only_indent && visual > 0 {
+                        let prev_boundary = ((visual - 1) / sts) * sts;
+                        let to_remove_visual = visual - prev_boundary;
+                        if to_remove_visual > 1
+                            && buffer.delete_indent_backwards(to_remove_visual, tab_w)
+                        {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
             buffer.delete_char();
         }
         Ok(())
@@ -1439,6 +1531,7 @@ impl KeyHandler {
     }
 
     fn action_completion_next(&self, editor: &mut Editor) -> Result<()> {
+        // Cycle to next completion candidate (no-op if inactive)
         editor.completion_next();
         Ok(())
     }
@@ -1449,35 +1542,41 @@ impl KeyHandler {
     }
 
     fn action_completion_accept(&self, editor: &mut Editor) -> Result<()> {
-        if let Some(completed_text) = editor.completion_accept() {
-            // Set the command line to the completed command with ':' prefix
-            editor.set_command_line(format!(":{}", completed_text));
+        if let Some(replacement) = editor.completion_accept() {
+            let mut line = editor.command_line().to_string();
+            if let Some(colon) = line.find(':') {
+                line.replace_range(colon + 1.., &replacement);
+            }
+            editor.set_command_line(line);
         }
         Ok(())
     }
 
     fn action_append_search(&self, editor: &mut Editor, key: KeyEvent) -> Result<()> {
         if let KeyCode::Char(ch) = key.code {
-            let mut search = editor.command_line().to_string();
-            search.push(ch);
-            editor.set_command_line(search);
+            let mut s = editor.command_line().to_string();
+            s.push(ch);
+            editor.set_command_line(s);
         }
         Ok(())
     }
 
     fn action_delete_search_char(&self, editor: &mut Editor) -> Result<()> {
-        let mut search = editor.command_line().to_string();
-        if search.len() > 1 {
-            search.pop();
-            editor.set_command_line(search);
+        let mut s = editor.command_line().to_string();
+        if s.len() > 1 {
+            // Preserve leading '/' or '?'
+            s.pop();
+            editor.set_command_line(s);
         }
         Ok(())
     }
 
     fn action_execute_search(&self, editor: &mut Editor) -> Result<()> {
-        let search_term = editor.command_line()[1..].to_string();
-        if !search_term.is_empty() {
-            editor.search(&search_term);
+        let line = editor.command_line().to_string();
+        if let Some(term) = line.strip_prefix('/').or_else(|| line.strip_prefix('?'))
+            && !term.is_empty()
+        {
+            editor.search(term);
         }
         editor.set_mode(Mode::Normal);
         editor.set_command_line(String::new());
@@ -1949,8 +2048,51 @@ impl KeyHandler {
     }
 
     fn action_insert_tab(&self, editor: &mut Editor) -> Result<()> {
+        // Capture config-derived values before mutable borrow
+        let shift_width = editor.shift_width().max(1);
+        let sts = editor.soft_tab_stop().max(1);
+        let use_spaces = editor.expand_tabs();
+        let smart = editor.smart_tab();
+        let tab_w = editor.tab_width().max(1);
+
         if let Some(buffer) = editor.current_buffer_mut() {
-            buffer.insert_char('\t');
+            let row = buffer.cursor.row;
+            if row >= buffer.lines.len() {
+                return Ok(());
+            }
+            let line = &buffer.lines[row];
+            let col = buffer.cursor.col.min(line.len());
+
+            if !use_spaces {
+                // Literal tab insert path
+                buffer.insert_char('\t');
+                return Ok(());
+            }
+
+            // Determine insertion width: at line start (only spaces before cursor) and smarttab -> shiftwidth else softtabstop
+            let at_indent_region = line[..col].chars().all(|c| c == ' ' || c == '\t');
+            let base_width = if smart && at_indent_region {
+                shift_width
+            } else {
+                sts
+            };
+
+            // Current visual column within indent using spaces (treat tabs as advancing to next tabstop)
+            let mut visual_col = 0usize;
+            for ch in line[..col].chars() {
+                match ch {
+                    '\t' => {
+                        let next = ((visual_col / tab_w) + 1) * tab_w;
+                        visual_col = next;
+                    }
+                    _ => visual_col += 1,
+                }
+            }
+            let target = ((visual_col / base_width) + 1) * base_width;
+            let to_insert = target - visual_col;
+            for _ in 0..to_insert {
+                buffer.insert_char(' ');
+            }
         }
         Ok(())
     }

@@ -479,6 +479,94 @@ impl Buffer {
         }
     }
 
+    /// Delete indentation backwards up to a visual column delta, grouping into one undo entry.
+    /// Returns true if a grouped deletion occurred; falls back to false if not suitable.
+    pub fn delete_indent_backwards(
+        &mut self,
+        visual_cols_to_remove: usize,
+        tab_width: usize,
+    ) -> bool {
+        if visual_cols_to_remove == 0 {
+            return false;
+        }
+        if self.cursor.col == 0 {
+            return false;
+        }
+        let row = self.cursor.row;
+        if row >= self.lines.len() {
+            return false;
+        }
+        let line_snapshot = self.lines[row].clone();
+        let col = self.cursor.col.min(line_snapshot.len());
+        // Build segments of indentation up to cursor
+        let mut segments: Vec<(usize, usize, usize)> = Vec::new(); // (byte_start, byte_end, visual_end)
+        let mut visual = 0usize;
+        for (i, ch) in line_snapshot.char_indices() {
+            if i >= col {
+                break;
+            }
+            let w = if ch == '\t' {
+                ((visual / tab_width) + 1) * tab_width - visual
+            } else {
+                1
+            };
+            visual += w;
+            segments.push((i, i + ch.len_utf8(), visual));
+        }
+        if segments.is_empty() {
+            return false;
+        }
+        let current_visual = segments.last().map(|s| s.2).unwrap_or(0);
+        if current_visual == 0 {
+            return false;
+        }
+        let target_visual = current_visual.saturating_sub(visual_cols_to_remove);
+        if target_visual >= current_visual {
+            return false;
+        }
+        // Find starting segment boundary (can't split a tab)
+        let mut removal_start_byte = 0usize;
+        for idx in 0..segments.len() {
+            let (_, _, vis_end) = segments[idx];
+            if vis_end > target_visual {
+                // deletion starts before or at this segment
+                // Removal should start at previous segment end to avoid partial tab deletion
+                if idx == 0 {
+                    removal_start_byte = 0;
+                } else {
+                    removal_start_byte = segments[idx - 1].1;
+                }
+                break;
+            }
+            removal_start_byte = segments[idx].1; // advance
+        }
+        // Ensure region is whitespace only
+        if !line_snapshot[removal_start_byte..col]
+            .chars()
+            .all(|c| c == ' ' || c == '\t')
+        {
+            return false;
+        }
+        // Create single undo operation
+        let deleted_text = line_snapshot[removal_start_byte..col].to_string();
+        let operation = EditOperation::Delete {
+            pos: Position {
+                row,
+                col: removal_start_byte,
+            },
+            text: deleted_text.clone(),
+        };
+        self.save_operation(operation);
+        // Perform deletion
+        let mut new_line = String::with_capacity(line_snapshot.len() - (col - removal_start_byte));
+        new_line.push_str(&line_snapshot[..removal_start_byte]);
+        new_line.push_str(&line_snapshot[col..]);
+        self.lines[row] = new_line;
+        self.cursor.col = removal_start_byte;
+        self.modified = true;
+        true
+    }
+
     fn apply_edit_operation(&mut self, operation: &EditOperation) {
         match operation {
             EditOperation::Insert { pos, text } => {
@@ -1711,35 +1799,54 @@ impl Buffer {
         self.cursor = start;
     }
 
-    /// Add indentation to a line
-    pub fn indent_line(&mut self, line_num: usize) -> anyhow::Result<()> {
+    /// Add indentation to a line using provided shift width and tab expansion setting
+    pub fn indent_line(
+        &mut self,
+        line_num: usize,
+        shift_width: usize,
+        expand_tabs: bool,
+    ) -> anyhow::Result<()> {
         if line_num < self.lines.len() {
+            let indent_str = if expand_tabs {
+                " ".repeat(shift_width.max(1))
+            } else {
+                "\t".to_string()
+            };
             let operation = EditOperation::Insert {
                 pos: Position {
                     row: line_num,
                     col: 0,
                 },
-                text: "    ".to_string(), // 4 spaces for indentation
+                text: indent_str.clone(),
             };
             self.save_operation(operation);
-
-            self.lines[line_num].insert_str(0, "    ");
+            self.lines[line_num].insert_str(0, &indent_str);
             self.modified = true;
         }
         Ok(())
     }
 
-    /// Remove indentation from a line
-    pub fn unindent_line(&mut self, line_num: usize) -> anyhow::Result<()> {
+    /// Remove indentation from a line using provided shift width and tab expansion setting
+    pub fn unindent_line(
+        &mut self,
+        line_num: usize,
+        shift_width: usize,
+        expand_tabs: bool,
+    ) -> anyhow::Result<()> {
         if line_num < self.lines.len() {
             let line = &self.lines[line_num];
-            let chars_to_remove = if line.starts_with("    ") {
-                4
-            } else if line.starts_with("\t") {
+            let shift_width = shift_width.max(1);
+            let shift_indent = " ".repeat(shift_width);
+            let chars_to_remove = if expand_tabs && line.starts_with(&shift_indent) {
+                shift_width
+            } else if !expand_tabs && line.starts_with('\t') {
                 1
             } else {
-                // Count leading spaces up to 4
-                line.chars().take(4).take_while(|&c| c == ' ').count()
+                // Count leading spaces up to shift_width (mixed indentation fallback)
+                line.chars()
+                    .take(shift_width)
+                    .take_while(|&c| c == ' ')
+                    .count()
             };
 
             if chars_to_remove > 0 {
@@ -1753,7 +1860,6 @@ impl Buffer {
                     text: removed_text,
                 };
                 self.save_operation(operation);
-
                 let remaining: String = chars[chars_to_remove..].iter().collect();
                 self.lines[line_num] = remaining;
                 self.modified = true;
