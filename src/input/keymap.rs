@@ -1362,10 +1362,30 @@ impl KeyHandler {
     }
 
     fn action_insert_char(&self, editor: &mut Editor, key: KeyEvent) -> Result<()> {
-        if let KeyCode::Char(ch) = key.code
-            && let Some(buffer) = editor.current_buffer_mut()
-        {
-            buffer.insert_char(ch);
+        if let KeyCode::Char(ch) = key.code {
+            // Capture config before mutable borrow
+            let smart_indent = editor
+                .get_config_value("smartindent")
+                .map(|v| v == "true")
+                .unwrap_or(true);
+            let shift_width = editor.shift_width().max(1);
+            let tab_w = editor.tab_width().max(1);
+            if let Some(buffer) = editor.current_buffer_mut() {
+                // smartindent: if inserting a closing brace on an otherwise empty indented line
+                // automatically dedent by one shiftwidth so the brace aligns with its opener.
+                if smart_indent
+                    && ch == '}'
+                    && let Some(line) = buffer.lines.get(buffer.cursor.row)
+                {
+                    let col = buffer.cursor.col.min(line.len());
+                    // Only whitespace before cursor and at least one indent char present
+                    if col > 0 && line[..col].chars().all(|c| c == ' ' || c == '\t') {
+                        // Remove exactly one shiftwidth of indentation (visual columns)
+                        let _ = buffer.delete_indent_backwards(shift_width, tab_w);
+                    }
+                }
+                buffer.insert_char(ch);
+            }
         }
         Ok(())
     }

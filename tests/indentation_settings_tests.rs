@@ -110,3 +110,66 @@ fn test_smartindent_gates_block_indent() -> Result<()> {
     assert_eq!(buf2.get_line(1).unwrap(), ""); // no extra indent when smartindent disabled
     Ok(())
 }
+
+#[test]
+fn test_smartindent_closing_brace_dedent() -> Result<()> {
+    let (mut editor, mut kh) = editor_with_buffer()?;
+    editor.set_config_setting_ephemeral("expandtab", "true");
+    editor.set_config_setting_ephemeral("shiftwidth", "4");
+    editor.set_config_setting_ephemeral("autoindent", "true");
+    // smartindent default on
+    editor.set_mode(oxidized::core::mode::Mode::Insert);
+    // Type opening brace then newline -> indented new line
+    kh.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('{'), KeyModifiers::NONE),
+    )?;
+    kh.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    )?;
+    // Now type closing brace, should dedent to column 0
+    kh.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('}'), KeyModifiers::NONE),
+    )?;
+    let buf = editor.current_buffer().unwrap();
+    assert_eq!(buf.get_line(0).unwrap(), "{");
+    assert_eq!(buf.get_line(1).unwrap(), "}");
+    Ok(())
+}
+
+#[test]
+fn test_no_dedent_when_smartindent_disabled() -> Result<()> {
+    let (mut editor, mut kh) = editor_with_buffer()?;
+    editor.set_config_setting_ephemeral("expandtab", "true");
+    editor.set_config_setting_ephemeral("shiftwidth", "4");
+    editor.set_config_setting_ephemeral("autoindent", "true");
+    editor.set_config_setting_ephemeral("smartindent", "false");
+    editor.set_mode(oxidized::core::mode::Mode::Insert);
+    kh.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('{'), KeyModifiers::NONE),
+    )?;
+    kh.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    )?;
+    // Manually indent with 4 spaces
+    for _ in 0..4 {
+        kh.handle_key(
+            &mut editor,
+            KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
+        )?;
+    }
+    // Insert closing brace; should NOT trigger dedent when smartindent disabled
+    kh.handle_key(
+        &mut editor,
+        KeyEvent::new(KeyCode::Char('}'), KeyModifiers::NONE),
+    )?;
+    let buf = editor.current_buffer().unwrap();
+    assert_eq!(buf.get_line(0).unwrap(), "{");
+    // Brace remains at the manually inserted indentation (4 spaces + })
+    assert_eq!(buf.get_line(1).unwrap(), "    }");
+    Ok(())
+}
