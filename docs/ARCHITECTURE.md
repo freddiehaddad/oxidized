@@ -554,8 +554,9 @@ Mermaid (rendered):
 
 ```mermaid
 flowchart LR
-  Editor[Editor] -->|ensure_lines (batch)| Worker[SyntaxManager worker]
-  Worker -->|Parse+Extract global spans| Worker
+  Editor[Editor] -->|ensure_lines batch| Worker[SyntaxManager worker]
+  Worker --> Parse[Parse + extract spans]
+  Parse --> Worker
   Worker --> ReadyEvent[SyntaxReady event]
   ReadyEvent --> Editor
   Editor -->|poll_results| Update[Update line states]
