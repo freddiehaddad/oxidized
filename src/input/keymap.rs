@@ -2525,49 +2525,54 @@ impl KeyHandler {
 
             // Find all sentence starts in the text
             let mut sentence_starts = vec![0]; // Buffer always starts with a sentence
-            let chars: Vec<char> = all_text.chars().collect();
+            let bytes = all_text.as_bytes();
 
-            // Method 1: Find sentences ending with punctuation (iterator form)
-            for (i, &c) in chars.iter().enumerate() {
-                if matches!(c, '.' | '!' | '?') {
-                    // Skip consecutive punctuation
-                    let mut j = i + 1;
-                    while j < chars.len() && matches!(chars[j], '.' | '!' | '?') {
-                        j += 1;
+            #[inline]
+            fn is_ascii_space(b: u8) -> bool {
+                matches!(b, b' ' | b'\t' | b'\r' | b'\n')
+            }
+
+            // Method 1: punctuation-based sentence boundaries
+            for i in 0..bytes.len() {
+                match bytes[i] {
+                    b'.' | b'!' | b'?' => {
+                        let mut j = i + 1;
+                        while j < bytes.len() && matches!(bytes[j], b'.' | b'!' | b'?') {
+                            j += 1;
+                        }
+                        while j < bytes.len() && is_ascii_space(bytes[j]) {
+                            j += 1;
+                        }
+                        if j < bytes.len() {
+                            sentence_starts.push(j);
+                        }
                     }
-                    // Skip whitespace to next content char
-                    while j < chars.len() && chars[j].is_whitespace() {
-                        j += 1;
-                    }
-                    if j < chars.len() {
-                        sentence_starts.push(j);
-                    }
+                    _ => {}
                 }
             }
 
-            // Method 2: Find sentences separated by empty lines (for cases like LICENSE files)
+            // Method 2: empty-line separated (e.g. LICENSE style)
             let mut i = 0;
-            while i < chars.len() {
-                if chars[i] == '\n' {
-                    // Check if this is the start of an empty line
+            while i < bytes.len() {
+                if bytes[i] == b'\n' {
                     let mut j = i + 1;
-
-                    // Skip whitespace on this line
-                    while j < chars.len() && chars[j] != '\n' && chars[j].is_whitespace() {
+                    while j < bytes.len() && bytes[j] != b'\n' && is_ascii_space(bytes[j]) {
                         j += 1;
                     }
-
-                    // If we reach another newline, this was an empty (or whitespace-only) line
-                    if j < chars.len() && chars[j] == '\n' {
-                        // Now skip any additional empty lines
-                        while j < chars.len() && chars[j] == '\n' {
+                    if j < bytes.len() && bytes[j] == b'\n' {
+                        // empty or whitespace-only line
+                        while j < bytes.len() && bytes[j] == b'\n' {
+                            // skip consecutive empties
                             j += 1;
-                            // Skip whitespace on next line
-                            while j < chars.len() && chars[j] != '\n' && chars[j].is_whitespace() {
+                            while j < bytes.len()
+                                && j < bytes.len()
+                                && bytes[j] != b'\n'
+                                && is_ascii_space(bytes[j])
+                            {
                                 j += 1;
                             }
-                            // If this line has content, we found start of next sentence
-                            if j < chars.len() && chars[j] != '\n' {
+                            if j < bytes.len() && bytes[j] != b'\n' {
+                                // content line
                                 sentence_starts.push(j);
                                 break;
                             }
@@ -2579,9 +2584,9 @@ impl KeyHandler {
                 i += 1;
             }
 
-            // Method 3: Find sentences with double spaces using windows
-            for (i, win) in chars.windows(3).enumerate() {
-                if win[0] == ' ' && win[1] == ' ' && !win[2].is_whitespace() {
+            // Method 3: double-space heuristic
+            for i in 0..bytes.len().saturating_sub(2) {
+                if bytes[i] == b' ' && bytes[i + 1] == b' ' && !is_ascii_space(bytes[i + 2]) {
                     sentence_starts.push(i + 2);
                 }
             }
