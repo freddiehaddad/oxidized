@@ -2527,22 +2527,18 @@ impl KeyHandler {
             let mut sentence_starts = vec![0]; // Buffer always starts with a sentence
             let chars: Vec<char> = all_text.chars().collect();
 
-            // Method 1: Find sentences ending with punctuation
-            for i in 0..chars.len() {
-                if chars[i] == '.' || chars[i] == '!' || chars[i] == '?' {
+            // Method 1: Find sentences ending with punctuation (iterator form)
+            for (i, &c) in chars.iter().enumerate() {
+                if matches!(c, '.' | '!' | '?') {
                     // Skip consecutive punctuation
                     let mut j = i + 1;
-                    while j < chars.len() && (chars[j] == '.' || chars[j] == '!' || chars[j] == '?')
-                    {
+                    while j < chars.len() && matches!(chars[j], '.' | '!' | '?') {
                         j += 1;
                     }
-
-                    // Skip whitespace to find start of next sentence
+                    // Skip whitespace to next content char
                     while j < chars.len() && chars[j].is_whitespace() {
                         j += 1;
                     }
-
-                    // If we found a non-whitespace character, it's a sentence start
                     if j < chars.len() {
                         sentence_starts.push(j);
                     }
@@ -2583,9 +2579,9 @@ impl KeyHandler {
                 i += 1;
             }
 
-            // Method 3: Find sentences with double spaces
-            for i in 0..(chars.len().saturating_sub(2)) {
-                if chars[i] == ' ' && chars[i + 1] == ' ' && !chars[i + 2].is_whitespace() {
+            // Method 3: Find sentences with double spaces using windows
+            for (i, win) in chars.windows(3).enumerate() {
+                if win[0] == ' ' && win[1] == ' ' && !win[2].is_whitespace() {
                     sentence_starts.push(i + 2);
                 }
             }
