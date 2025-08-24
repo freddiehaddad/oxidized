@@ -70,15 +70,21 @@ Developer docs and diagrams:
 - **Undo Engine**: Sophisticated multi-level undo/redo with operation
    tracking
 
-**Rendering Pipeline:**
+**Rendering & Syntax Pipeline:**
 
-- **Async Syntax Highlighter**: Dedicated worker thread with request
-   coalescing, priority levels, and a versioned results pipeline. A dispatcher
-   thread applies results to an LRU cache and triggers redraws.
+- **Event‑driven Syntax Manager**: Single worker thread (SyntaxManager)
+   performs full‑buffer parses with tree‑sitter, applies incremental
+   single‑edit reparses (tree.edit) when possible, and emits a
+   `SyntaxReady` event directly (no dispatcher / polling thread). Per‑line
+   state machine (Uninitialized → Pending → Ready / Stale) lets the UI
+   reuse previous spans while fresh results stream in.
+- **Debounced Refinement**: After short idle time a focused 5‑line window
+   around the cursor is re‑scheduled to improve contextual tokens (e.g.
+   braces / identifiers) without flooding the worker.
 - **Viewport Manager**: Efficient screen updates with scroll optimization
-- **Terminal Interface**: Cross-platform terminal handling with alternate
+- **Terminal Interface**: Cross‑platform terminal handling with alternate
    screen support
-- **Unicode Engine**: UTF-8 safe, grapheme-cluster aware width calculation
+- **Unicode Engine**: UTF‑8 safe, grapheme‑cluster aware width calculation
 
 **Configuration Framework:**
 
@@ -91,14 +97,16 @@ Developer docs and diagrams:
 ### Performance Features
 
 - **Efficient Rendering**: Minimized redraws and buffered terminal updates
-- **Background Processing**: Syntax highlighting runs asynchronously via a
-   worker thread and event-driven dispatcher
-- **Versioned Results**: A monotonic token prevents stale highlight results
-   from being applied after scroll/resize/theme changes
-- **Bounded Cache**: A small in-memory LRU stores per-line highlights for
-   fast reuse without unbounded growth
-- **Memory Management**: Rust's ownership system ensures memory safety without
-   garbage collection
+- **Incremental Syntax**: Single edit diff detection drives selective
+   tree‑sitter incremental parsing; unchanged lines reuse prior spans.
+- **Direct Events**: Worker sends `SyntaxReady` only when new / reused
+   spans arrive; UI avoids polling and extra wakeups.
+- **Adaptive Scheduling**: Cursor‑adjacent window re‑highlighted after a
+   short idle to refine brace / delimiter context.
+- **Span Reuse Instead of Cache**: Previous per‑line spans are held in the
+   line state (no separate LRU layer) eliminating cache eviction churn.
+- **Memory Management**: Rust's ownership system ensures memory safety
+   without garbage collection
 - **Pragmatic Data Structures**: Efficient line-based model today; advanced
    gap/rope structures are planned
 - **Fast Search Path (ASCII)**: Case-insensitive search uses an ASCII fast

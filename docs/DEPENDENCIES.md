@@ -13,7 +13,7 @@
 - tree-sitter — AST parsing for syntax highlighting
 - tree-sitter-rust — Rust grammar for Tree-sitter
 - notify — filesystem monitoring for hot reload
-- tokio — async runtime for background tasks
+- (tokio removed) — current background syntax worker uses a dedicated std::thread
 - unicode-width / unicode-segmentation — Unicode handling
 
 ## Development

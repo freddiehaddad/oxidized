@@ -18,6 +18,7 @@ for a one-page visual overview.
 - src/input: [event loop](../src/input/event_driven.rs),
   [key handling](../src/input/keymap.rs), [event types](../src/input/events.rs)
 - src/features: [syntax highlighting](../src/features/syntax.rs),
+  [syntax manager](../src/features/syntax_manager.rs),
   [search](../src/features/search.rs), [macros](../src/features/macros.rs),
   [text objects](../src/features/text_objects.rs), [LSP (stub)](../src/features/lsp.rs)
 - src/config: editor/theme/keymap config + [file watchers](../src/config/watcher.rs)
@@ -33,8 +34,8 @@ for a one-page visual overview.
 - [core/editor.rs](../src/core/editor.rs)
   - Orchestrates buffers, window manager, UI, terminal, input handling,
     search, macros.
-  - Holds config and theme state, async syntax highlighter, completion engine,
-    and flags for redraw.
+  - Holds config and theme state, event-driven SyntaxManager (single worker),
+    completion engine, and flags for redraw.
   - Produces EditorRenderState for the UI on each render.
 - [core/window.rs](../src/core/window.rs)
   - WindowManager and Window data structures: splits, sizes, active window,
@@ -47,13 +48,15 @@ for a one-page visual overview.
   - Grapheme-aware widths and safe UTF-8 slicing.
 - [input/event_driven.rs](../src/input/event_driven.rs) +
   [input/events.rs](../src/input/events.rs) + [input/keymap.rs](../src/input/keymap.rs)
-  - EventDrivenEditor: input thread, config watcher, syntax results
-    dispatcher, (future) render thread.
+  - EventDrivenEditor: input thread, config watcher, direct SyntaxReady
+    events from SyntaxManager worker (dispatcher thread removed).
   - Key handling maps key sequences to editor actions and Ex commands.
 - [features/syntax.rs](../src/features/syntax.rs)
-  - Tree-sitter based synchronous highlighter and an AsyncSyntaxHighlighter
-    worker pipeline.
-  - Small per-line LRU cache for highlight results.
+  - Tree-sitter integration utilities and base highlighter helpers.
+- [features/syntax_manager.rs](../src/features/syntax_manager.rs)
+  - Event-driven worker performing full parse + incremental single-edit
+    reparses; per-line state machine (Uninitialized/Pending/Ready/Stale) and
+    direct EditorEvent::SyntaxReady emission (no dispatcher / LRU cache).
 - [features/search.rs](../src/features/search.rs),
   [features/macros.rs](../src/features/macros.rs),
   [features/text_objects.rs](../src/features/text_objects.rs), completion:
@@ -73,26 +76,27 @@ for a one-page visual overview.
 ## Key Runtime Flow
 
 1. main.rs initializes logging and creates an Editor.
-2. EventDrivenEditor wraps Editor and spawns threads (input, config watch,
-   syntax results dispatcher, render stub) and an event bus. Syntax
-   highlighting runs in a dedicated worker thread; results are applied via a
-   dispatcher that requests UI redraws.
+2. EventDrivenEditor wraps Editor and spawns threads (input, config watch) and
+  a single syntax worker owned by SyntaxManager. The worker sends direct
+  SyntaxReady events that cause the main loop to poll batched results and
+  request UI redraws.
 
 ### Timing and Cadence
 
 - The input thread uses crossterm polling with EVENT_TICK_MS (default 16ms) to
   stay responsive. The main event loop uses a fully blocking recv and wakes
-  only when events arrive. The config watcher blocks on filesystem events, and
-  the syntax results dispatcher blocks on a dedicated channel from the async
-  highlighter.
+  only when events arrive. The config watcher blocks on filesystem events. A
+  dedicated syntax worker thread (SyntaxManager) receives jobs and emits
+  SyntaxReady events directly (no dispatcher thread).
 
 1. Input thread reads terminal events and sends Input events.
 2. EventDrivenEditor processes events, mutates Editor as needed, and sends UI
-   RedrawRequest when state changes.
-3. A syntax results dispatcher thread listens for background highlight results,
-   updates caches, drops stale versions, and triggers redraws.
+  RedrawRequest when state changes.
+3. Syntax worker performs (incremental) parse + span extraction, sends a
+  SyntaxReady event; main thread polls all ready line results and updates
+  per-line states.
 4. Editor::render() snapshots EditorRenderState and asks UI to draw via
-   Terminal.
+  Terminal.
 
 Sequence (input → state → render):
 
@@ -116,8 +120,8 @@ sequenceDiagram
 ## Data Model
 
 - Buffer: lines, cursor, selection, undo/redo stacks, marks, clipboard.
-- Editor: buffer set, window manager, mode, status, config, themes, async
-  syntax state.
+- Editor: buffer set, window manager, mode, status, config, themes, syntax
+  manager state.
 - UI: theme, syntax theme, flags; computes gutter/columns; renders
   status/command lines.
 - Events: strongly-typed enums for
@@ -178,21 +182,23 @@ Core classes and relationships (high-level):
 - ThemeConfig load_with_default_theme applies color scheme; UI reads it on
   init and reload.
 
-## Syntax Highlighting (async pipeline)
+## Syntax Highlighting (event-driven incremental)
 
-Oxidized uses a truly async syntax pipeline powered by Tree-sitter:
+Oxidized now uses a single event-driven SyntaxManager powered by Tree-sitter:
 
-- A dedicated worker thread owns its own parser/theme and receives work items
-  over a bounded channel. Work items contain (buffer_id, line_index,
-  full_content, language, priority, version).
-- The worker coalesces requests by (buffer,line), preferring the latest
-  version and highest priority, then highlights line text using the provided
-  full-file context for correctness.
-- Results are sent over an unbounded results channel to a dispatcher thread.
-- The dispatcher validates results against a monotonic version token held by
-  the Editor and drops stale results. Valid results are applied to a small
-  in-memory LRU cache keyed by (buffer_id, line_index), and a UI redraw is
-  requested.
+- A worker thread owns parsers and receives batched ParseAndExtract jobs with
+  (buffer_id, version, needed line indices, full text, language).
+- It attempts a fast incremental reparse for single contiguous edits; on
+  complex changes it falls back to a full parse.
+- Global highlight spans are collected once (shortest-first conflict
+  resolution). Requested lines are sliced from that global set and returned as
+  per-line results (Line / LineUnchanged messages) plus metrics (incremental
+  vs full vs reused counts).
+- Worker emits EditorEvent::SyntaxReady. The main loop polls all ready
+  results, promoting Pending lines to Ready and marking Stale lines when
+  necessary (e.g. empty/mismatched output) and then schedules a redraw.
+- Previous Ready spans remain visible while a line is Pending; this removes
+  the need for a separate LRU cache and avoids flicker.
 
 Priorities
 
@@ -214,47 +220,34 @@ Caching
 
 ### End-to-end flow (code pointers)
 
-- Editor::render collects visible lines for all windows and calls
-  Editor::get_syntax_highlights(buffer_id, line_index, text, path).
-  - Tries AsyncSyntaxHighlighter cache first; if miss, enqueues a request with
-    full buffer content and returns empty highlights for now.
-  - Sets needs_syntax_refresh so the UI redraws when results arrive.
-- features/syntax.rs: AsyncSyntaxHighlighter
-  - Bounded work queue (256) prevents unbounded growth. Each WorkItem
-    contains buffer_id, line_index, full_content, language, priority, version.
-  - Worker loop coalesces a small backlog by (buffer,line), prefers higher
-    priority, then highlights that single line using a per-thread
-    SyntaxHighlighter and Tree-sitter parser.
-  - Results are sent as HighlightResult { buffer_id, line_index, version,
-    highlights }.
-- input/event_driven.rs: spawn_syntax_results_thread
-  - Receives results, compares result.version with editor.highlight_version,
-    drops stale results, then calls Editor::apply_syntax_highlight_result
-    which writes to the AsyncSyntaxHighlighter cache and flips
-    needs_syntax_refresh.
-  - Emits a UI RedrawRequest event.
+- Editor::render ensures visible lines are scheduled (ensure_lines) and then
+  reads any Ready spans already received (immediate rendering for reused
+  lines).
+- features/syntax_manager.rs: worker_loop performs parse, incremental edit
+  diffing (tree.edit), span collection, and message emission.
+- input/event_driven.rs: On SyntaxReady, editor.poll_results() drains all
+  line results, updates per-line state machine, sets needs_syntax_refresh and
+  triggers redraw.
 - ui/renderer.rs
   - Uses EditorRenderState.syntax_highlights map (collected by
     Editor::render) to render colored segments. Highlight ranges are shifted
     for wrap and horizontal scrolling.
 
-### Why Tree-sitter per-line?
+### Why parse once then slice lines?
 
-- We parse the full buffer text in the worker but compute highlights for the
-  requested line only. This preserves correctness with language constructs
-  that span lines while keeping rendering incremental and responsive.
+- Parsing the full buffer once and slicing spans for requested lines removes
+  redundant parses, keeps correctness for multi-line constructs, and still
+  allows lazy expansion (request more lines when scrolled).
 
-### LRU cache purpose and behavior
+### Per-line state machine vs LRU cache
 
-- The AsyncSyntaxHighlighter owns a small, mutex-protected per-line LRU cache
-  keyed by (buffer_id, line_index). Purpose:
-  - Bound memory usage for highlight results.
-  - Avoid recomputation during normal scrolling back-and-forth.
-  - Provide instant highlights on repeated renders while worker catches up.
-- Capacity is fixed (currently 2048 entries). Least-recently-used entries are
-  evicted when capacity is reached.
-- Cache is cleared on theme updates to prevent color/style mismatches. There
-  is also support to invalidate entries for specific buffers when needed.
+- Instead of an external LRU cache, each line tracks a state:
+  - Uninitialized: no spans yet (schedule on demand)
+  - Pending: worker in-flight; previous Ready spans (if any) are reused
+  - Ready: current spans to render
+  - Stale: previous spans known outdated; scheduler prioritizes refresh
+- This collapses caching + scheduling into a unified structure, avoids
+  eviction churn, and eliminates flicker during rapid edits.
 
 ## Windows and Viewports
 
@@ -466,14 +459,16 @@ See diagrams:
 ## Operational tips
 
 - Logging
-  - Use RUST_LOG=debug to see syntax pipeline traces (worker enqueue, UI
-    highlight usage). File-based logs reduce TTY noise.
+  - Use RUST_LOG=debug to see syntax traces (ensure_lines scheduling,
+    incremental parse vs full parse decisions, SyntaxReady events). File-based
+    logs reduce TTY noise.
 
 - Performance knobs
-  - EVENT_TICK_MS controls input polling. LRU cache size and async work queue
-    size are set in features/syntax.rs.
-  - Bumping highlight_version is cheap and a good way to invalidate in-flight
-    work after big changes (theme switch, large scrolls).
+  - EVENT_TICK_MS controls input polling cadence.
+  - highlight_version bumps invalidate in-flight results (theme/theme switch,
+    large scroll). Worker drops stale versions on poll.
+  - ensure_lines batches visible + nearby lines; future tuning knobs can
+    expand background prefetch window without architectural changes.
 
 ## Diagrams (visual overview)
 
@@ -488,10 +483,10 @@ See diagrams:
   - [Rendering and Cursor](#rendering-and-cursor)
   - [Undo/Redo and Redraws](#undoredo-and-redraws)
   - [Config \& Hot Reload](#config--hot-reload)
-  - [Syntax Highlighting (async pipeline)](#syntax-highlighting-async-pipeline)
+  - [Syntax Highlighting (event-driven incremental)](#syntax-highlighting-event-driven-incremental)
     - [End-to-end flow (code pointers)](#end-to-end-flow-code-pointers)
-    - [Why Tree-sitter per-line?](#why-tree-sitter-per-line)
-    - [LRU cache purpose and behavior](#lru-cache-purpose-and-behavior)
+    - [Why parse once then slice lines?](#why-parse-once-then-slice-lines)
+    - [Per-line state machine vs LRU cache](#per-line-state-machine-vs-lru-cache)
   - [Windows and Viewports](#windows-and-viewports)
   - [Testing](#testing)
     - [Layout \& Categories](#layout--categories)
@@ -508,10 +503,10 @@ See diagrams:
   - [Diagrams (visual overview)](#diagrams-visual-overview)
     - [Diagrams index](#diagrams-index)
     - [Event-driven threads and event bus](#event-driven-threads-and-event-bus)
-    - [Async syntax highlighting pipeline (with versioning and cache)](#async-syntax-highlighting-pipeline-with-versioning-and-cache)
+    - [Event-driven incremental syntax pipeline](#event-driven-incremental-syntax-pipeline)
     - [Window layout and splits (example)](#window-layout-and-splits-example)
     - [Rendering: gutter, wrapping, and highlights](#rendering-gutter-wrapping-and-highlights)
-    - [LRU cache behavior (per-line highlights)](#lru-cache-behavior-per-line-highlights)
+    - [Per-line syntax state transitions](#per-line-syntax-state-transitions)
     - [Buffer close (MRU fallback) sequence](#buffer-close-mru-fallback-sequence)
     - [RenderState diff and redraw decision (hybrid strategy)](#renderstate-diff-and-redraw-decision-hybrid-strategy)
     - [Terminal frame diff engine invariants](#terminal-frame-diff-engine-invariants)
@@ -529,7 +524,8 @@ Legend:
 
 - Boxes = threads/components; arrows = message flow.
 - mpsc = std::sync::mpsc channel for EditorEvents.
-- crossbeam channels: work_tx (bounded) and result_rx (unbounded) for syntax.
+- SyntaxManager worker has an unbounded job queue (batched per buffer) and
+  sends SyntaxReady events when results are ready for polling.
 - RedrawRequest triggers Editor::render and UI drawing.
 
 Mermaid (rendered):
@@ -539,31 +535,31 @@ graph LR
   Input[Input thread - poll] --> Bus[Event bus - mpsc]
   Config[Config watcher thread] --> Bus
   Bus -->|EditorEvent| Editor
-  Editor -->|work_tx bounded| Worker[Async worker - Tree-sitter]
-  Worker -->|result_rx unbounded| Dispatcher[Syntax dispatcher thread]
-  Dispatcher -->|apply results| Editor
+  Editor -->|ensure_lines| Worker[SyntaxManager worker]
+  Worker -->|SyntaxReady| Bus
   Editor -->|render draw| UI[UI]
   UI --> Terminal[Terminal]
 ```
 
-### Async syntax highlighting pipeline (with versioning and cache)
+### Event-driven incremental syntax pipeline
 
 Legend:
 
-- bounded queue (256) provides backpressure for syntax work; results are unbounded.
-- version is monotonic; results with result.version < highlight_version are dropped.
-- Priority order: Critical > High > Medium > Low.
+- Single worker parses full buffer; incremental reparse attempted for single
+  contiguous edits (tree.edit) else full parse.
+- highlight_version guards against stale results.
+- Per-line states: Uninitialized -> Pending -> Ready (reuse spans while Pending) -> Stale.
 
 Mermaid (rendered):
 
 ```mermaid
 flowchart LR
-  Editor[Editor] -->|enqueue WorkItem| Work[(work_tx\\nbounded 256)]
-  Work --> Worker[Worker thread]
-  Worker --> Result[(result_tx\\nunbounded)]
-  Result --> Dispatcher[Syntax dispatcher]
-  Dispatcher -->|drop stale; cache;\\nsend RedrawRequest| Editor
-  Dispatcher --> Cache[[AsyncSyntaxHighlighter LRU cache]]
+  Editor[Editor] -->|ensure_lines (batch)| Worker[SyntaxManager worker]
+  Worker -->|Parse+Extract global spans| Worker
+  Worker --> ReadyEvent[SyntaxReady event]
+  ReadyEvent --> Editor
+  Editor -->|poll_results| Update[Update line states]
+  Update --> Redraw[RedrawRequest]
 ```
 
 ### Window layout and splits (example)
@@ -614,30 +610,20 @@ Notes:
 - Wrap width is measured in display columns (unicode-width), not bytes.
 - Highlight ranges are byte-based; shifting occurs after safe slicing.
 
-### LRU cache behavior (per-line highlights)
+### Per-line syntax state transitions
 
 Legend:
 
-- Touch on get/put moves key to newest; capacity eviction pops oldest.
-- Current capacity: 2048 entries; theme update clears all entries.
-- Buffer-specific invalidation is supported (drop all K where K.buffer_id == X).
-
-Mermaid (rendered):
+- Ready spans reused while line Pending prevents flicker.
+- Stale marks schedule prioritized refresh.
 
 ```mermaid
-flowchart TB
-  Start[Start] --> Get{get key?}
-  Get -- yes --> Move[return value and move key to newest]
-  Get -- no --> Put{put key-value?}
-  Put -- no --> End[End]
-  Put -- yes --> Exists{key exists?}
-  Exists -- yes --> Replace[replace and move to newest]
-  Exists -- no --> Full{is full?}
-  Full -- yes --> Evict[evict oldest then remove]
-  Full -- no --> Insert[insert at newest]
-  Evict --> Insert
-  Replace --> End
-  Insert --> End
+flowchart LR
+  U[Uninitialized] -->|schedule| P[Pending]
+  P -->|worker output| R[Ready]
+  R -->|edit| P
+  R -->|structural edit| S[Stale]
+  S -->|ensure_lines| P
 ```
 
 ### Buffer close (MRU fallback) sequence

@@ -6,14 +6,12 @@ Mermaid.
 
 ## Core ideas
 
-- Editor orchestrates buffers, windows, UI, input, search, macros, and async
-      syntax.
+- Editor orchestrates buffers, windows, UI, input, search, macros, and the
+      event-driven incremental syntax manager.
 - Event-driven runtime: background threads send typed events; the main loop
       reacts and renders.
-- UI renders a snapshot (EditorRenderState) and uses cached per-line
-      highlights.
-- Async syntax highlighting runs off-thread, prioritized, versioned, and
-      cached via a small LRU.
+- UI renders a snapshot (EditorRenderState) and uses per-line Ready spans; Pending lines reuse previous spans (no flicker).
+- Incremental syntax highlighting runs in a single worker thread (SyntaxManager) that parses the full buffer, attempts incremental reparses, slices requested lines, and emits SyntaxReady events (no dispatcher/LRU layer).
 - Visual selection is anchor-oriented: `Selection.start` is the anchor and is
       not always ordered before `end`. Helpers derive ordered spans; this
       preserves direction for motions.
@@ -32,31 +30,29 @@ Mermaid (rendered):
 flowchart LR
       Input[Input thread (poll)] --> Bus[Event bus (mpsc)]
       Config[Config watcher thread] --> Bus
-      Bus -->|EditorEvent::Config| Editor
-      Editor -->|work_tx (bounded)| Worker[Async worker (Tree-sitter)]
-      Worker -->|result_rx (unbounded)| Dispatcher[Syntax dispatcher thr.]
-      Dispatcher -->|apply results| Editor
+      Bus -->|EditorEvent| Editor
+      Editor -->|ensure_lines| Worker[SyntaxManager worker]
+      Worker -->|SyntaxReady| Bus
       Editor -->|render() draw| UI[UI]
       UI --> Terminal[Terminal]
 ```
 
-## Async syntax highlighting pipeline
+## Incremental syntax highlighting pipeline
 
 Legend:
 
-- work_tx is bounded (backpressure); result_tx is unbounded.
-- version is monotonic; stale results are dropped by dispatcher.
-- Priority: Critical (cursor) > High (visible) > Medium/Low (nearby/bg).
+- Single worker parses full buffer; incremental reparse on single contiguous edits (tree.edit), else full parse.
+- highlight_version guards against stale results; main thread drops outdated spans.
+- Per-line states (Uninitialized/Pending/Ready/Stale) replace external LRU cache; Ready spans reused while Pending prevents flicker.
 
 Mermaid (rendered):
 
 ```mermaid
 flowchart LR
-      Editor[Editor] -->|enqueue WorkItem| Work[(work_tx\nbounded 256)]
-      Work --> Worker[Worker]
-      Worker --> Result[(result_tx\nunbounded)]
-      Result --> Dispatcher[Dispatcher]
-      Dispatcher -->|drop stale; cache;\nsend RedrawRequest| Editor
+      Editor[Editor] -->|ensure_lines (batch)| Worker[SyntaxManager]
+      Worker --> Ready[SyntaxReady event]
+      Ready --> Editor
+      Editor -->|poll_results; update line states| Redraw[RedrawRequest]
 ```
 
 ## Window layout (example)
@@ -110,11 +106,11 @@ flowchart TB
 - UI/Terminal: Renderer and crossterm-backed terminal IO.
 - EventDrivenEditor: Spawns input/config/syntax threads; main event loop.
 - Event bus: mpsc channel carrying EditorEvent enums.
-- AsyncSyntaxHighlighter: Worker + per-line LRU cache of highlights.
-- WorkItem/HighlightResult: Job and result for one (buffer,line).
-- Priority: Critical/High/Medium/Low scheduling for syntax tasks.
-- highlight_version: Atomic counter to drop stale results safely.
-- LRU cache: Fixed-capacity per-line highlights; cleared on theme change.
+- SyntaxManager: Single worker + per-line state machine (Uninitialized/Pending/Ready/Stale).
+- ensure_lines: Batches visible (and nearby) line scheduling.
+- SyntaxReady: Event indicating new/updated spans ready for polling.
+- highlight_version: Atomic counter; stale versions ignored.
+- Per-line state reuse: Ready spans reused while Pending; no separate LRU.
 
 ## Testing (snapshot)
 

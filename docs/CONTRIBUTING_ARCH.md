@@ -122,10 +122,11 @@ green.
   :set wiring).
 - Async/background: prefer event-driven flows via
   [src/input/event_driven.rs](../src/input/event_driven.rs) and
-  [events.rs](../src/input/events.rs). The async syntax worker lives in
-  [src/features/syntax.rs](../src/features/syntax.rs) and sends results over a
-  channel consumed by the dispatcher thread in
-  [src/input/event_driven.rs](../src/input/event_driven.rs).
+  [events.rs](../src/input/events.rs). Incremental syntax highlighting now
+  lives in [src/features/syntax_manager.rs](../src/features/syntax_manager.rs)
+  (single worker). It parses full buffers, attempts incremental reparses, and
+  emits SyntaxReady events consumed directly by the main loop (no dispatcher
+  thread / per-line LRU layer).
 
 ## Adding a Feature: Mini-Checklist
 
@@ -147,11 +148,13 @@ green.
     for the next input unless you add an interrupt mechanism), or
   - implement an adaptive backoff: increase poll timeout when idle, reset on
     activity.
-- Async syntax uses a bounded work queue, coalescing by (buffer,line) with
-  priority, and a monotonic version token. Results older than the current
-  version are dropped before applying.
-- A small LRU cache limits per-line highlight storage; cache stats are exposed
-  via the editor for debugging.
+- Incremental syntax manager parses once per edit batch, slices per-line spans
+  from global results, and reuses Ready spans while lines are Pending.
+- highlight_version invalidates in-flight spans (theme switches, large
+  scrolls). Stale versions are ignored when polled.
+- Per-line state machine (Uninitialized/Pending/Ready/Stale) replaces the
+  external LRU cache and dispatcher; previous Ready spans display while new
+  results compute (no flicker, no eviction churn).
 
 ## Architecture Diagrams
 

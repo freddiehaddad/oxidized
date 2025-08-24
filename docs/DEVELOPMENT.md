@@ -118,7 +118,7 @@ RUST_LOG=oxidized::features::macros=trace
 ```bash
 # Timing logs
 RUST_LOG="oxidized::ui=debug,oxidized::buffer=debug" cargo run large_file.txt
-# Highlighting performance
+# Highlighting performance & incremental parse decisions
 RUST_LOG=oxidized::syntax=trace cargo run code_file.rs
 # Memory/allocations
 RUST_LOG=trace cargo run --features debug-allocations
@@ -256,10 +256,11 @@ enabled = false
 ```
 
 ```toml
-# In editor.toml - reduce background processing
-[performance]
-async_processing = false
-max_syntax_workers = 1
+# In editor.toml - reduce or disable syntax (example keys; subject to change)
+[syntax]
+enabled = true
+incremental = true
+background_prefetch = "nearby"  # options: off|nearby|aggressive
 ```
 
 ```powershell

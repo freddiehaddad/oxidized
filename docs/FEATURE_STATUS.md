@@ -15,7 +15,8 @@ This page summarizes what Oxidized supports today. For the development roadmap, 
 - Search (forward/backward, n/N)
 - Ex-commands (`:w`, `:q`, `:set`, `:setp`, ...)
 - Config system (TOML, live reload)
-- Syntax highlighting (Tree-sitter, async worker)
+- Syntax highlighting (Tree-sitter, event-driven incremental worker)
+  - Incremental reparses with span reuse (per-line state machine; no LRU cache)
   - Markdown: block + inline grammars merged for accurate highlighting
 - Terminal integration (alt screen, cross-platform)
 - Markdown preview (split view)
