@@ -2722,11 +2722,14 @@ impl KeyHandler {
     }
 
     fn action_repeat_last_change(&mut self, editor: &mut Editor) -> Result<()> {
-        if let Some(last_command) = &self.last_command.clone() {
-            info!("Repeating last command: {}", last_command.action);
+        if let Some(last_command) = self.last_command.as_ref() {
+            // Copy fields we need before mutably borrowing self again.
+            let action_key = last_command.key;
+            let action_name = last_command.action.clone();
+            info!("Repeating last command: {}", action_name);
             // Execute the last command without recording it again to avoid infinite loops
-            self.execute_action_without_recording(editor, &last_command.action, last_command.key)?;
-            editor.set_status_message(format!("Repeated: {}", last_command.action));
+            self.execute_action_without_recording(editor, &action_name, action_key)?;
+            editor.set_status_message(format!("Repeated: {}", action_name));
         } else {
             editor.set_status_message("No command to repeat".to_string());
         }
@@ -3328,7 +3331,7 @@ impl KeyHandler {
     }
 
     fn action_repeat_char_search(&mut self, editor: &mut Editor) -> Result<()> {
-        if let Some(ref search_state) = self.last_char_search.clone() {
+        if let Some(ref search_state) = self.last_char_search {
             debug!(
                 "Repeating character search: {:?} '{}' forward: {}",
                 search_state.search_type, search_state.character, search_state.forward
@@ -3356,7 +3359,7 @@ impl KeyHandler {
     }
 
     fn action_repeat_char_search_reverse(&mut self, editor: &mut Editor) -> Result<()> {
-        if let Some(ref search_state) = self.last_char_search.clone() {
+        if let Some(ref search_state) = self.last_char_search {
             debug!(
                 "Repeating character search in reverse: {:?} '{}' forward: {}",
                 search_state.search_type, search_state.character, !search_state.forward
