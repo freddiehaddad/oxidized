@@ -2592,7 +2592,8 @@ impl KeyHandler {
             }
 
             // Remove duplicates and sort
-            sentence_starts.sort();
+            // Unstable sort is sufficient (we only need ordering before dedup)
+            sentence_starts.sort_unstable();
             sentence_starts.dedup();
 
             // Find the sentence start to move to
