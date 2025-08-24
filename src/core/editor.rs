@@ -6,20 +6,17 @@ use crate::core::mode::Mode;
 use crate::core::window::{SplitDirection, WindowManager};
 use crate::features::completion::CommandCompletion;
 use crate::features::search::{SearchEngine, SearchResult};
-use crate::features::syntax::{
-    AsyncSyntaxHighlighter, HighlightRange, HighlightResult, HighlightStyle, Priority,
-};
+use crate::features::syntax::{HighlightRange, HighlightStyle};
 use crate::input::keymap::KeyHandler;
 use crate::ui::UI;
 use crate::ui::terminal::Terminal;
 use anyhow::Result;
-use crossbeam_channel as xchan;
 use log::{debug, error, info, trace, warn};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Represents an operator waiting for a text object or motion
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,13 +124,15 @@ pub struct Editor {
     pub config_watcher: Option<ConfigWatcher>,
     /// Theme configuration for hot reloading themes
     theme_config: ThemeConfig,
-    /// Async syntax highlighter for background code highlighting
-    async_syntax_highlighter: Option<AsyncSyntaxHighlighter>,
-    /// Flag to trigger re-render when async syntax highlighting completes
+    /// Modern syntax manager (new pipeline)
+    syntax_manager: Option<crate::features::syntax_manager::SyntaxManager>,
+    /// Flag to trigger re-render when syntax highlighting completes
     pub needs_syntax_refresh: Arc<AtomicBool>,
     /// Flag to request a UI redraw for non-syntax changes (e.g., undo/delete with no cursor move)
     pub needs_redraw: Arc<AtomicBool>,
-    /// Monotonic version for async syntax tasks (drop stale results)
+    /// Timestamp of last textual edit to drive debounce refresh
+    last_input_instant: Instant,
+    /// Legacy version counter (retained for now; may remove later)
     pub highlight_version: Arc<AtomicU64>,
     /// Command completion system
     command_completion: CommandCompletion,
@@ -236,17 +235,8 @@ impl Editor {
         // Initialize theme configuration for hot reloading themes using editor's color scheme
         let theme_config = ThemeConfig::load_with_default_theme(&config.display.color_scheme);
 
-        // Initialize async syntax highlighter
-        let async_syntax_highlighter = match AsyncSyntaxHighlighter::new() {
-            Ok(highlighter) => {
-                debug!("Async syntax highlighter initialized");
-                Some(highlighter)
-            }
-            Err(e) => {
-                warn!("Failed to initialize async syntax highlighter: {}", e);
-                None
-            }
-        };
+        // Initialize new syntax manager
+        let syntax_manager = crate::features::syntax_manager::SyntaxManager::new().ok();
 
         info!("Editor initialized");
         let mut editor = Self {
@@ -269,9 +259,10 @@ impl Editor {
             status_message: String::new(),
             config_watcher,
             theme_config,
-            async_syntax_highlighter,
+            syntax_manager,
             needs_syntax_refresh: Arc::new(AtomicBool::new(false)),
             needs_redraw: Arc::new(AtomicBool::new(false)),
+            last_input_instant: Instant::now(),
             highlight_version: Arc::new(AtomicU64::new(1)),
             command_completion: crate::features::completion::CommandCompletionBuilder::new()
                 .build(),
@@ -368,11 +359,136 @@ impl Editor {
             }
         }
 
-        // Request syntax highlighting for newly opened buffer
-        self.clear_syntax_cache(); // Force fresh highlighting
+        // Request syntax highlighting for newly opened buffer (new pipeline)
         self.request_visible_line_highlighting();
 
         Ok(id)
+    }
+
+    /// Insert a character in the current buffer with syntax notification.
+    pub fn insert_char_current_buffer(&mut self, ch: char) {
+        // Perform edit and capture necessary snapshot
+        let (bid, line_idx, neighbor_lines, full_text, path, line_count) =
+            if let Some(buf) = self.current_buffer_mut() {
+                buf.insert_char(ch);
+                let cur = buf.cursor.row;
+                let mut neighbors = vec![cur];
+                if cur > 0 {
+                    neighbors.push(cur - 1);
+                }
+                if cur + 1 < buf.lines.len() {
+                    neighbors.push(cur + 1);
+                }
+                (
+                    buf.id,
+                    cur,
+                    neighbors,
+                    buf.lines.join("\n"),
+                    buf.file_path
+                        .as_ref()
+                        .map(|p| p.to_string_lossy().to_string()),
+                    buf.lines.len(),
+                )
+            } else {
+                return;
+            };
+        let language = path
+            .as_ref()
+            .and_then(|p| self.config.languages.detect_language_from_extension(p))
+            .or_else(|| self.config.languages.get_fallback_language())
+            .unwrap_or_else(|| "text".to_string());
+        if let Some(sm) = self.syntax_manager.as_mut() {
+            for li in &neighbor_lines {
+                sm.notify_line_changed(bid, *li, line_count);
+            }
+            sm.ensure_lines(bid, &neighbor_lines, &full_text, &language);
+            // If a brace just typed, attempt scheduling scan inward/outward small window (brace matching heuristic)
+            if matches!(ch, '}' | ')') {
+                // For now just reschedule previous 8 lines for context (cheap heuristic)
+                let mut extra: Vec<usize> = (line_idx.saturating_sub(8)..line_idx).collect();
+                extra.retain(|l| *l < line_count);
+                if !extra.is_empty() {
+                    sm.ensure_lines(bid, &extra, &full_text, &language);
+                }
+            }
+            // Force UI to consider redraw for pending syntax update
+            self.needs_syntax_refresh.store(true, Ordering::Relaxed);
+        }
+        self.last_input_instant = Instant::now();
+    }
+
+    /// Insert a line break in the current buffer with syntax notification.
+    pub fn insert_newline_current_buffer(&mut self) {
+        // Perform newline insertion but capture snapshot for incremental scheduling of the two affected lines
+        let (bid, affected_lines, full_text, path, line_count) =
+            if let Some(buf) = self.current_buffer_mut() {
+                let prev_line = buf.cursor.row;
+                buf.insert_line_break();
+                // After insertion, cursor moves to next line; we want to rescan both previous and new current line
+                let new_line = buf.cursor.row;
+                let mut lines = vec![prev_line];
+                if new_line != prev_line {
+                    lines.push(new_line);
+                }
+                (
+                    buf.id,
+                    lines,
+                    buf.lines.join("\n"),
+                    buf.file_path
+                        .as_ref()
+                        .map(|p| p.to_string_lossy().to_string()),
+                    buf.lines.len(),
+                )
+            } else {
+                return;
+            };
+        let language = path
+            .as_ref()
+            .and_then(|p| self.config.languages.detect_language_from_extension(p))
+            .or_else(|| self.config.languages.get_fallback_language())
+            .unwrap_or_else(|| "text".to_string());
+        if let Some(sm) = self.syntax_manager.as_mut() {
+            // Mark full buffer version bump because structure changed
+            sm.notify_edit(bid, line_count);
+            sm.ensure_lines(bid, &affected_lines, &full_text, &language);
+            self.needs_syntax_refresh.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Delete a character (backspace semantics) in current buffer with syntax notification.
+    pub fn delete_char_current_buffer(&mut self) {
+        let opt = if let Some(buf) = self.current_buffer_mut() {
+            if buf.delete_char() {
+                Some((
+                    buf.id,
+                    buf.cursor.row,
+                    buf.lines.join("\n"),
+                    buf.file_path
+                        .as_ref()
+                        .map(|p| p.to_string_lossy().to_string()),
+                    buf.lines.len(),
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some((bid, line, full_text, path, count)) = opt {
+            let language = path
+                .as_ref()
+                .and_then(|p| self.config.languages.detect_language_from_extension(p))
+                .or_else(|| self.config.languages.get_fallback_language())
+                .unwrap_or_else(|| "text".to_string());
+            if let Some(sm) = self.syntax_manager.as_mut() {
+                sm.notify_line_changed(bid, line, count);
+                sm.ensure_lines(bid, &[line], &full_text, &language);
+            }
+            if self.syntax_manager.is_some() {
+                self.needs_syntax_refresh.store(true, Ordering::Relaxed);
+            }
+        }
+        self.last_input_instant = Instant::now();
     }
 
     pub fn current_buffer(&self) -> Option<&Buffer> {
@@ -382,6 +498,21 @@ impl Editor {
     pub fn current_buffer_mut(&mut self) -> Option<&mut Buffer> {
         self.current_buffer_id
             .and_then(|id| self.buffers.get_mut(&id))
+    }
+
+    /// Internal accessor for background threads to poll syntax manager
+    pub fn syntax_manager_mut(
+        &mut self,
+    ) -> Option<&mut crate::features::syntax_manager::SyntaxManager> {
+        self.syntax_manager.as_mut()
+    }
+
+    /// Replace the syntax manager with one constructed with a direct event sender.
+    pub fn replace_syntax_manager(
+        &mut self,
+        new_sm: crate::features::syntax_manager::SyntaxManager,
+    ) {
+        self.syntax_manager = Some(new_sm);
     }
 
     pub fn switch_to_buffer(&mut self, id: usize) -> bool {
@@ -798,22 +929,73 @@ impl Editor {
             }
         }
 
-        // Now generate syntax highlights for all collected lines
-        for (key, (line_content, file_path)) in lines_to_highlight {
-            let (buffer_id, line_index) = key;
-            // If this is a markdown preview buffer and we have precomputed preview highlights, use them
-            let highlights = if self.markdown_preview_buffer_id == Some(buffer_id) {
-                if let Some(h) = self.preview_highlights.get(&(buffer_id, line_index)) {
-                    h.clone()
-                } else {
-                    // No precomputed spans: don't attempt tree-sitter for preview buffers
-                    Vec::new()
+        if let Some(manager) = &mut self.syntax_manager {
+            // Poll results first
+            if manager.poll_results() {
+                self.needs_syntax_refresh.store(true, Ordering::Relaxed);
+            }
+            // Debounced refinement: after 40ms idle, reschedule a 5-line window around cursor for improved brace/identifier context
+            const IDLE_MS: u64 = 40;
+            if self.last_input_instant.elapsed() >= Duration::from_millis(IDLE_MS) {
+                if let Some(buf) = &current_buffer {
+                    let row = buf.cursor.row;
+                    let start = row.saturating_sub(2);
+                    let end = (row + 2).min(buf.lines.len().saturating_sub(1));
+                    let window: Vec<usize> = (start..=end).collect();
+                    if !window.is_empty() {
+                        let full = buf.lines.join("\n");
+                        let path = buf
+                            .file_path
+                            .as_ref()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        let lang = self
+                            .config
+                            .languages
+                            .detect_language_from_extension(&path)
+                            .or_else(|| self.config.languages.get_fallback_language())
+                            .unwrap_or_else(|| "text".to_string());
+                        manager.ensure_lines(buf.id, &window, &full, &lang);
+                    }
                 }
-            } else {
-                self.get_syntax_highlights(buffer_id, line_index, &line_content, Some(&file_path))
-            };
-            // Store ALL highlights, even empty ones, so UI knows syntax highlighting was attempted
-            syntax_highlights.insert(key, highlights);
+                self.last_input_instant = Instant::now();
+            }
+            // Schedule needed lines per buffer
+            let mut per_buffer: HashMap<usize, (Vec<usize>, String, String)> = HashMap::new();
+            for ((buf_id, line_idx), (_line_content, file_path)) in &lines_to_highlight {
+                let entry = per_buffer
+                    .entry(*buf_id)
+                    .or_insert_with(|| (Vec::new(), String::new(), file_path.clone()));
+                entry.0.push(*line_idx);
+                if entry.1.is_empty()
+                    && let Some(buf) = self.buffers.get(buf_id)
+                {
+                    entry.1 = buf.lines.join("\n");
+                }
+            }
+            for (buf_id, (lines, full_text, path)) in per_buffer.into_iter() {
+                let lang = self
+                    .config
+                    .languages
+                    .detect_language_from_extension(&path)
+                    .or_else(|| self.config.languages.get_fallback_language())
+                    .unwrap_or_else(|| "text".to_string());
+                manager.ensure_lines(buf_id, &lines, &full_text, &lang);
+            }
+            // Collect ready spans
+            for key in lines_to_highlight.keys() {
+                let (buf_id, line_idx) = *key;
+                let spans_vec = manager
+                    .get_line(buf_id, line_idx)
+                    .map(|s| s.to_vec())
+                    .unwrap_or_default();
+                syntax_highlights.insert(*key, spans_vec);
+            }
+        } else {
+            // Legacy path
+            for (key, _) in lines_to_highlight {
+                syntax_highlights.insert(key, Vec::new());
+            }
         }
 
         // Create an optimized render state that only clones buffers currently displayed in windows
@@ -2545,15 +2727,7 @@ impl Editor {
         // Apply specific settings that need immediate effect
         match setting {
             "syntax" | "syn" => {
-                if self.config.display.syntax_highlighting {
-                    // Re-enable syntax highlighting
-                    if self.async_syntax_highlighter.is_none() {
-                        self.async_syntax_highlighter = AsyncSyntaxHighlighter::new().ok();
-                    }
-                } else {
-                    // Disable syntax highlighting
-                    self.async_syntax_highlighter = None;
-                }
+                // New pipeline always present; toggle just sets flag used on render decisions.
             }
             // Markdown preview settings: accept and noop-apply for now
             "mdpreview.update"
@@ -2679,154 +2853,8 @@ impl Editor {
         )
     }
 
-    /// Get syntax highlights for a line of text (async version)
-    pub fn get_syntax_highlights(
-        &mut self,
-        buffer_id: usize,
-        line_index: usize,
-        text: &str,
-        file_path: Option<&str>,
-    ) -> Vec<crate::features::syntax::HighlightRange> {
-        // Debug: Log what we're trying to highlight
-        log::debug!(
-            "get_syntax_highlights: buffer={}, line={}, text='{}', path={:?}",
-            buffer_id,
-            line_index,
-            text,
-            file_path
-        );
-
-        // First check if we have an async syntax highlighter
-        if let Some(ref highlighter) = self.async_syntax_highlighter {
-            log::debug!("Async syntax highlighter is available");
-
-            // Get the language from file extension using configuration
-            let language = if let Some(path) = file_path {
-                let detected = self.config.languages.detect_language_from_extension(path);
-                log::debug!("Language detected from path '{}': {:?}", path, detected);
-                detected
-            } else {
-                // For unnamed buffers, use configured fallback language
-                let detected = self.config.languages.get_fallback_language();
-                log::debug!("Language fallback for unnamed buffer: {:?}", detected);
-                detected
-            };
-
-            if let Some(lang) = language {
-                log::debug!("Using language: '{}'", lang);
-
-                // Try to get cached highlights first - only for single line
-                if let Some(cached) =
-                    highlighter.get_cached_highlights(buffer_id, line_index, text, &lang)
-                {
-                    log::debug!("Found cached highlights: {} items", cached.len());
-                    return cached;
-                }
-
-                log::debug!("No cached highlights, getting immediate highlights for single line");
-
-                // Enqueue async highlighting for this line using full-file context
-                if let Some(buf) = self.buffers.get(&buffer_id) {
-                    let full_content = buf.lines.join("\n");
-                    // Use current version for ad-hoc single-line requests
-                    let version = self.highlight_version.load(Ordering::Relaxed);
-                    highlighter.request_highlighting(
-                        buffer_id,
-                        line_index,
-                        full_content,
-                        lang,
-                        Priority::High,
-                        version,
-                    );
-                    // Mark that a syntax refresh should trigger a redraw when results arrive
-                    self.needs_syntax_refresh
-                        .store(true, std::sync::atomic::Ordering::Relaxed);
-                }
-            } else {
-                log::warn!("No language detected for path: {:?}", file_path);
-            }
-        } else {
-            log::warn!("No async syntax highlighter available");
-        }
-
-        // Fallback to empty highlights if no async highlighter or no language detected
-        log::debug!("Returning empty highlights as fallback");
-        Vec::new()
-    }
-
-    /// Request syntax highlighting for all visible lines in current window
-    /// Uses full-file context for proper tree-sitter parsing
-    pub fn request_visible_line_highlighting(&mut self) {
-        if let Some(highlighter) = &mut self.async_syntax_highlighter
-            && let Some(window) = self.window_manager.current_window()
-            && let Some(buffer_id) = window.buffer_id
-            && let Some(buffer) = self.buffers.get(&buffer_id)
-        {
-            let content_height = window.content_height();
-            let viewport_top = window.viewport_top;
-
-            // Get highlighting for visible lines immediately
-            let visible_start = viewport_top;
-            let visible_end = std::cmp::min(viewport_top + content_height, buffer.lines.len());
-
-            // Request immediate highlighting for visible lines + buffer for scrolling
-            let highlight_start = viewport_top;
-            let highlight_end = std::cmp::min(
-                viewport_top + content_height + 10, // 10 line buffer for smooth scrolling
-                buffer.lines.len(),
-            );
-
-            if let Some(file_path) = &buffer.file_path {
-                let path_str = file_path.to_string_lossy().to_string();
-
-                // Determine language from file extension using configuration
-                let language = self
-                    .config
-                    .languages
-                    .detect_language_from_extension(&path_str)
-                    .or_else(|| self.config.languages.get_fallback_language())
-                    .unwrap_or_else(|| "text".to_string()); // Ultimate fallback
-
-                // Get full buffer content for proper context-aware parsing
-                let full_content = buffer.lines.join("\n");
-
-                // Bump version once per visible request (e.g., on scroll)
-                let version = self.highlight_version.fetch_add(1, Ordering::Relaxed);
-                let cursor_line = buffer.cursor.row;
-
-                // Enqueue full-context highlighting for all visible lines
-                for line_index in visible_start..visible_end {
-                    let prio = if line_index == cursor_line {
-                        Priority::Critical
-                    } else {
-                        Priority::High
-                    };
-                    highlighter.request_highlighting(
-                        buffer_id,
-                        line_index,
-                        full_content.clone(),
-                        language.clone(),
-                        prio,
-                        version,
-                    );
-                }
-
-                // Also cache highlights for buffer lines beyond visible area for smooth scrolling
-                for line_index in highlight_start..highlight_end {
-                    if line_index < visible_start || line_index >= visible_end {
-                        // Enqueue background highlighting for buffer lines too
-                        highlighter.request_highlighting(
-                            buffer_id,
-                            line_index,
-                            full_content.clone(),
-                            language.clone(),
-                            Priority::Medium,
-                            version,
-                        );
-                    }
-                }
-            }
-        }
+    /// Request syntax highlighting for all visible lines (new pipeline is passive; we just mark lines needing ensure on render)
+    pub fn request_visible_line_highlighting(&mut self) { /* no-op with new manager; render will schedule */
     }
 
     /// Build per-line highlight ranges for a markdown preview render using the current theme mapping
@@ -2930,7 +2958,7 @@ impl Editor {
         line_index: usize,
     ) -> Vec<crate::features::syntax::HighlightRange> {
         // Get the necessary data first to avoid borrow conflicts
-        let (buffer_id, line_text, file_path) = {
+        let (_buffer_id, line_text, _file_path) = {
             if let Some(buffer) = self.current_buffer() {
                 let line = buffer.get_line(line_index).map(|s| s.to_string());
                 let path = buffer
@@ -2942,27 +2970,17 @@ impl Editor {
                 (0, None, None)
             }
         };
-
-        if let (Some(line), Some(path)) = (line_text, file_path) {
-            self.get_syntax_highlights(buffer_id, line_index, &line, Some(&path))
-        } else {
-            Vec::new()
-        }
+        // Return empty; batch scheduling handles highlights
+        line_text.map(|_| Vec::new()).unwrap_or_default()
     }
 
     /// Get syntax highlighting cache statistics
     pub fn get_cache_stats(&self) -> Option<(usize, usize)> {
-        self.async_syntax_highlighter
-            .as_ref()
-            .map(|h| h.cache_stats())
+        None
     }
 
     /// Clear syntax highlighting cache (useful for debugging or memory management)
-    pub fn clear_syntax_cache(&mut self) {
-        if let Some(ref highlighter) = self.async_syntax_highlighter {
-            highlighter.invalidate_buffer_cache(0); // Clear all cache for now
-            debug!("Syntax highlighting cache cleared");
-        }
+    pub fn clear_syntax_cache(&mut self) { /* obsolete */
     }
 
     // ---------- Markdown Preview MVP ----------
@@ -3373,26 +3391,7 @@ impl Editor {
         }
     }
 
-    /// Clone the syntax result receiver so other threads can block on it
-    pub fn clone_syntax_result_receiver(&self) -> Option<xchan::Receiver<HighlightResult>> {
-        self.async_syntax_highlighter
-            .as_ref()
-            .map(|h| h.clone_result_receiver())
-    }
-
-    /// Apply a syntax highlight result into the highlighter cache and flag redraw
-    pub fn apply_syntax_highlight_result(
-        &mut self,
-        buffer_id: usize,
-        line_index: usize,
-        highlights: Vec<HighlightRange>,
-    ) {
-        if let Some(ref highlighter) = self.async_syntax_highlighter {
-            highlighter.set_cached_highlights(buffer_id, line_index, highlights);
-        }
-        self.needs_syntax_refresh
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-    }
+    // Legacy async syntax receiver & apply methods removed.
 
     /// Reload editor configuration from editor.toml
     pub fn reload_editor_config(&mut self) {
@@ -3429,79 +3428,15 @@ impl Editor {
         // Update the UI with the new theme
         self.ui.set_theme(current_theme);
 
-        // Update the syntax highlighter with the new theme and clear cache
-        if let Some(ref highlighter) = self.async_syntax_highlighter {
-            if let Err(e) = highlighter.update_theme(current_theme) {
-                log::warn!("Failed to update syntax highlighter theme: {}", e);
-            } else {
-                log::info!("Successfully updated syntax highlighter theme and cleared cache");
-            }
-        }
-
         self.status_message = format!("Theme '{}' reloaded", current_theme);
 
-        // Force immediate re-highlighting of visible content with new theme
-        self.refresh_visible_syntax_highlighting();
-    }
-
-    /// Force immediate re-highlighting of visible content (used after theme changes)
-    fn refresh_visible_syntax_highlighting(&mut self) {
-        if let Some(current_window) = self.window_manager.current_window()
-            && let Some(buffer_id) = current_window.buffer_id
-            && let Some(buffer) = self.buffers.get(&buffer_id)
-            && let Some(ref highlighter) = self.async_syntax_highlighter
-        {
-            // Calculate visible range
-            let viewport_top = current_window.viewport_top;
-            let viewport_height = current_window.height as usize;
-            let visible_start = viewport_top;
-            let visible_end = (viewport_top + viewport_height).min(buffer.line_count());
-
-            // Determine language
-            let language = if let Some(ref path) = buffer.file_path {
-                if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
-                    match extension {
-                        "rs" => "rust",
-                        "py" => "python",
-                        "js" => "javascript",
-                        "ts" => "typescript",
-                        "c" => "c",
-                        "cpp" | "cc" | "cxx" => "cpp",
-                        _ => "rust",
-                    }
-                } else {
-                    "rust"
-                }
-            } else {
-                "rust"
-            };
-
-            log::debug!(
-                "Refreshing syntax highlighting for visible lines {}-{}",
-                visible_start,
-                visible_end
-            );
-
-            // Bump version to invalidate in-flight results and requeue visible lines
-            let version = self.highlight_version.fetch_add(1, Ordering::Relaxed);
-            let full_content = buffer.lines.join("\n");
-            for line_index in visible_start..visible_end {
-                let prio = if line_index == buffer.cursor.row {
-                    Priority::Critical
-                } else {
-                    Priority::High
-                };
-                highlighter.request_highlighting(
-                    buffer_id,
-                    line_index,
-                    full_content.clone(),
-                    language.to_string(),
-                    prio,
-                    version,
-                );
-            }
+        // Future: notify SyntaxManager/theme mapping.
+        if let Some(sm) = self.syntax_manager.as_mut() {
+            sm.invalidate_all();
         }
     }
+
+    // refresh_visible_syntax_highlighting removed.
 
     // Scrolling methods
 
@@ -4068,8 +4003,8 @@ impl Editor {
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// Stop async syntax highlighting and close its channels (used during shutdown)
-    pub fn shutdown_async_syntax(&mut self) {
-        self.async_syntax_highlighter = None;
-    }
+    /// Stop syntax highlighting (no-op for new pipeline)
+    pub fn shutdown_async_syntax(&mut self) {}
+
+    // Direct event-based syntax notifications; no external notify channel needed.
 }

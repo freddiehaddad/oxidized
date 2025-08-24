@@ -12,6 +12,7 @@ pub mod lsp;
 pub mod macros;
 pub mod search;
 pub mod syntax;
+pub mod syntax_manager;
 pub mod text_objects;
 
 pub use completion::CommandCompletion;
@@ -19,4 +20,5 @@ pub use lsp::*;
 pub use macros::{Macro, MacroError, MacroKeyEvent, MacroRecorder};
 pub use search::{SearchEngine, SearchResult};
 pub use syntax::{AsyncSyntaxHighlighter, HighlightRange, Priority};
+pub use syntax_manager::*;
 pub use text_objects::*;

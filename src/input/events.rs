@@ -30,6 +30,8 @@ pub enum EditorEvent {
     Plugin(PluginEvent),
     /// LSP events (future LSP integration)
     LSP(LSPEvent),
+    /// Syntax results ready (wake UI)
+    SyntaxReady,
 }
 
 /// Macro-related events

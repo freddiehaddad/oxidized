@@ -1370,11 +1370,12 @@ impl KeyHandler {
                 .unwrap_or(true);
             let shift_width = editor.shift_width().max(1);
             let tab_w = editor.tab_width().max(1);
-            if let Some(buffer) = editor.current_buffer_mut() {
+            if let Some(_buffer) = editor.current_buffer_mut() {
                 // smartindent: if inserting a closing brace on an otherwise empty indented line
                 // automatically dedent by one shiftwidth so the brace aligns with its opener.
                 if smart_indent
                     && ch == '}'
+                    && let Some(buffer) = editor.current_buffer_mut()
                     && let Some(line) = buffer.lines.get(buffer.cursor.row)
                 {
                     let col = buffer.cursor.col.min(line.len());
@@ -1384,7 +1385,7 @@ impl KeyHandler {
                         let _ = buffer.delete_indent_backwards(shift_width, tab_w);
                     }
                 }
-                buffer.insert_char(ch);
+                editor.insert_char_current_buffer(ch);
             }
         }
         Ok(())
@@ -1402,7 +1403,7 @@ impl KeyHandler {
             .unwrap_or(true);
         let expand_tabs = editor.expand_tabs();
         let shift_width = editor.shift_width().max(1);
-        if let Some(buffer) = editor.current_buffer_mut() {
+        if let Some(buffer) = editor.current_buffer() {
             // Gather previous line context before inserting newline
             let (prev_indent, add_block_indent) =
                 if auto_indent && buffer.cursor.row < buffer.lines.len() {
@@ -1425,9 +1426,12 @@ impl KeyHandler {
                     (String::new(), false)
                 };
 
-            buffer.insert_line_break();
+            editor.insert_newline_current_buffer();
 
-            if auto_indent && let Some(line) = buffer.lines.get_mut(buffer.cursor.row) {
+            if auto_indent
+                && let Some(buffer) = editor.current_buffer_mut()
+                && let Some(line) = buffer.lines.get_mut(buffer.cursor.row)
+            {
                 // Apply previous indentation
                 if !prev_indent.is_empty() {
                     line.insert_str(0, &prev_indent);
@@ -1455,7 +1459,7 @@ impl KeyHandler {
         let expand_tabs = editor.expand_tabs();
         let sts = editor.soft_tab_stop().max(1);
         let tab_w_cfg = editor.tab_width().max(1);
-        if let Some(buffer) = editor.current_buffer_mut() {
+        if let Some(buffer) = editor.current_buffer() {
             // Soft tab stop handling only in insert mode
             if in_insert
                 && expand_tabs
@@ -1483,15 +1487,17 @@ impl KeyHandler {
                     if only_indent && visual > 0 {
                         let prev_boundary = ((visual - 1) / sts) * sts;
                         let to_remove_visual = visual - prev_boundary;
+                        // Need mutable buffer to delete indentation; reacquire mutably
                         if to_remove_visual > 1
-                            && buffer.delete_indent_backwards(to_remove_visual, tab_w)
+                            && let Some(bufm) = editor.current_buffer_mut()
+                            && bufm.delete_indent_backwards(to_remove_visual, tab_w)
                         {
                             return Ok(());
                         }
                     }
                 }
             }
-            buffer.delete_char();
+            editor.delete_char_current_buffer();
         }
         Ok(())
     }

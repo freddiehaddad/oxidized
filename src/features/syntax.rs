@@ -440,8 +440,8 @@ impl HighlightCacheEntry {
 }
 
 pub struct SyntaxHighlighter {
-    parsers: HashMap<String, Parser>,
-    language_support: HashMap<String, LanguageSupport>,
+    pub(crate) parsers: HashMap<String, Parser>,
+    pub(crate) language_support: HashMap<String, LanguageSupport>,
     theme_config: ThemeConfig,
     current_syntax_theme: SyntaxTheme,
 }
@@ -716,7 +716,7 @@ impl SyntaxHighlighter {
     }
 
     /// Get color for a semantic category from the current theme
-    fn get_color_for_category(&self, category: &SemanticCategory) -> Option<Color> {
+    pub(crate) fn get_color_for_category(&self, category: &SemanticCategory) -> Option<Color> {
         // Look up the color for this semantic category in the theme
         // The theme now uses semantic category names instead of specific node types
         self.current_syntax_theme
@@ -825,6 +825,14 @@ impl AsyncSyntaxHighlighter {
         priority: Priority,
         version: u64,
     ) {
+        log::debug!(
+            "enqueue_highlight_request buffer={} line={} lang={} priority={:?} version={}",
+            buffer_id,
+            line_index,
+            language,
+            priority,
+            version
+        );
         let _ = self.work_tx.send(WorkItem {
             buffer_id,
             line_index,

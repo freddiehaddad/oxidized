@@ -64,13 +64,18 @@ impl EventDrivenEditor {
         let config_thread = Self::spawn_config_watcher_thread(editor.clone(), event_sender.clone());
         thread_handles.push(config_thread);
 
-        // Start syntax results dispatcher thread (async highlighter results -> events)
-        let syntax_thread = Self::spawn_syntax_results_thread(editor.clone(), event_sender.clone());
-        thread_handles.push(syntax_thread);
+        // Legacy syntax results dispatcher removed (handled inline during render scheduling).
 
-        // Start rendering thread
-        let render_thread = Self::spawn_render_thread(editor.clone(), event_sender.clone());
-        thread_handles.push(render_thread);
+        // Rendering now purely event-driven (no periodic render thread).
+
+        // Recreate syntax manager with direct event sender (replace placeholder created in Editor::new)
+        if let Ok(mut ed_guard) = editor.lock()
+            && let Ok(sm) = crate::features::syntax_manager::SyntaxManager::new_with_event_sender(
+                Some(event_sender.clone()),
+            )
+        {
+            ed_guard.replace_syntax_manager(sm);
+        }
 
         Self {
             editor,
@@ -178,6 +183,20 @@ impl EventDrivenEditor {
             EditorEvent::Config(config_event) => self.handle_config_event(config_event)?,
             EditorEvent::Search(search_event) => self.handle_search_event(search_event)?,
             EditorEvent::System(system_event) => self.handle_system_event(system_event)?,
+            EditorEvent::SyntaxReady => {
+                if let Ok(mut editor) = self.editor.lock()
+                    && let Some(sm) = editor.syntax_manager_mut()
+                    && sm.poll_results()
+                {
+                    editor
+                        .needs_syntax_refresh
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    let _ = self
+                        .event_sender
+                        .send(EditorEvent::UI(UIEvent::RedrawRequest));
+                }
+                false
+            }
             EditorEvent::Plugin(_) => false, // Future implementation
             EditorEvent::LSP(_) => false,    // Future implementation
             EditorEvent::Macro(macro_event) => self.handle_macro_event(macro_event)?,
@@ -612,85 +631,7 @@ impl EventDrivenEditor {
         })
     }
 
-    // (syntax thread removed)
-    /// Spawn syntax result dispatcher thread
-    fn spawn_syntax_results_thread(
-        editor: Arc<Mutex<Editor>>,
-        sender: mpsc::Sender<EditorEvent>,
-    ) -> thread::JoinHandle<()> {
-        thread::spawn(move || {
-            info!("Syntax results dispatcher thread started");
-
-            // Obtain a clone of the result receiver once
-            let rx_opt = {
-                if let Ok(ed) = editor.lock() {
-                    ed.clone_syntax_result_receiver()
-                } else {
-                    None
-                }
-            };
-
-            let Some(result_rx) = rx_opt else {
-                info!("No async syntax highlighter; exiting syntax dispatcher");
-                return;
-            };
-
-            while let Ok(result) = result_rx.recv() {
-                // Apply the first result
-                if let Ok(mut ed) = editor.lock() {
-                    let current_version = ed
-                        .highlight_version
-                        .load(std::sync::atomic::Ordering::Relaxed);
-                    if result.version >= current_version {
-                        ed.apply_syntax_highlight_result(
-                            result.buffer_id,
-                            result.line_index,
-                            result.highlights,
-                        );
-                    }
-                }
-
-                // Drain any immediately-available results to coalesce redraws
-                while let Ok(next) = result_rx.try_recv() {
-                    if let Ok(mut ed) = editor.lock() {
-                        let current_version = ed
-                            .highlight_version
-                            .load(std::sync::atomic::Ordering::Relaxed);
-                        if next.version >= current_version {
-                            ed.apply_syntax_highlight_result(
-                                next.buffer_id,
-                                next.line_index,
-                                next.highlights,
-                            );
-                        }
-                    }
-                }
-
-                // Single redraw for the batch
-                let _ = sender.send(EditorEvent::UI(UIEvent::RedrawRequest));
-            }
-
-            info!("Syntax results dispatcher thread finished");
-        })
-    }
-
-    /// Spawn rendering thread
-    fn spawn_render_thread(
-        _editor: Arc<Mutex<Editor>>,
-        _sender: mpsc::Sender<EditorEvent>,
-    ) -> thread::JoinHandle<()> {
-        thread::spawn(move || {
-            info!("Render thread started");
-
-            // For now, rendering is handled synchronously in the main thread
-            // In the future, this could handle background rendering optimizations
-
-            // TODO: Implement background rendering optimizations
-            // Currently no background work is done here.
-
-            info!("Render thread finished");
-        })
-    }
+    // Spawn rendering thread (removed). Syntax notifications now arrive directly via a dedicated channel.
 
     /// Shutdown all background threads
     fn shutdown(&mut self) -> Result<()> {
