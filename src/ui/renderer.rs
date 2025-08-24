@@ -2388,81 +2388,62 @@ impl UI {
             }
         }
 
-        // Render the popup background and rows
-        for i in 0..menu_height {
-            let row = popup_row.saturating_sub(menu_height as u16) + i as u16;
+        // Render the popup background and rows (iterator for actual rows, then padding)
+        let start_row = popup_row.saturating_sub(menu_height as u16);
+        for (i, cols) in rows.iter().enumerate().take(menu_height) {
+            let row = start_row + i as u16;
             terminal.queue_move_cursor(Position::new(row as usize, popup_col as usize))?;
-
-            if i < rows.len() {
-                let cols = &rows[i];
-                let is_selected = i == selected_index;
-
-                // Set colors based on selection
-                if is_selected {
-                    terminal.queue_set_bg_color(self.theme.completion_selected_bg)?;
-                } else {
-                    terminal.queue_set_bg_color(self.theme.completion_menu_bg)?;
-                }
-                if cols.is_columnar {
-                    // Compose aligned columns with colors
-                    // Leading space + key
-                    let key_text = truncate_to_width(&cols.key, key_w_used);
-                    let alias_text = truncate_to_width(&cols.alias, alias_w_used);
-                    let value_text = truncate_to_width(&cols.value, value_w_used);
-                    let desc_text = truncate_to_width(&cols.desc, desc_w_used);
-
-                    // 1) leading space
-                    terminal.queue_set_fg_color(self.theme.completion_key_fg)?;
-                    terminal.queue_print(" ")?;
-                    // 2) key padded
-                    let key_padded = format!("{:<w$}", key_text, w = key_w_used);
-                    terminal.queue_print(&key_padded)?;
-                    // 3) gap
-                    terminal.queue_print(&" ".repeat(gap))?;
-                    // 4) alias padded
-                    terminal.queue_set_fg_color(self.theme.completion_alias_fg)?;
-                    let alias_padded = format!("{:<w$}", alias_text, w = alias_w_used);
-                    terminal.queue_print(&alias_padded)?;
-                    // 5) gap
-                    terminal.queue_print(&" ".repeat(gap))?;
-                    // 6) value (fixed width)
-                    terminal.queue_set_fg_color(self.theme.completion_value_fg)?;
-                    let value_padded = format!("{:<w$}", value_text, w = value_w_used);
-                    terminal.queue_print(&value_padded)?;
-
-                    // 7) optional gap and description (fixed start column)
-                    let mut printed_width =
-                        1 + key_w_used + gap + alias_w_used + gap + value_w_used;
-                    if include_desc {
-                        terminal.queue_print(&" ".repeat(gap))?;
-                        terminal.queue_set_fg_color(self.theme.completion_desc_fg)?;
-                        terminal.queue_print(&desc_text)?;
-                        printed_width += gap + UnicodeWidthStr::width(desc_text.as_str());
-                    }
-
-                    // Pad any remaining to full width
-                    if printed_width < menu_width {
-                        let pad = menu_width - printed_width;
-                        terminal.queue_print(&" ".repeat(pad))?;
-                    }
-                } else {
-                    // Fallback: clear row (should not be hit in normal flow)
-                    terminal.queue_set_bg_color(self.theme.command_line_bg)?;
-                    terminal.queue_set_fg_color(self.theme.command_line_fg)?;
-                    let empty_line = " ".repeat(menu_width);
-                    terminal.queue_print(&empty_line)?;
-                }
-
-                // Reset colors immediately after printing each line
-                terminal.queue_reset_color()?;
+            let is_selected = i == selected_index;
+            if is_selected {
+                terminal.queue_set_bg_color(self.theme.completion_selected_bg)?;
             } else {
-                // Empty row - set background color and fill with spaces
+                terminal.queue_set_bg_color(self.theme.completion_menu_bg)?;
+            }
+            if cols.is_columnar {
+                let key_text = truncate_to_width(&cols.key, key_w_used);
+                let alias_text = truncate_to_width(&cols.alias, alias_w_used);
+                let value_text = truncate_to_width(&cols.value, value_w_used);
+                let desc_text = truncate_to_width(&cols.desc, desc_w_used);
+
+                terminal.queue_set_fg_color(self.theme.completion_key_fg)?;
+                terminal.queue_print(" ")?; // leading space
+                let key_padded = format!("{:<w$}", key_text, w = key_w_used);
+                terminal.queue_print(&key_padded)?;
+                terminal.queue_print(&" ".repeat(gap))?;
+                terminal.queue_set_fg_color(self.theme.completion_alias_fg)?;
+                let alias_padded = format!("{:<w$}", alias_text, w = alias_w_used);
+                terminal.queue_print(&alias_padded)?;
+                terminal.queue_print(&" ".repeat(gap))?;
+                terminal.queue_set_fg_color(self.theme.completion_value_fg)?;
+                let value_padded = format!("{:<w$}", value_text, w = value_w_used);
+                terminal.queue_print(&value_padded)?;
+
+                let mut printed_width = 1 + key_w_used + gap + alias_w_used + gap + value_w_used;
+                if include_desc {
+                    terminal.queue_print(&" ".repeat(gap))?;
+                    terminal.queue_set_fg_color(self.theme.completion_desc_fg)?;
+                    terminal.queue_print(&desc_text)?;
+                    printed_width += gap + UnicodeWidthStr::width(desc_text.as_str());
+                }
+                if printed_width < menu_width {
+                    terminal.queue_print(&" ".repeat(menu_width - printed_width))?;
+                }
+            } else {
+                // Fallback (rare)
                 terminal.queue_set_bg_color(self.theme.command_line_bg)?;
                 terminal.queue_set_fg_color(self.theme.command_line_fg)?;
-                let empty_line = " ".repeat(menu_width);
-                terminal.queue_print(&empty_line)?;
-
-                // Reset colors immediately after printing each line
+                terminal.queue_print(&" ".repeat(menu_width))?;
+            }
+            terminal.queue_reset_color()?;
+        }
+        // Padding rows (if menu_height exceeds rows.len())
+        if menu_height > rows.len() {
+            for pad_i in rows.len()..menu_height {
+                let row = start_row + pad_i as u16;
+                terminal.queue_move_cursor(Position::new(row as usize, popup_col as usize))?;
+                terminal.queue_set_bg_color(self.theme.command_line_bg)?;
+                terminal.queue_set_fg_color(self.theme.command_line_fg)?;
+                terminal.queue_print(&" ".repeat(menu_width))?;
                 terminal.queue_reset_color()?;
             }
         }
