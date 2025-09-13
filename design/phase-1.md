@@ -65,7 +65,7 @@ Action Abstraction (Added mid‑Phase 1):
 * Dispatcher applies action -> state delta, returns dirty flag.
 * Render scheduler stub decides when to flush (currently immediate full redraw; future diff integration hooks here).
 * Breadth‑first principle preserved: behavior identical after each incremental commit.
-* Ordering note: Dispatcher (Action -> state) implemented before async channel migration to minimize simultaneous behavioral + concurrency changes.
+* Ordering note: Dispatcher (Action -> state) implemented before async channel migration to minimize simultaneous behavioral + concurrency changes. Async channel migration (Task 9.6) now complete: main loop awaits `tokio::mpsc` events (still single producer) with identical user-visible behavior, enabling future background action producers without architectural rewrite. Render scheduler stub (Task 9.8) not yet extracted – current dirty tracking inline.
 
 ## 5. Data Model Changes
 

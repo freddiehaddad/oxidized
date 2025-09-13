@@ -129,7 +129,7 @@ Checklist:
 - [ ] 9.3 Extract broader helpers (motion/edit/command). (Partial: inline `apply_motion` / `apply_vertical_motion` added; full separation pending edits & command handling.)
 - [x] 9.4 Action enum introduced (`core-actions` crate) & compiled.
 - [x] 9.5 Translation function skeleton (`translate_key`) added (no wiring yet).
-- [ ] 9.6 Async tokio channel + loop.
+- [x] 9.6 Async tokio channel + loop.
 - [x] 9.7 Dispatcher & dirty flag (implemented ahead of 9.6 for lower-churn refactor).
 - [ ] 9.8 Render scheduler stub.
 - [ ] 9.9 Deferred multi-producer & diff hook documented.

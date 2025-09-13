@@ -9,7 +9,7 @@ use core_state::Mode;
 use core_terminal::{CrosstermBackend, TerminalBackend};
 use core_text::Buffer;
 use core_text::{grapheme, motion};
-use std::sync::mpsc;
+use tokio::sync::mpsc;
 use tracing::{error, info};
 
 #[tokio::main]
@@ -48,7 +48,8 @@ async fn main() -> Result<()> {
         "Welcome to Oxidized (Phase 0)\nPress :q to quit.",
     )?;
     let mut state = EditorState::new(buffer);
-    let (tx, rx) = mpsc::channel::<Event>();
+    // Async unbounded channel (single consumer main loop). Input thread forwards blocking crossterm events.
+    let (tx, mut rx) = mpsc::unbounded_channel::<Event>();
     let _input_handle = core_input::spawn_input_thread(tx.clone());
 
     // Simple command mode detection
@@ -64,7 +65,7 @@ async fn main() -> Result<()> {
 
     let render_span = tracing::info_span!("event_loop");
     let _enter_loop = render_span.enter();
-    while let Ok(event) = rx.recv() {
+    while let Some(event) = rx.recv().await {
         let mut dirty = false; // track whether we need to render
         match event {
             Event::Input(InputEvent::CtrlC) => {

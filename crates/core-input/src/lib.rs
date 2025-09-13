@@ -1,4 +1,5 @@
 //! Blocking input collection on a dedicated thread (no polling timeout).
+//! Phase 1 Task 9.6: adapted to send over an asynchronous `tokio::mpsc::UnboundedSender`.
 
 use core_events::{Event, InputEvent, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::event::{
@@ -9,7 +10,9 @@ use tracing::trace;
 
 /// Spawn a blocking input thread. The thread exits automatically when the
 /// receiving side of the channel is dropped (send will return Err).
-pub fn spawn_input_thread(sender: std::sync::mpsc::Sender<Event>) -> thread::JoinHandle<()> {
+pub fn spawn_input_thread(
+    sender: tokio::sync::mpsc::UnboundedSender<Event>,
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let span = tracing::info_span!("input_thread");
         let _e = span.enter();

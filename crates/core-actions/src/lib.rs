@@ -17,20 +17,39 @@ pub enum Action {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MotionKind { Left, Right, Up, Down, LineStart, LineEnd, WordForward, WordBackward }
+pub enum MotionKind {
+    Left,
+    Right,
+    Up,
+    Down,
+    LineStart,
+    LineEnd,
+    WordForward,
+    WordBackward,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EditKind { InsertGrapheme(String), InsertNewline, Backspace, DeleteUnder }
+pub enum EditKind {
+    InsertGrapheme(String),
+    InsertNewline,
+    Backspace,
+    DeleteUnder,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModeChange { EnterInsert, LeaveInsert }
+pub enum ModeChange {
+    EnterInsert,
+    LeaveInsert,
+}
 
 /// Pure translation from a key event + editor mode + current command buffer into an Action.
 /// This does NOT mutate state and is safe to unit test in isolation.
 pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Option<Action> {
     match key.code {
         KeyCode::Char(':') => {
-            if pending_command.is_empty() { return Some(Action::CommandInput(':')); }
+            if pending_command.is_empty() {
+                return Some(Action::CommandInput(':'));
+            }
             None
         }
         KeyCode::Char(c) => {
@@ -54,7 +73,9 @@ pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Optio
                 },
                 Mode::Insert => {
                     // Printable insertion (grapheme boundaries handled upstream by terminal input)
-                    if !c.is_control() { return Some(Action::Edit(EditKind::InsertGrapheme(c.to_string()))); }
+                    if !c.is_control() {
+                        return Some(Action::Edit(EditKind::InsertGrapheme(c.to_string())));
+                    }
                     None
                 }
             }
@@ -65,7 +86,9 @@ pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Optio
                 Some(Action::CommandExecute(pending_command.to_string()))
             } else if matches!(mode, Mode::Insert) {
                 Some(Action::Edit(EditKind::InsertNewline))
-            } else { None }
+            } else {
+                None
+            }
         }
         KeyCode::Backspace => {
             if matches!(mode, Mode::Insert) {
@@ -73,14 +96,18 @@ pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Optio
             } else if pending_command.starts_with(':') && !pending_command.is_empty() {
                 // Backspace inside command-line: treat as removing last char (will be handled by caller) -> signal input with sentinel? For now reuse CommandInput with '\u{08}'
                 Some(Action::CommandInput('\u{08}'))
-            } else { None }
+            } else {
+                None
+            }
         }
         KeyCode::Esc => {
             if pending_command.starts_with(':') {
                 Some(Action::CommandExecute(String::new())) // special meaning: cancel
             } else if matches!(mode, Mode::Insert) {
                 Some(Action::ModeChange(ModeChange::LeaveInsert))
-            } else { None }
+            } else {
+                None
+            }
         }
         KeyCode::Left => Some(Action::Motion(MotionKind::Left)),
         KeyCode::Right => Some(Action::Motion(MotionKind::Right)),
@@ -94,16 +121,26 @@ pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Optio
 mod tests {
     use super::*;
     use core_events::{KeyEvent, KeyModifiers};
-    fn kc(c: char) -> KeyEvent { KeyEvent { code: KeyCode::Char(c), mods: KeyModifiers::empty() } }
+    fn kc(c: char) -> KeyEvent {
+        KeyEvent {
+            code: KeyCode::Char(c),
+            mods: KeyModifiers::empty(),
+        }
+    }
 
     #[test]
     fn normal_mode_motion() {
-        assert!(matches!(translate_key(Mode::Normal, "", &kc('h')), Some(Action::Motion(MotionKind::Left))));
+        assert!(matches!(
+            translate_key(Mode::Normal, "", &kc('h')),
+            Some(Action::Motion(MotionKind::Left))
+        ));
         assert!(translate_key(Mode::Normal, "", &kc('z')).is_none());
     }
 
     #[test]
     fn insert_mode_inserts() {
-        assert!(matches!(translate_key(Mode::Insert, "", &kc('a')), Some(Action::Edit(EditKind::InsertGrapheme(ref s))) if s=="a"));
+        assert!(
+            matches!(translate_key(Mode::Insert, "", &kc('a')), Some(Action::Edit(EditKind::InsertGrapheme(ref s))) if s=="a")
+        );
     }
 }
