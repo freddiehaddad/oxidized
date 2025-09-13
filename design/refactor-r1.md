@@ -56,10 +56,14 @@ Out of Scope (Deferred to later phases):
    * Main loop and dispatcher updated to use `state.command_line` instead of local `pending_command`.
    * Behavior remains identical; tests updated accordingly.
 
-3. Remove Unsafe Motion Wrappers
-   * Delete `apply_motion` / `apply_vertical_motion`.
-   * Call motion functions directly borrowing `&Buffer` then mutably updating `state.position`.
-   * Tests unchanged.
+3. Remove Unsafe Motion Wrappers (COMPLETED)
+   * Removed `apply_motion` / `apply_vertical_motion` which used raw pointer reborrow + `unsafe`.
+   * Replaced with `apply_horizontal_motion` and `apply_vertical_motion_safe` performing:
+     * Copy of `state.position` into a local mutable `pos`.
+     * Invoke motion with a shared `&Buffer` reference (no aliasing of mutable state).
+     * Write back updated `pos` into `state.position`.
+   * Eliminated all `unsafe` in motion path; no semantic changes (verified by existing tests).
+   * Preserves breadth-first behavior while enabling future extraction of motion logic without unsafe blocks.
 
 4. Move `RenderScheduler`
    * New module `core-render::scheduler` with identical API (`mark_dirty`, `consume_dirty`).

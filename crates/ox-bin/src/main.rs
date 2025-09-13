@@ -258,31 +258,27 @@ fn render(state: &EditorState) -> Result<()> {
     Ok(())
 }
 
-// Helper to apply a simple motion function without violating borrow rules.
-// Extracts the position out temporarily to ensure the buffer (&self) borrow ends
-// before we mutably borrow the position.
-fn apply_motion<F>(state: &mut EditorState, f: F)
-where
-    F: Fn(&core_text::Buffer, &mut core_text::Position),
-{
-    use std::mem;
-    let buf_ptr: *const core_text::Buffer = state.active_buffer(); // immutable borrow ends after this line
-    // Move position out, operate, then move back.
-    let mut pos = mem::replace(&mut state.position, core_text::Position::origin());
-    unsafe {
-        f(&*buf_ptr, &mut pos);
-    }
+// Safe motion application (Refactor R1 Step 3):
+// We temporarily clone the position, invoke motion with shared buffer ref, then write back.
+// This avoids the previous raw pointer + unsafe reborrow pattern.
+fn apply_horizontal_motion(
+    state: &mut EditorState,
+    f: fn(&core_text::Buffer, &mut core_text::Position),
+) {
+    let buf = state.active_buffer();
+    let mut pos = state.position;
+    f(buf, &mut pos);
     state.position = pos;
 }
 
-fn apply_vertical_motion<F>(state: &mut EditorState, sticky: Option<usize>, f: F) -> Option<usize>
-where
-    F: Fn(&core_text::Buffer, &mut core_text::Position, Option<usize>) -> Option<usize>,
-{
-    use std::mem;
-    let buf_ptr: *const core_text::Buffer = state.active_buffer();
-    let mut pos = mem::replace(&mut state.position, core_text::Position::origin());
-    let new_sticky = unsafe { f(&*buf_ptr, &mut pos, sticky) };
+fn apply_vertical_motion_safe(
+    state: &mut EditorState,
+    sticky: Option<usize>,
+    f: fn(&core_text::Buffer, &mut core_text::Position, Option<usize>) -> Option<usize>,
+) -> Option<usize> {
+    let buf = state.active_buffer();
+    let mut pos = state.position;
+    let new_sticky = f(buf, &mut pos, sticky);
     state.position = pos;
     new_sticky
 }
@@ -304,35 +300,35 @@ fn dispatch(
             let before_byte = state.position.byte;
             match kind {
                 MotionKind::Left => {
-                    apply_motion(state, motion::left);
+                    apply_horizontal_motion(state, motion::left);
                     *sticky_visual_col = None;
                 }
                 MotionKind::Right => {
-                    apply_motion(state, motion::right);
+                    apply_horizontal_motion(state, motion::right);
                     *sticky_visual_col = None;
                 }
                 MotionKind::LineStart => {
-                    apply_motion(state, motion::line_start);
+                    apply_horizontal_motion(state, motion::line_start);
                     *sticky_visual_col = None;
                 }
                 MotionKind::LineEnd => {
-                    apply_motion(state, motion::line_end);
+                    apply_horizontal_motion(state, motion::line_end);
                     *sticky_visual_col = None;
                 }
                 MotionKind::Up => {
                     *sticky_visual_col =
-                        apply_vertical_motion(state, *sticky_visual_col, motion::up);
+                        apply_vertical_motion_safe(state, *sticky_visual_col, motion::up);
                 }
                 MotionKind::Down => {
                     *sticky_visual_col =
-                        apply_vertical_motion(state, *sticky_visual_col, motion::down);
+                        apply_vertical_motion_safe(state, *sticky_visual_col, motion::down);
                 }
                 MotionKind::WordForward => {
-                    apply_motion(state, motion::word_forward);
+                    apply_horizontal_motion(state, motion::word_forward);
                     *sticky_visual_col = None;
                 }
                 MotionKind::WordBackward => {
-                    apply_motion(state, motion::word_backward);
+                    apply_horizontal_motion(state, motion::word_backward);
                     *sticky_visual_col = None;
                 }
             }
