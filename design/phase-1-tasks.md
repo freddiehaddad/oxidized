@@ -126,7 +126,7 @@ Checklist:
 
 - [x] 9.1 Normal mode motion key mapping (h j k l 0 $ w b, arrows) wired.
 - [x] 9.2 Render occurs after each handled input (motions currently).
-- [ ] 9.3 Extract broader helpers (motion/edit/command). (Partial: inline `apply_motion` / `apply_vertical_motion` added; full separation pending edits & command handling.)
+- [ ] 9.3 Extract broader helpers (motion/edit/command). (Rescoped: motion helpers complete; edit + command helpers intentionally deferred to land alongside Insert & Undo work in Tasks 4–6/7 to avoid premature abstraction churn.)
 - [x] 9.4 Action enum introduced (`core-actions` crate) & compiled.
 - [x] 9.5 Translation function skeleton (`translate_key`) added (no wiring yet).
 - [x] 9.6 Async tokio channel + loop.
