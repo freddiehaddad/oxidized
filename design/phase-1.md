@@ -110,6 +110,12 @@ Action Abstraction (Added mid‑Phase 1):
 15. Update design docs & README to reflect new capabilities and hybrid ordering (4a -> 5a -> 4b -> 5b).
 16. Run build, clippy, fmt, tests; ensure clean exit still works.
 
+### Refactor Checkpoint R1 (Inserted Mid-Phase)
+
+Before proceeding to Task 7 (status / command line enhancements), we introduce **Refactor Checkpoint R1** (`design/refactor-r1.md`). This checkpoint extracts overgrown responsibilities from `main.rs`, replaces the boolean Insert run flag with an enum, adds a command line state struct, and moves scheduling/dispatcher/status formatting into dedicated modules. No user-visible features change; this is a structural hardening pass to preserve breadth-first momentum and prevent technical debt from compounding ahead of splits, diff rendering, and LSP integration.
+
+Refer to the separate plan for the ordered commit breakdown. Task 7 will resume on top of the cleaner substrate once R1 exits.
+
 ## 7. Exit Criteria
 
 * Build + clippy + fmt check all pass (`cargo build`, `cargo clippy -- -D warnings`, `cargo fmt --all -- --check`).

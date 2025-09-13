@@ -166,7 +166,7 @@ Checklist:
 
 - [x] 9.1 Normal mode motion key mapping (h j k l 0 $ w b, arrows) wired.
 - [x] 9.2 Render occurs after each handled input (motions currently).
-- [ ] 9.3 Extract broader helpers (motion/edit/command). (Rescoped: motion helpers complete; edit + command helpers intentionally deferred to land alongside Insert & Undo work in Tasks 4–6/7 to avoid premature abstraction churn.)
+- [ ] 9.3 (Moved to Refactor Checkpoint R1) Extraction of broader helpers (edit/command) along with dispatcher & scheduler relocation. See `design/refactor-r1.md`.
 - [x] 9.4 Action enum introduced (`core-actions` crate) & compiled.
 - [x] 9.5 Translation function skeleton (`translate_key`) added (no wiring yet).
 - [x] 9.6 Async tokio channel + loop.
@@ -225,5 +225,7 @@ Multi-producer architecture will permit additional asynchronous sources of `Acti
 ---
 
 ## Notes
+
+Refactor Checkpoint R1 introduced (see `design/refactor-r1.md`) to keep Phase 1 incremental while preventing `main.rs` bloat and preparing for Task 7. Items moved: helper extraction (9.3), dispatcher relocation, status formatter, command line state struct, Insert run enum, viewport stub, observer hook, and scheduling module extraction.
 
 Keep changes linear: each numbered section should leave code runnable. Avoid starting undo stack before mutation APIs exist, etc.
