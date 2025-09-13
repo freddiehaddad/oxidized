@@ -67,4 +67,5 @@ impl Renderer {
     }
 }
 
+pub mod scheduler;
 pub mod status;

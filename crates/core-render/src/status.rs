@@ -8,8 +8,8 @@ use core_state::Mode;
 /// Simple DTO describing what we need to render a status line.
 pub struct StatusContext<'a> {
     pub mode: Mode,
-    pub line: usize,   // 0-based current line index
-    pub col: usize,    // 0-based visual column
+    pub line: usize, // 0-based current line index
+    pub col: usize,  // 0-based visual column
     pub command_active: bool,
     pub command_buffer: &'a str,
 }

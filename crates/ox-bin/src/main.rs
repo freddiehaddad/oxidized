@@ -3,6 +3,7 @@
 use anyhow::Result;
 use core_actions::{Action, EditKind, ModeChange, MotionKind};
 use core_events::{CommandEvent, Event, InputEvent, KeyCode, KeyEvent};
+use core_render::scheduler::RenderScheduler;
 use core_render::status::{StatusContext, build_status};
 use core_render::{Frame, Renderer};
 use core_state::EditorState;
@@ -13,29 +14,7 @@ use core_text::{grapheme, motion};
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
-// --- Render Scheduler Stub (Task 9.8) ---
-// Breadth-first placeholder: encapsulates 'dirty' tracking and full-frame redraw policy.
-// Future phases will extend this with coalescing, debounce timers, and diff-based damage sets.
-struct RenderScheduler {
-    dirty: bool,
-}
-
-impl RenderScheduler {
-    fn new() -> Self {
-        Self { dirty: false }
-    }
-    fn mark_dirty(&mut self) {
-        self.dirty = true;
-    }
-    fn consume_dirty(&mut self) -> bool {
-        if self.dirty {
-            self.dirty = false;
-            true
-        } else {
-            false
-        }
-    }
-}
+// RenderScheduler moved to core-render::scheduler (Refactor R1 Step 4)
 
 #[tokio::main]
 async fn main() -> Result<()> {

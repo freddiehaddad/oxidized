@@ -65,9 +65,11 @@ Out of Scope (Deferred to later phases):
    * Eliminated all `unsafe` in motion path; no semantic changes (verified by existing tests).
    * Preserves breadth-first behavior while enabling future extraction of motion logic without unsafe blocks.
 
-4. Move `RenderScheduler`
-   * New module `core-render::scheduler` with identical API (`mark_dirty`, `consume_dirty`).
-   * Replace struct in `main.rs` with imported type.
+4. Move `RenderScheduler` (COMPLETED)
+   * Added `core-render::scheduler` module exposing `RenderScheduler` with the same API (`new`, `mark_dirty`, `consume_dirty`).
+   * Removed local struct from `ox-bin/src/main.rs`; now imports the module.
+   * Added unit tests validating dirty consumption semantics.
+   * Documentation in the module outlines future evolution (debounce, damage tracking) preserving call sites.
 
 5. Extract Dispatcher Module
    * Create `core-actions::dispatcher` (or `core-dispatch` crate if size grows) exporting `dispatch(Action, &mut EditorCtx) -> DispatchResult`.
