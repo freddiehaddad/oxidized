@@ -78,15 +78,16 @@ Out of Scope (Deferred to later phases):
    * Left motion helper duplication (horizontal/vertical) local to module for now; future step may centralize.
    * Main loop now imports and calls `dispatch`, reducing `main.rs` size and isolating mutation logic for future observer insertion.
 
-6. Insert Run Enum (PENDING)
-   * Replace `insert_run_active: bool` in `EditorState` with:
+6. Insert Run Enum (COMPLETED)
+    * Replaced `insert_run_active: bool` with:
 
-     ```rust
-     pub enum InsertRun { Inactive, Active { started_at: std::time::Instant, edits: u32 } }
-     ```
+       ```rust
+       pub enum InsertRun { Inactive, Active { started_at: std::time::Instant, edits: u32 } }
+       ```
 
-   * Update begin/end helpers; existing semantics preserved.
-   * Add rustdoc & simple tests.
+    * Updated `begin_insert_coalescing`, `end_insert_coalescing`, added `note_insert_edit` for diagnostics.
+    * Dispatcher now calls `note_insert_edit()` on insert, newline, backspace.
+    * Existing undo/coalescing semantics unchanged (boundaries: Esc, newline). Additional tests assert edit count increments and run reset across boundaries.
 
 7. Add Motion & Translation Spans (PENDING)
    * `translate_key` -> span `translate_key` at trace level.

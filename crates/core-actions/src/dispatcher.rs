@@ -122,6 +122,7 @@ pub fn dispatch(
                     let span = tracing::trace_span!("edit_insert", grapheme = %g);
                     let _e = span.enter();
                     state.begin_insert_coalescing();
+                    state.note_insert_edit();
                     let mut pos = state.position;
                     state.active_buffer_mut().insert_grapheme(&mut pos, &g);
                     state.position = pos;
@@ -135,6 +136,7 @@ pub fn dispatch(
                     let span = tracing::trace_span!("edit_newline");
                     let _e = span.enter();
                     state.begin_insert_coalescing();
+                    state.note_insert_edit();
                     let mut pos = state.position;
                     state.active_buffer_mut().insert_newline(&mut pos);
                     state.position = pos;
@@ -149,6 +151,7 @@ pub fn dispatch(
                     let span = tracing::trace_span!("edit_backspace");
                     let _e = span.enter();
                     state.begin_insert_coalescing(); // ensure pre-edit snapshot captured once per run
+                    state.note_insert_edit();
                     let mut pos = state.position;
                     state.active_buffer_mut().delete_grapheme_before(&mut pos);
                     state.position = pos;

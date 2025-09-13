@@ -64,10 +64,23 @@ pub struct EditorState {
     pub undo_stack: Vec<EditSnapshot>,
     /// Redo history (most recently undone states). Cleared on new edit.
     pub redo_stack: Vec<EditSnapshot>,
-    /// Indicates we are in the middle of an Insert coalescing run (snapshot already taken).
-    pub insert_run_active: bool,
+    /// Insert coalescing run state (Refactor R1 Step 6): tracks active run start & edit count.
+    pub insert_run: InsertRun,
     /// Command-line (":" style) transient input buffer state (Refactor R1 Step 2).
     pub command_line: CommandLineState,
+}
+
+/// Insert run state tracking (Refactor R1 Step 6).
+///
+/// In Phase 1 this is informational beyond boundary detection and counting edits. Future
+/// heuristics (time-based split, telemetry) can leverage `started_at` and `edits`.
+#[derive(Debug, Clone)]
+pub enum InsertRun {
+    Inactive,
+    Active {
+        started_at: std::time::Instant,
+        edits: u32,
+    },
 }
 
 /// Minimal command-line state container (Refactor R1 Step 2).
@@ -123,7 +136,7 @@ impl EditorState {
             position: Position::origin(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
-            insert_run_active: false,
+            insert_run: InsertRun::Inactive,
             command_line: CommandLineState::default(),
         }
     }
@@ -178,9 +191,15 @@ impl EditorState {
     /// an Insert mutation (insert grapheme, backspace, newline) so the pre-edit state is captured
     /// exactly once.
     pub fn begin_insert_coalescing(&mut self) {
-        if !self.insert_run_active {
-            self.push_snapshot(SnapshotKind::Edit);
-            self.insert_run_active = true;
+        match self.insert_run {
+            InsertRun::Inactive => {
+                self.push_snapshot(SnapshotKind::Edit);
+                self.insert_run = InsertRun::Active {
+                    started_at: std::time::Instant::now(),
+                    edits: 0,
+                };
+            }
+            InsertRun::Active { .. } => { /* already active */ }
         }
     }
 
@@ -192,7 +211,7 @@ impl EditorState {
     /// The next Insert mutation will start a new run and thus push a new snapshot via
     /// `begin_insert_coalescing`.
     pub fn end_insert_coalescing(&mut self) {
-        self.insert_run_active = false;
+        self.insert_run = InsertRun::Inactive;
     }
 
     /// Push a discrete edit snapshot (used for Normal mode edits like `x` or
@@ -203,6 +222,12 @@ impl EditorState {
         self.push_snapshot(SnapshotKind::Edit);
     }
 
+    /// Increment the edit counter for an active insert run (used for diagnostics / future heuristics).
+    pub fn note_insert_edit(&mut self) {
+        if let InsertRun::Active { edits, .. } = &mut self.insert_run {
+            *edits += 1;
+        }
+    }
     /// Restore previously captured snapshot (caller ensures existence). Returns true if restored.
     pub fn undo(&mut self) -> bool {
         if let Some(last) = self.undo_stack.pop() {
@@ -320,6 +345,7 @@ mod tests {
         st.begin_insert_coalescing(); // should push snapshot
         let len_after_first = st.undo_stack.len();
         assert_eq!(len_after_first, 1);
+        assert!(matches!(st.insert_run, InsertRun::Active { .. }));
 
         // Simulate multiple inserts inside same run (no further snapshots expected)
         for ch in ["a", "b", "c"] {
@@ -329,6 +355,7 @@ mod tests {
             st.buffers[st.active] = modified;
             st.position = pos;
             st.begin_insert_coalescing(); // no-op after first
+            st.note_insert_edit();
         }
         assert_eq!(
             st.undo_stack.len(),
@@ -339,11 +366,15 @@ mod tests {
         // End run and start new one -> pushes again
         st.end_insert_coalescing();
         st.begin_insert_coalescing();
+        st.note_insert_edit();
         assert_eq!(
             st.undo_stack.len(),
             2,
             "second run did not create new snapshot"
         );
+        if let InsertRun::Active { edits, .. } = st.insert_run {
+            assert_eq!(edits, 1);
+        }
     }
 
     #[test]
@@ -413,6 +444,10 @@ mod tests {
             st.buffers[st.active] = modified;
             st.position = pos;
             st.begin_insert_coalescing(); // no-op while active
+            st.note_insert_edit();
+        }
+        if let InsertRun::Active { edits, .. } = st.insert_run {
+            assert_eq!(edits, 2);
         }
         // End run via Esc boundary semantics
         st.end_insert_coalescing();
@@ -515,6 +550,7 @@ mod tests {
             st.buffers[st.active] = modified;
             st.position = pos;
             st.begin_insert_coalescing();
+            st.note_insert_edit();
         }
         // Backspace one character (should not end run or create new snapshot)
         {
@@ -524,16 +560,49 @@ mod tests {
             st.buffers[st.active] = modified;
             st.position = pos;
             st.begin_insert_coalescing(); // still active
+            st.note_insert_edit();
         }
         assert_eq!(
             st.undo_stack.len(),
             1,
             "backspace created unexpected snapshot"
         );
+        if let InsertRun::Active { edits, .. } = st.insert_run {
+            assert_eq!(edits, 3);
+        }
         // End run and undo should revert to empty buffer
         st.end_insert_coalescing();
         st.mode = Mode::Normal;
         assert!(st.undo());
         assert_eq!(st.active_buffer().line(0).unwrap_or_default(), "");
+    }
+
+    #[test]
+    fn insert_run_newline_resets_counter() {
+        let buf = Buffer::from_str("t", "").unwrap();
+        let mut st = EditorState::new(buf);
+        st.mode = Mode::Insert;
+        st.begin_insert_coalescing();
+        {
+            let mut modified = st.active_buffer().clone();
+            let mut pos = st.position;
+            modified.insert_grapheme(&mut pos, "a");
+            st.buffers[st.active] = modified;
+            st.position = pos;
+        }
+        st.note_insert_edit();
+        st.end_insert_coalescing();
+        st.begin_insert_coalescing();
+        {
+            let mut modified = st.active_buffer().clone();
+            let mut pos = st.position;
+            modified.insert_grapheme(&mut pos, "b");
+            st.buffers[st.active] = modified;
+            st.position = pos;
+        }
+        st.note_insert_edit();
+        if let InsertRun::Active { edits, .. } = st.insert_run {
+            assert_eq!(edits, 1);
+        }
     }
 }
