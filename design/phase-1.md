@@ -89,7 +89,7 @@ If desired for cleanliness: introduce `ActionEvent` enum later—explicitly defe
 5. Enhance input handling in main loop:
    * Normal mode key mapping: motions (h/j/k/l/0/$/w/b), `i` -> enter Insert, `x` -> delete char under cursor, `u` -> undo, `Ctrl-R` -> redo, `:` -> command-line start.
    * Insert mode: printable -> insert char; Enter -> newline; Backspace -> delete previous char (col>0 or join lines); Esc -> leave Insert, finalize snapshot.
-6. Implement word motion helpers (naive: alphanumeric+underscore cluster sequences vs others) using grapheme iteration.
+6. Implement word motion helpers (naive: alphanumeric+underscore cluster sequences vs others) using grapheme iteration. (Completed alongside basic motions in Step 3 to keep motion module cohesive.)
 7. Integrate undo stack logic: on first edit after leaving Insert or performing Normal mode edit, capture pre-edit snapshot; coalesce sequential InsertChar edits until mode switches or a pause threshold (simple: flush on Esc or newline only, defer time-based merging to later phase).
 8. Add command-line echo: maintain `pending_command` state; render at status line; execute on Enter (still only `:q` recognized this phase).
 9. Update tests: buffer mutation (insert/delete/newline), cursor motion clamping, undo/redo restoring previous text, status line string composition.

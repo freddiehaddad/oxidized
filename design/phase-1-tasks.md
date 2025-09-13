@@ -47,13 +47,17 @@ Tests: middle-of-line insert, newline split, delete at end, join lines.
 
 ---
 
-## 3. Cursor Motions
+## 3. Cursor Motions  
 
-3.1 Basic motions h/l (prev/next boundary).
-3.2 j/k (line +/- with column preservation via target visual column).
-3.3 0 / $ (line start / line end at last cluster boundary).
-3.4 Word motions w/b (naive classification on first char of cluster).
-Tests: boundary conditions; word motion skipping punctuation.
+**Status:** [x] complete (2025-09-13)
+
+- [x] 3.1 Basic motions h/l (prev/next boundary)
+- [x] 3.2 j/k (line +/- with sticky visual column)
+- [x] 3.3 0 / $ (line start / line end at last cluster boundary)
+- [x] 3.4 Word motions w/b (naive first-char classification)
+- [x] Tests: horizontal boundaries, vertical sticky column, word motion punctuation & cross-line
+
+Notes: Word motions implemented with a simplified single-step algorithm (naive ASCII/underscore classification). Future improvement (UAX #29) deferred per design.
 
 ---
 
