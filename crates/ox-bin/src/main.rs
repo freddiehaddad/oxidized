@@ -1,7 +1,8 @@
 //! Oxidized entrypoint – Phase 0 skeleton.
 
 use anyhow::Result;
-use core_events::{CommandEvent, Event, InputEvent, KeyCode};
+use core_actions::{Action, ModeChange, MotionKind};
+use core_events::{CommandEvent, Event, InputEvent, KeyCode, KeyEvent};
 use core_render::{Frame, Renderer};
 use core_state::EditorState;
 use core_state::Mode;
@@ -56,9 +57,15 @@ async fn main() -> Result<()> {
     // Sticky visual column for vertical motions (None until first j/k).
     let mut sticky_visual_col: Option<usize> = None;
 
+    // Initial render so the user sees content before pressing a key.
+    if let Err(e) = render(&state) {
+        error!(?e, "initial render error");
+    }
+
     let render_span = tracing::info_span!("event_loop");
     let _enter_loop = render_span.enter();
     while let Ok(event) = rx.recv() {
+        let mut dirty = false; // track whether we need to render
         match event {
             Event::Input(InputEvent::CtrlC) => {
                 info!("shutdown");
@@ -70,79 +77,55 @@ async fn main() -> Result<()> {
                     pending_command.push(':');
                 }
                 KeyCode::Char(c) => {
-                    if pending_command.starts_with(':') {
-                        pending_command.push(c);
-                    } else if matches!(state.mode, Mode::Normal) {
-                        match c {
-                            'h' => {
-                                apply_motion(&mut state, motion::left);
-                                sticky_visual_col = None;
-                            }
-                            'l' => {
-                                apply_motion(&mut state, motion::right);
-                                sticky_visual_col = None;
-                            }
-                            '0' => {
-                                apply_motion(&mut state, motion::line_start);
-                                sticky_visual_col = None;
-                            }
-                            '$' => {
-                                apply_motion(&mut state, motion::line_end);
-                                sticky_visual_col = None;
-                            }
-                            'j' => {
-                                sticky_visual_col = apply_vertical_motion(
-                                    &mut state,
-                                    sticky_visual_col,
-                                    motion::down,
-                                );
-                            }
-                            'k' => {
-                                sticky_visual_col = apply_vertical_motion(
-                                    &mut state,
-                                    sticky_visual_col,
-                                    motion::up,
-                                );
-                            }
-                            'w' => {
-                                apply_motion(&mut state, motion::word_forward);
-                                sticky_visual_col = None;
-                            }
-                            'b' => {
-                                apply_motion(&mut state, motion::word_backward);
-                                sticky_visual_col = None;
-                            }
-                            _ => {}
+                    // Use translator for motions/commands (Insert edits not yet wired)
+                    if let Some(act) = translate_key_wrapper(
+                        state.mode,
+                        &pending_command,
+                        &KeyEvent {
+                            code: KeyCode::Char(c),
+                            mods: k.mods,
+                        },
+                    ) {
+                        let dr = dispatch(
+                            act,
+                            &mut state,
+                            &mut pending_command,
+                            &mut sticky_visual_col,
+                        );
+                        if dr.dirty {
+                            dirty = true;
+                        }
+                        if dr.quit {
+                            break;
                         }
                     }
                 }
-                KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => match k.code {
-                    KeyCode::Left => {
-                        apply_motion(&mut state, motion::left);
-                        sticky_visual_col = None;
+                KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+                    if let Some(act) = translate_key_wrapper(state.mode, &pending_command, &k) {
+                        let dr = dispatch(
+                            act,
+                            &mut state,
+                            &mut pending_command,
+                            &mut sticky_visual_col,
+                        );
+                        if dr.dirty {
+                            dirty = true;
+                        }
+                        if dr.quit {
+                            break;
+                        }
                     }
-                    KeyCode::Right => {
-                        apply_motion(&mut state, motion::right);
-                        sticky_visual_col = None;
-                    }
-                    KeyCode::Up => {
-                        sticky_visual_col =
-                            apply_vertical_motion(&mut state, sticky_visual_col, motion::up);
-                    }
-                    KeyCode::Down => {
-                        sticky_visual_col =
-                            apply_vertical_motion(&mut state, sticky_visual_col, motion::down);
-                    }
-                    _ => {}
-                },
+                }
                 KeyCode::Enter => {
                     if pending_command == ":q" {
                         break;
                     }
                     pending_command.clear();
+                    dirty = true;
                 }
                 KeyCode::Esc => {
                     pending_command.clear();
+                    dirty = true;
                 }
                 _ => {}
             },
@@ -155,9 +138,8 @@ async fn main() -> Result<()> {
                 break;
             }
         }
-
-        // After handling any event, render.
-        if let Err(e) = render(&state) {
+        // Render only if dirty (motions/edit/command changes). Avoid useless redraw on no-op motions.
+        if dirty && let Err(e) = render(&state) {
             error!(?e, "render error");
         }
     }
@@ -235,4 +217,130 @@ where
     let new_sticky = unsafe { f(&*buf_ptr, &mut pos, sticky) };
     state.position = pos;
     new_sticky
+}
+
+// --- Dispatcher Skeleton (Task 9.7) ---
+struct DispatchResult {
+    dirty: bool,
+    quit: bool,
+}
+
+fn dispatch(
+    action: Action,
+    state: &mut EditorState,
+    pending_command: &mut String,
+    sticky_visual_col: &mut Option<usize>,
+) -> DispatchResult {
+    match action {
+        Action::Motion(kind) => {
+            let before_line = state.position.line;
+            let before_byte = state.position.byte;
+            match kind {
+                MotionKind::Left => {
+                    apply_motion(state, motion::left);
+                    *sticky_visual_col = None;
+                }
+                MotionKind::Right => {
+                    apply_motion(state, motion::right);
+                    *sticky_visual_col = None;
+                }
+                MotionKind::LineStart => {
+                    apply_motion(state, motion::line_start);
+                    *sticky_visual_col = None;
+                }
+                MotionKind::LineEnd => {
+                    apply_motion(state, motion::line_end);
+                    *sticky_visual_col = None;
+                }
+                MotionKind::Up => {
+                    *sticky_visual_col =
+                        apply_vertical_motion(state, *sticky_visual_col, motion::up);
+                }
+                MotionKind::Down => {
+                    *sticky_visual_col =
+                        apply_vertical_motion(state, *sticky_visual_col, motion::down);
+                }
+                MotionKind::WordForward => {
+                    apply_motion(state, motion::word_forward);
+                    *sticky_visual_col = None;
+                }
+                MotionKind::WordBackward => {
+                    apply_motion(state, motion::word_backward);
+                    *sticky_visual_col = None;
+                }
+            }
+            let moved = before_line != state.position.line || before_byte != state.position.byte;
+            DispatchResult {
+                dirty: moved,
+                quit: false,
+            }
+        }
+        Action::ModeChange(mc) => {
+            match mc {
+                ModeChange::EnterInsert => {
+                    state.mode = Mode::Insert;
+                }
+                ModeChange::LeaveInsert => {
+                    state.mode = Mode::Normal;
+                }
+            }
+            DispatchResult {
+                dirty: true,
+                quit: false,
+            }
+        }
+        Action::CommandInput(ch) => {
+            if ch == '\u{08}' {
+                // backspace sentinel inside command input
+                if pending_command.len() > 1 {
+                    pending_command.pop();
+                }
+            } else {
+                if pending_command.is_empty() {
+                    pending_command.push(':');
+                }
+                pending_command.push(ch);
+            }
+            DispatchResult {
+                dirty: true,
+                quit: false,
+            }
+        }
+        Action::CommandExecute(cmd) => {
+            if cmd == ":q" {
+                return DispatchResult {
+                    dirty: true,
+                    quit: true,
+                };
+            }
+            // Empty string or unrecognized: clear for now.
+            pending_command.clear();
+            DispatchResult {
+                dirty: true,
+                quit: false,
+            }
+        }
+        Action::Edit(_) => {
+            // Not yet implemented in Phase 1 sequence (Insert mode wiring pending)
+            DispatchResult {
+                dirty: false,
+                quit: false,
+            }
+        }
+        Action::Undo | Action::Redo => {
+            // Placeholder until undo stack implemented
+            DispatchResult {
+                dirty: false,
+                quit: false,
+            }
+        }
+        Action::Quit => DispatchResult {
+            dirty: false,
+            quit: true,
+        },
+    }
+}
+
+fn translate_key_wrapper(mode: Mode, pending_command: &str, key: &KeyEvent) -> Option<Action> {
+    core_actions::translate_key(mode, pending_command, key)
 }

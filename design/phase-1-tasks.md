@@ -130,15 +130,11 @@ Checklist:
 - [x] 9.4 Action enum introduced (`core-actions` crate) & compiled.
 - [x] 9.5 Translation function skeleton (`translate_key`) added (no wiring yet).
 - [ ] 9.6 Async tokio channel + loop.
-- [ ] 9.7 Dispatcher & dirty flag.
+- [x] 9.7 Dispatcher & dirty flag (implemented ahead of 9.6 for lower-churn refactor).
 - [ ] 9.8 Render scheduler stub.
 - [ ] 9.9 Deferred multi-producer & diff hook documented.
-- [ ] 9.4 Action enum introduced & compiled.
-- [ ] 9.5 Translation function returning `Action`.
-- [ ] 9.6 Async tokio channel + loop.
-- [ ] 9.7 Dispatcher & dirty flag.
-- [ ] 9.8 Render scheduler stub.
-- [ ] 9.9 Deferred multi-producer & diff hook documented.
+
+Notes: Dispatcher landed before async channel migration (9.6) to reduce simultaneous complexity. Initial render bug fixed by performing a first-frame render at startup before event loop (ensures visible buffer without input). Render scheduler stub (9.8) still pending—current dirty flag logic exists inline; it will move into a dedicated struct during 9.8.
 
 Notes: Replaced temporary unsafe raw pointer borrowing with safe helper functions (`apply_motion`, `apply_vertical_motion`) before proceeding to Undo/Redo to avoid accruing technical debt. Introduced new `core-actions` crate for semantic intent separation (motions/edits/mode changes) per modularity goal.
 

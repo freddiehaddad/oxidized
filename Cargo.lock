@@ -441,6 +441,7 @@ name = "oxidized"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "core-actions",
  "core-config",
  "core-events",
  "core-input",

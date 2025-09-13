@@ -65,6 +65,7 @@ Action Abstraction (Added mid‑Phase 1):
 * Dispatcher applies action -> state delta, returns dirty flag.
 * Render scheduler stub decides when to flush (currently immediate full redraw; future diff integration hooks here).
 * Breadth‑first principle preserved: behavior identical after each incremental commit.
+* Ordering note: Dispatcher (Action -> state) implemented before async channel migration to minimize simultaneous behavioral + concurrency changes.
 
 ## 5. Data Model Changes
 

@@ -19,3 +19,4 @@ core-text = { path = "../core-text" }
 core-state = { path = "../core-state" }
 core-input = { path = "../core-input" }
 core-config = { path = "../core-config" }
+core-actions = { path = "../core-actions" }
