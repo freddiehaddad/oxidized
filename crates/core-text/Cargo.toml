@@ -7,4 +7,6 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-ropey = "1.6"
+unicode-segmentation.workspace = true
+unicode-width.workspace = true
+ropey = "1.6.1"

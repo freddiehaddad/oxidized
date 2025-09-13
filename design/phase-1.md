@@ -1,0 +1,157 @@
+# Phase 1: Basic Editing & Cursor Foundations
+
+## 1. Objective
+
+Introduce fundamental text editing capabilities and cursor/motion primitives while preserving the event-driven architecture. This phase delivers Normal + Insert modes with basic motions, insertion, deletion, a minimal undo/redo stack, and a visible command/status line (command echo). Rendering remains full-frame (no diff optimization yet) but now reflects cursor position and updates after text mutations.
+
+## 2. Scope
+
+In Scope:
+
+* Add `Mode::Insert` and mode switching via `i`, `Esc`.
+* Cursor tracking with grapheme-cluster awareness (line, byte offset at grapheme boundary) and visual column computation via cluster width.
+* Basic Normal mode motions: `h`, `j`, `k`, `l`, `0`, `$`, `w`, `b` (word motions naive; ASCII or first-char classification). Motions traverse grapheme clusters, not raw codepoints.
+* Insertion in Insert mode: printable characters (entire grapheme cluster as typed), newline (Enter), backspace deletion of previous full grapheme (including emoji / combining sequences).
+* Simple deletion in Normal mode: `x` (delete char under cursor).
+* Minimal undo/redo stack (linear) using snapshot or diff-based approach (choose simplest working: rope snapshots with coalescing for bursts of insert in Insert mode).
+* Command/status line with live echo of `:` commands while typing (support `:q` still) and show current mode & cursor coordinates.
+* Event additions needed to represent cursor updates & undo/redo triggers.
+* Tests: buffer edit operations, cursor boundary conditions, undo/redo, motion correctness (selected subset), command echo display logic.
+
+Out of Scope (Deferred):
+
+* Visual mode, Operator-pending commands beyond `x`.
+* Multi-window/split management.
+* Persistent macros, registers, yanking/pasting.
+* Multi-cursor or selection.
+* Full Unicode word boundary correctness (UAX #29 nuanced cases, extended pictographic sequences) beyond naive cluster grouping.
+* Syntax highlighting, Tree-sitter, folding.
+* Performance diff rendering (still full redraw).
+* Search (`/`), replace, join, indentation logic.
+* Multi-buffer editing (still single active buffer, though mutations allowed).
+* Auto-repeat key handling for held keys (still filtered to Press events).
+
+## 3. Architectural Touchpoints
+
+Existing crates extended rather than adding new ones:
+
+* `core-events`: Add motion & edit events; possibly CursorMoved event; Introduce Undo/Redo events.
+* `core-state`: Add `Cursor` struct, integrate into `EditorState`; track mode; maintain undo stack.
+* `core-text`: Add mutable editing operations (insert_char, insert_newline, delete_at). Possibly small wrapper around ropey mutation APIs.
+* `core-render`: Render cursor position (highlight cell or rely on terminal cursor MoveTo). Add status/command line composition.
+* `core-input`: Map new keys to either motion intents or insertion (depending on mode). Introduce a minimal state machine for command-line entry vs normal vs insert.
+* `core-terminal`: Provide API for setting terminal cursor position (if not already) for direct cursor placement.
+* `ox-bin`: Expand event loop to handle new event variants, route motions/edit operations, update status line, manage undo stack triggers.
+
+No new crate is strictly required; future phases (syntax, LSP, plugins) will introduce new crates.
+
+## 4. Event Additions
+
+Extend `Event` / `InputEvent` mapping indirectly via translation layer in `core-input` producing domain events (either keep `Event::Input` + interpret in loop, or introduce a `Motion`/`Edit` internal event). For simplicity in Phase 1, maintain current structure and interpret `InputEvent::Key` in main loop to derive actions.
+
+Add (logical) action set (not necessarily new enum variants yet, but documented for clarity):
+
+* Motions: Left, Right, Up, Down, LineStart, LineEnd, WordForward, WordBackward.
+* Edits: InsertChar(char), InsertNewline, Backspace, DeleteCharUnder.
+* Mode changes: EnterInsert, LeaveInsert.
+* Undo, Redo (map to `u` and `Ctrl-R`).
+* CursorMoved (implicit after motion/edit) used internally to trigger render.
+
+If desired for cleanliness: introduce `ActionEvent` enum later—explicitly deferred; Phase 1 may keep imperative interpretation for speed of delivery.
+
+## 5. Data Model Changes
+
+`core-state` additions:
+
+* `Cursor { line: usize, byte: usize }` — line index and byte offset (always at a grapheme boundary). Visual column derived dynamically via grapheme iteration.
+* `EditorState` fields:
+  * `cursor: Cursor`
+  * `mode: Mode` now includes `Insert`.
+  * `undo_stack: Vec<EditSnapshot>`; `redo_stack: Vec<EditSnapshot>`.
+* `EditSnapshot` (struct) capturing minimal info to restore prior text:
+  * Approach: store entire buffer rope clone for simplicity (Phase 1) with coalescing rule: while in Insert mode, consecutive InsertChar within a short time window (< N ms) merge into one snapshot; leaving Insert mode always forces a snapshot boundary. (Performance acceptable for small early files; will optimize later.)
+
+`core-text` additions:
+
+* `insert_grapheme(line, byte, &str)` returning new byte offset & visual info.
+* `insert_newline(line, byte)` split line at grapheme boundary.
+* `delete_grapheme_before(line, byte)` (backspace) & `delete_grapheme_at(line, byte)` (Normal `x`).
+* Helpers: previous_boundary, next_boundary, visual_col(line, byte), clamp.
+
+## 6. Steps
+
+0. (DONE) Unicode Foundations: Added `unicode-segmentation` & `unicode-width`, grapheme helper module (`core-text::grapheme`) providing boundaries, visual column, width, and basic word classification. All cursor logic and future mutations will rely on byte offsets restricted to grapheme boundaries.
+
+1. Add `Mode::Insert` variant and grapheme-aware `Cursor` struct to `core-state` with constructor & clamp helpers.
+2. Implement grapheme mutation APIs in `core-text` (leveraging ropey insert & remove). Provide safe wrappers that adjust positions.
+3. Add undo snapshot abstraction (simple full-rope clone) + push/restore methods.
+4. Extend rendering: draw buffer; move terminal cursor to current logical position (translate to (x,y)) before flush; compose status/command line: `[NORMAL|INSERT]  Ln {line+1}, Col {col+1}  :{pending_command}`.
+5. Enhance input handling in main loop:
+   * Normal mode key mapping: motions (h/j/k/l/0/$/w/b), `i` -> enter Insert, `x` -> delete char under cursor, `u` -> undo, `Ctrl-R` -> redo, `:` -> command-line start.
+   * Insert mode: printable -> insert char; Enter -> newline; Backspace -> delete previous char (col>0 or join lines); Esc -> leave Insert, finalize snapshot.
+6. Implement word motion helpers (naive: alphanumeric+underscore cluster sequences vs others) using grapheme iteration.
+7. Integrate undo stack logic: on first edit after leaving Insert or performing Normal mode edit, capture pre-edit snapshot; coalesce sequential InsertChar edits until mode switches or a pause threshold (simple: flush on Esc or newline only, defer time-based merging to later phase).
+8. Add command-line echo: maintain `pending_command` state; render at status line; execute on Enter (still only `:q` recognized this phase).
+9. Update tests: buffer mutation (insert/delete/newline), cursor motion clamping, undo/redo restoring previous text, status line string composition.
+10. Add tracing spans for `edit_op`, `motion`, and `undo_cycle`.
+11. Update design docs & README to reflect new capabilities.
+12. Run build, clippy, fmt, tests; ensure clean exit still works.
+
+## 7. Exit Criteria
+
+* Build + clippy + fmt check all pass (`cargo build`, `cargo clippy -- -D warnings`, `cargo fmt --all -- --check`).
+* Enter Insert mode with `i`, type text, see it appear in buffer; Esc returns to Normal with cursor adjusted (one-left typical Vim behavior optional: adopt: keep cursor on last inserted char unless at line end; decide simple: leave as rope insertion position for Phase 1, adjust later).
+* Motions `h j k l 0 $ w b` update cursor without panics and stay in bounds.
+* `x` deletes the character under the cursor.
+* Backspace in Insert mode deletes previous full grapheme cluster or joins lines when at line start.
+* Newline insertion splits line correctly and moves cursor to line start of new line.
+* Undo (`u`) reverts last mutation; Redo (`Ctrl-R`) reapplies it.
+* Command/status line shows current mode, cursor (Ln/Col), and live `:` command input.
+* `:q` still exits cleanly; terminal always restored on panic or normal exit.
+* All new public APIs documented.
+
+## 8. Telemetry / Logging
+
+* Add spans: `motion`, `insert`, `delete`, `newline`, `undo`, `redo`, `grapheme_nav`.
+* Debug logs for snapshot push/pop (size of rope, stacks lengths).
+* Trace-level logging for each key translated into an action.
+
+## 9. Risks & Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| Performance overhead of full-rope snapshots | Acceptable for small files; document and schedule diff-based undo optimization later. |
+| Cursor desync after edits | Centralize all text mutations through `core-text` API returning updated cursor. Add tests. |
+| Word motion edge cases (Unicode) | Naive ASCII now; add TODO + tests for boundaries. |
+| Undo stack memory growth | Cap stack length (e.g., 200 snapshots) and drop oldest with log warning. |
+| Insert coalescing complexity | Start with boundary-based (Esc/newline) only; time-based merging deferred. |
+| Rendering flicker with cursor move | Still full redraw; acceptable Phase 1; optimize later. |
+| Inconsistent mode indicator after panic | Guard + panic hook already handle restoration; ensure mode not required for restoration path. |
+
+## 10. Deferred Items
+
+* Grapheme caching / performance optimization (current approach recalculates per motion).
+* Time-based insert coalescing.
+* Multi-line operators (dd, dw, etc.).
+* Visual/Operator-pending modes.
+* Registers, yanking/pasting, clipboard integration.
+* Multi-buffer & window management.
+* Persistent undo tree (branching).
+* Search, replace, incremental highlight.
+* Diff-based rendering & damage tracking.
+* Tree-sitter syntax highlighting.
+* LSP/DAP/git integration.
+* Plugin host (WASM) interaction.
+
+## 11. References
+
+* Phase 0 design.
+* Ropey editing API docs.
+* Vim motion semantics (subset) for comparison.
+
+## 12. Notes
+
+* Keep architecture event-driven: main loop interprets key -> action -> state mutation -> render.
+* No polling introduced; input thread unchanged except mapping more keys.
+* Maintain press-only key filtering for determinism; revisit auto-repeat after diffed rendering arrives.
+* Simplicity over optimality: full snapshots and full redraws.
