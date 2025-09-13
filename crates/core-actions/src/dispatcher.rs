@@ -6,7 +6,7 @@
 //! * Emit structured render deltas instead of a boolean dirty flag.
 //! * Integrate observer hooks (macro recorder, analytics) before mutation.
 
-use crate::{Action, EditKind, ModeChange, MotionKind};
+use crate::{Action, ActionObserver, EditKind, ModeChange, MotionKind};
 use core_state::{EditorState, Mode};
 use core_text::{Buffer, Position, motion};
 
@@ -44,7 +44,14 @@ pub fn dispatch(
     action: Action,
     state: &mut EditorState,
     sticky_visual_col: &mut Option<usize>,
+    observers: &[Box<dyn ActionObserver>],
 ) -> DispatchResult {
+    // Notify observers (pre-dispatch). Failures inside observers should not crash the editor;
+    // we rely on them being lightweight & infallible. Any panics propagate (deliberate) to avoid
+    // silently masking logic errors in early development.
+    for obs in observers {
+        obs.on_action(&action);
+    }
     match action {
         Action::Motion(kind) => {
             let span = tracing::trace_span!("motion", kind = ?kind, line = state.position.line, byte = state.position.byte);
@@ -234,7 +241,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(dispatch(act, &mut state, &mut sticky).dirty);
+        assert!(dispatch(act, &mut state, &mut sticky, &[]).dirty);
         // Moving left should also be dirty (position changed)
         let act = translate_key(
             state.mode,
@@ -245,7 +252,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(dispatch(act, &mut state, &mut sticky).dirty);
+        assert!(dispatch(act, &mut state, &mut sticky, &[]).dirty);
     }
 
     #[test]
@@ -254,9 +261,14 @@ mod tests {
         let mut state = EditorState::new(buffer);
         let mut sticky = None;
         // Simulate entering :q
-        dispatch(Action::CommandInput(':'), &mut state, &mut sticky);
-        dispatch(Action::CommandInput('q'), &mut state, &mut sticky);
-        let res = dispatch(Action::CommandExecute(":q".into()), &mut state, &mut sticky);
+        dispatch(Action::CommandInput(':'), &mut state, &mut sticky, &[]);
+        dispatch(Action::CommandInput('q'), &mut state, &mut sticky, &[]);
+        let res = dispatch(
+            Action::CommandExecute(":q".into()),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
         assert!(res.quit && res.dirty);
     }
 
@@ -270,22 +282,65 @@ mod tests {
             Action::ModeChange(ModeChange::EnterInsert),
             &mut state,
             &mut sticky,
+            &[],
         );
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("a".into())),
             &mut state,
             &mut sticky,
+            &[],
         );
         dispatch(
             Action::ModeChange(ModeChange::LeaveInsert),
             &mut state,
             &mut sticky,
+            &[],
         );
         // Undo
-        assert!(dispatch(Action::Undo, &mut state, &mut sticky).dirty);
+        assert!(dispatch(Action::Undo, &mut state, &mut sticky, &[]).dirty);
         assert_eq!(state.active_buffer().line(0).unwrap(), "");
         // Redo
-        assert!(dispatch(Action::Redo, &mut state, &mut sticky).dirty);
+        assert!(dispatch(Action::Redo, &mut state, &mut sticky, &[]).dirty);
         assert_eq!(state.active_buffer().line(0).unwrap(), "a");
+    }
+
+    #[test]
+    fn observer_invoked() {
+        use std::sync::{Arc, Mutex};
+        struct CountObs(Arc<Mutex<usize>>);
+        impl ActionObserver for CountObs {
+            fn on_action(&self, _action: &Action) {
+                *self.0.lock().unwrap() += 1;
+            }
+        }
+        let counter = Arc::new(Mutex::new(0usize));
+        let obs = CountObs(counter.clone());
+        let observers: Vec<Box<dyn ActionObserver>> = vec![Box::new(obs)];
+        let buffer = Buffer::from_str("t", "").unwrap();
+        let mut state = EditorState::new(buffer);
+        let mut sticky = None;
+        dispatch(
+            Action::ModeChange(ModeChange::EnterInsert),
+            &mut state,
+            &mut sticky,
+            &observers,
+        );
+        dispatch(
+            Action::Edit(EditKind::InsertGrapheme("a".into())),
+            &mut state,
+            &mut sticky,
+            &observers,
+        );
+        dispatch(
+            Action::ModeChange(ModeChange::LeaveInsert),
+            &mut state,
+            &mut sticky,
+            &observers,
+        );
+        assert_eq!(
+            *counter.lock().unwrap(),
+            3,
+            "observer should have seen three actions"
+        );
     }
 }

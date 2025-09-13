@@ -4,6 +4,22 @@
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_state::Mode;
 
+/// Observer hook (Refactor R1 Step 8): allows external components (macro recorder, analytics,
+/// future plugin host) to observe Actions as they are translated and/or dispatched without
+/// mutating editor state. Breadth-first: only pre-dispatch hook provided now.
+///
+/// Observers MUST be cheap and non-blocking; heavy work should be offloaded asynchronously.
+pub trait ActionObserver: Send + Sync {
+    /// Called immediately before an Action is dispatched (state not yet mutated).
+    fn on_action(&self, action: &Action);
+}
+
+impl<T: ActionObserver + ?Sized> ActionObserver for &T {
+    fn on_action(&self, action: &Action) {
+        (**self).on_action(action)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Action {
     Motion(MotionKind),

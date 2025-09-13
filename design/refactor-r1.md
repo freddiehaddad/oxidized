@@ -94,9 +94,11 @@ Out of Scope (Deferred to later phases):
    * Added `motion` span in dispatcher `Action::Motion` arm with kind + pre-motion position.
    * Provides telemetry groundwork for future performance profiling and macro recording hooks.
 
-8. Action Observer Hook (PENDING)
-   * Define `ActionObserver` trait.
-   * Add `Vec<Box<dyn ActionObserver>>` (empty for now) in main loop and call `on_action(&action)` prior to `dispatch`.
+8. Action Observer Hook (COMPLETED)
+   * Added `ActionObserver` trait (pre-dispatch hook) in `core-actions`.
+   * `dispatch` now accepts an `observers: &[Box<dyn ActionObserver>]` slice and invokes `on_action` before state mutation.
+   * `ox-bin` maintains an empty observers vector (breadth-first) – future macro recorder / analytics will register here.
+   * Unit test (`observer_invoked`) asserts observer receives actions.
 
 9. Viewport Stub (PENDING)
    * Introduce `Viewport { first_line: usize, height: usize }`.

@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use core_actions::Action;
+use core_actions::ActionObserver; // trait (currently unused in main but stored for future use)
 use core_actions::dispatcher::dispatch;
 use core_events::{CommandEvent, Event, InputEvent, KeyCode, KeyEvent};
 use core_render::scheduler::RenderScheduler;
@@ -70,6 +71,8 @@ async fn main() -> Result<()> {
     let render_span = tracing::info_span!("event_loop");
     let _enter_loop = render_span.enter();
     let mut scheduler = RenderScheduler::new();
+    // Refactor R1 Step 8: prepare empty observer list (macro recorder, analytics to be added later).
+    let observers: Vec<Box<dyn ActionObserver>> = Vec::new();
     while let Some(event) = rx.recv().await {
         // NOTE: No polling – loop wakes only on incoming events from channel.
         match event {
@@ -91,7 +94,7 @@ async fn main() -> Result<()> {
                             mods: k.mods,
                         },
                     ) {
-                        let dr = dispatch(act, &mut state, &mut sticky_visual_col);
+                        let dr = dispatch(act, &mut state, &mut sticky_visual_col, &observers);
                         if dr.dirty {
                             scheduler.mark_dirty();
                         }
@@ -104,7 +107,7 @@ async fn main() -> Result<()> {
                     if let Some(act) =
                         translate_key_wrapper(state.mode, state.command_line.buffer(), &k)
                     {
-                        let dr = dispatch(act, &mut state, &mut sticky_visual_col);
+                        let dr = dispatch(act, &mut state, &mut sticky_visual_col, &observers);
                         if dr.dirty {
                             scheduler.mark_dirty();
                         }
@@ -117,7 +120,7 @@ async fn main() -> Result<()> {
                     if let Some(act) =
                         translate_key_wrapper(state.mode, state.command_line.buffer(), &k)
                     {
-                        let dr = dispatch(act, &mut state, &mut sticky_visual_col);
+                        let dr = dispatch(act, &mut state, &mut sticky_visual_col, &observers);
                         if dr.dirty {
                             scheduler.mark_dirty();
                         }
@@ -140,7 +143,7 @@ async fn main() -> Result<()> {
                     if let Some(act) =
                         translate_key_wrapper(state.mode, state.command_line.buffer(), &k)
                     {
-                        let dr = dispatch(act, &mut state, &mut sticky_visual_col);
+                        let dr = dispatch(act, &mut state, &mut sticky_visual_col, &observers);
                         if dr.dirty {
                             scheduler.mark_dirty();
                         }
@@ -154,7 +157,7 @@ async fn main() -> Result<()> {
                     if let Some(act) =
                         translate_key_wrapper(state.mode, state.command_line.buffer(), &k)
                     {
-                        let dr = dispatch(act, &mut state, &mut sticky_visual_col);
+                        let dr = dispatch(act, &mut state, &mut sticky_visual_col, &observers);
                         if dr.dirty {
                             scheduler.mark_dirty();
                         }
@@ -258,16 +261,19 @@ mod tests {
         let mut state = mk_state("");
         let mut sticky = None;
         // Enter insert
+        let observers: Vec<Box<dyn ActionObserver>> = Vec::new();
         dispatch(
             Action::ModeChange(ModeChange::EnterInsert),
             &mut state,
             &mut sticky,
+            &observers,
         );
         // Insert 'a'
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("a".to_string())),
             &mut state,
             &mut sticky,
+            &observers,
         );
         assert_eq!(state.active_buffer().line(0).unwrap(), "a");
         assert_eq!(state.undo_stack.len(), 1, "expected first snapshot");
@@ -276,6 +282,7 @@ mod tests {
             Action::Edit(EditKind::InsertNewline),
             &mut state,
             &mut sticky,
+            &observers,
         );
         assert_eq!(state.active_buffer().line_count(), 2);
         assert_eq!(state.active_buffer().line(0).unwrap(), "a\n");
@@ -286,6 +293,7 @@ mod tests {
             Action::Edit(EditKind::InsertGrapheme("b".to_string())),
             &mut state,
             &mut sticky,
+            &observers,
         );
         assert_eq!(state.active_buffer().line(1).unwrap(), "b");
         assert_eq!(
@@ -299,25 +307,34 @@ mod tests {
     fn backspace_stays_within_run_dispatch() {
         let mut state = mk_state("");
         let mut sticky = None;
+        let observers: Vec<Box<dyn ActionObserver>> = Vec::new();
         dispatch(
             Action::ModeChange(ModeChange::EnterInsert),
             &mut state,
             &mut sticky,
+            &observers,
         );
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("a".to_string())),
             &mut state,
             &mut sticky,
+            &observers,
         );
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("b".to_string())),
             &mut state,
             &mut sticky,
+            &observers,
         );
         assert_eq!(state.active_buffer().line(0).unwrap(), "ab");
         assert_eq!(state.undo_stack.len(), 1, "still single run snapshot");
         // Backspace
-        dispatch(Action::Edit(EditKind::Backspace), &mut state, &mut sticky);
+        dispatch(
+            Action::Edit(EditKind::Backspace),
+            &mut state,
+            &mut sticky,
+            &observers,
+        );
         assert_eq!(state.active_buffer().line(0).unwrap(), "a");
         assert_eq!(
             state.undo_stack.len(),
@@ -329,9 +346,10 @@ mod tests {
             Action::ModeChange(ModeChange::LeaveInsert),
             &mut state,
             &mut sticky,
+            &observers,
         );
         // Undo should revert entire sequence (buffer empty)
-        assert!(dispatch(Action::Undo, &mut state, &mut sticky).dirty);
+        assert!(dispatch(Action::Undo, &mut state, &mut sticky, &observers).dirty);
         assert_eq!(state.active_buffer().line(0).unwrap(), "");
     }
 
@@ -340,11 +358,17 @@ mod tests {
         let mut state = mk_state("abc");
         let mut sticky = None;
         // Delete 'a'
-        dispatch(Action::Edit(EditKind::DeleteUnder), &mut state, &mut sticky);
+        let observers: Vec<Box<dyn ActionObserver>> = Vec::new();
+        dispatch(
+            Action::Edit(EditKind::DeleteUnder),
+            &mut state,
+            &mut sticky,
+            &observers,
+        );
         assert_eq!(state.active_buffer().line(0).unwrap(), "bc");
         assert_eq!(state.undo_stack.len(), 1, "snapshot pushed for delete");
         // Undo
-        assert!(dispatch(Action::Undo, &mut state, &mut sticky).dirty);
+        assert!(dispatch(Action::Undo, &mut state, &mut sticky, &observers).dirty);
         assert_eq!(state.active_buffer().line(0).unwrap(), "abc");
     }
 
@@ -353,16 +377,27 @@ mod tests {
         let mut state = mk_state("abcd");
         let mut sticky = None;
         // Delete 'a'
-        dispatch(Action::Edit(EditKind::DeleteUnder), &mut state, &mut sticky);
+        let observers: Vec<Box<dyn ActionObserver>> = Vec::new();
+        dispatch(
+            Action::Edit(EditKind::DeleteUnder),
+            &mut state,
+            &mut sticky,
+            &observers,
+        );
         // Delete 'b' (originally 'c', now at index 0 after first delete)
-        dispatch(Action::Edit(EditKind::DeleteUnder), &mut state, &mut sticky);
+        dispatch(
+            Action::Edit(EditKind::DeleteUnder),
+            &mut state,
+            &mut sticky,
+            &observers,
+        );
         assert_eq!(state.active_buffer().line(0).unwrap(), "cd");
         assert_eq!(state.undo_stack.len(), 2, "two discrete snapshots");
         // Undo last -> should restore to "bcd" (?) Actually sequence: start abcd -> after first delete bcd -> after second delete cd. Undo should return to bcd.
-        assert!(dispatch(Action::Undo, &mut state, &mut sticky).dirty);
+        assert!(dispatch(Action::Undo, &mut state, &mut sticky, &observers).dirty);
         assert_eq!(state.active_buffer().line(0).unwrap(), "bcd");
         // Undo again -> original
-        assert!(dispatch(Action::Undo, &mut state, &mut sticky).dirty);
+        assert!(dispatch(Action::Undo, &mut state, &mut sticky, &observers).dirty);
         assert_eq!(state.active_buffer().line(0).unwrap(), "abcd");
     }
 }
