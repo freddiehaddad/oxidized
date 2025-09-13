@@ -63,7 +63,7 @@ Notes: Word motions implemented with a simplified single-step algorithm (naive A
 
 ## 4. Undo/Redo (Snapshot)
 
-**Status:** [~] in progress (Hybrid Step 4a starting)
+**Status:** [x] 4a complete / [ ] 4b pending
 
 Goal: Land snapshot infrastructure (4a) before wiring undo keys (4b) to stabilize API, then complete coalescing semantics after minimal Insert exists.
 
@@ -92,16 +92,16 @@ Acceptance:
 
 ## 5. Insert Mode Mechanics
 
-**Status:** [ ] not started (Hybrid steps 5a, 5b)
+**Status:** [~] 5a partial (printable inserts + Esc); newline/backspace pending (5b)
 
 Goal: Introduce a minimal Insert experience (5a) to validate snapshot infra, then expand to full mechanics (5b) including newline/backspace and coalescing boundaries.
 
 Checklist:
 
-- [ ] 5.1 (5a) Map `i` -> `Action::ModeChange(EnterInsert)`; ensure any pending coalescing run is ended before switching.
-- [ ] 5.2 (5a) Printable grapheme insertion: translation maps visible chars to `Action::Edit(InsertChar(cluster))` when in Insert mode.
-- [ ] 5.3 (5a) Dispatcher inserts grapheme, marks dirty, sets/maintains an `insert_run_active` flag (begins with first inserted char after entering Insert).
-- [ ] 5.4 (5a) Esc handling: translate to `Action::ModeChange(LeaveInsert)`; dispatcher ends insert run (coalescing boundary) without modifying cursor position (Phase 1 simplicity).
+- [x] 5.1 (5a) Map `i` -> `Action::ModeChange(EnterInsert)`; ensure any pending coalescing run is ended before switching.
+- [x] 5.2 (5a) Printable grapheme insertion: translation maps visible chars to `Action::Edit(InsertChar(cluster))` when in Insert mode.
+- [x] 5.3 (5a) Dispatcher inserts grapheme, marks dirty, sets/maintains an `insert_run_active` flag (begins with first inserted char after entering Insert).
+- [x] 5.4 (5a) Esc handling: translate to `Action::ModeChange(LeaveInsert)`; dispatcher ends insert run (coalescing boundary) without modifying cursor position (Phase 1 simplicity).
 - [ ] 5.5 (5a) Tests: type "abc" Esc => one undo restores empty buffer; redo replays all.
 - [ ] 5.6 (5b) Enter key -> newline insertion (`Action::Edit(InsertNewline)`), ends coalescing run (boundary) and starts a fresh run after next char.
 - [ ] 5.7 (5b) Backspace -> delete previous full grapheme or join with previous line (cursor moves to join point).

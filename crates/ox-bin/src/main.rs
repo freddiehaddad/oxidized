@@ -1,7 +1,7 @@
 //! Oxidized entrypoint – Phase 0 skeleton.
 
 use anyhow::Result;
-use core_actions::{Action, ModeChange, MotionKind};
+use core_actions::{Action, EditKind, ModeChange, MotionKind};
 use core_events::{CommandEvent, Event, InputEvent, KeyCode, KeyEvent};
 use core_render::{Frame, Renderer};
 use core_state::EditorState;
@@ -150,8 +150,25 @@ async fn main() -> Result<()> {
                     scheduler.mark_dirty();
                 }
                 KeyCode::Esc => {
-                    pending_command.clear();
-                    scheduler.mark_dirty();
+                    // Route through translator so Insert mode Escape triggers ModeChange::LeaveInsert
+                    if let Some(act) = translate_key_wrapper(state.mode, &pending_command, &k) {
+                        let dr = dispatch(
+                            act,
+                            &mut state,
+                            &mut pending_command,
+                            &mut sticky_visual_col,
+                        );
+                        if dr.dirty {
+                            scheduler.mark_dirty();
+                        }
+                        if dr.quit {
+                            break;
+                        }
+                    } else {
+                        // Fallback: clear any pending (e.g. stray command buffer) and mark dirty
+                        pending_command.clear();
+                        scheduler.mark_dirty();
+                    }
                 }
                 _ => {}
             },
@@ -205,7 +222,16 @@ fn render(state: &EditorState) -> Result<()> {
             &line_content
         };
         let col = grapheme::visual_col(content_trim, state.position.byte);
-        let status = format!("[NORMAL] Ln {}, Col {} :", state.position.line + 1, col + 1);
+        let mode_str = match state.mode {
+            Mode::Normal => "NORMAL",
+            Mode::Insert => "INSERT",
+        };
+        let status = format!(
+            "[{}] Ln {}, Col {} :",
+            mode_str,
+            state.position.line + 1,
+            col + 1
+        );
         for (i, ch) in status.chars().enumerate() {
             if (i as u16) < w {
                 frame.set(i as u16, y, ch);
@@ -306,9 +332,13 @@ fn dispatch(
         Action::ModeChange(mc) => {
             match mc {
                 ModeChange::EnterInsert => {
+                    // Starting a new Insert session always ends any prior run defensively.
+                    state.end_insert_coalescing();
                     state.mode = Mode::Insert;
                 }
                 ModeChange::LeaveInsert => {
+                    // Leaving Insert ends coalescing run boundary.
+                    state.end_insert_coalescing();
                     state.mode = Mode::Normal;
                 }
             }
@@ -348,8 +378,30 @@ fn dispatch(
                 quit: false,
             }
         }
-        Action::Edit(_) => {
-            // Not yet implemented in Phase 1 sequence (Insert mode wiring pending)
+        Action::Edit(kind) => {
+            match kind {
+                EditKind::InsertGrapheme(g) => {
+                    if matches!(state.mode, Mode::Insert) {
+                        state.begin_insert_coalescing();
+                        let mut pos = state.position;
+                        state.active_buffer_mut().insert_grapheme(&mut pos, &g);
+                        state.position = pos;
+                        return DispatchResult {
+                            dirty: true,
+                            quit: false,
+                        };
+                    }
+                }
+                EditKind::InsertNewline => {
+                    // Not part of minimal 5a subset yet.
+                }
+                EditKind::Backspace => {
+                    // Deferred to 5b.
+                }
+                EditKind::DeleteUnder => {
+                    // Will be implemented in Task 6.
+                }
+            }
             DispatchResult {
                 dirty: false,
                 quit: false,

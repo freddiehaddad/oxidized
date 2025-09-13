@@ -59,16 +59,10 @@ impl EditorState {
         &self.buffers[self.active]
     }
 
-    #[allow(dead_code)]
-    /// Temporary mutable accessor for the active buffer.
-    ///
-    /// This is intentionally unused until Insert mode (Task 5a) wires edit
-    /// actions through a dispatcher that mutates the buffer. Keeping it now
-    /// avoids repeating direct `self.buffers[self.active]` indexing patterns
-    /// across early mutation call sites and clarifies the intended single
-    /// mutation choke point. The `#[allow(dead_code)]` will be removed once
-    /// the first edit path (printable grapheme insertion) lands.
-    fn active_buffer_mut(&mut self) -> &mut Buffer {
+    /// Mutable accessor for the active buffer (Phase 1: single buffer only).
+    /// All text mutations in editing paths should flow through this to keep
+    /// future invariants (multi-buffer, dirty tracking) centralized.
+    pub fn active_buffer_mut(&mut self) -> &mut Buffer {
         &mut self.buffers[self.active]
     }
 
