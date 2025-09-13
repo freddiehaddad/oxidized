@@ -66,6 +66,51 @@ pub struct EditorState {
     pub redo_stack: Vec<EditSnapshot>,
     /// Indicates we are in the middle of an Insert coalescing run (snapshot already taken).
     pub insert_run_active: bool,
+    /// Command-line (":" style) transient input buffer state (Refactor R1 Step 2).
+    pub command_line: CommandLineState,
+}
+
+/// Minimal command-line state container (Refactor R1 Step 2).
+/// Breadth-first: only stores raw buffer including leading ':' when active.
+/// Future (Phase 2+): history, cursor within command line, validation status, suggestion UI.
+#[derive(Debug, Default, Clone)]
+pub struct CommandLineState {
+    buf: String,
+}
+
+impl CommandLineState {
+    /// Returns true if a command is being entered (buffer starts with ':').
+    pub fn is_active(&self) -> bool {
+        self.buf.starts_with(':')
+    }
+    /// Expose raw buffer for rendering/translation.
+    pub fn buffer(&self) -> &str {
+        &self.buf
+    }
+    /// Clear command buffer (leave inactive state).
+    pub fn clear(&mut self) {
+        self.buf.clear();
+    }
+    /// Begin a new command (resets existing content) – ensures leading ':'.
+    pub fn begin(&mut self) {
+        self.buf.clear();
+        self.buf.push(':');
+    }
+    /// Push a character (assumes already active or will auto-activate if empty and ch not ':').
+    pub fn push_char(&mut self, ch: char) {
+        if self.buf.is_empty() && ch != ':' {
+            self.buf.push(':');
+        }
+        self.buf.push(ch);
+    }
+    /// Backspace behavior inside command line (keeps ':' sentinel until removing last char resets activity).
+    pub fn backspace(&mut self) {
+        if self.buf.len() > 1 {
+            self.buf.pop();
+        } else {
+            self.buf.clear();
+        }
+    }
 }
 
 impl EditorState {
@@ -79,6 +124,7 @@ impl EditorState {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             insert_run_active: false,
+            command_line: CommandLineState::default(),
         }
     }
 

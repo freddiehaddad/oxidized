@@ -8,4 +8,5 @@ rust-version.workspace = true
 [dependencies]
 anyhow.workspace = true
 crossterm = "0.29"
+core-state = { path = "../core-state" }
 core-terminal = { path = "../core-terminal" }

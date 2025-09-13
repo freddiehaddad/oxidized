@@ -44,15 +44,17 @@ Out of Scope (Deferred to later phases):
 
 ## 4. Step Breakdown (Each = One Commit)
 
-1. Extract Status Line Formatter
-   * Add `core-render::status` with `build_status(&EditorState, &CommandLineState) -> String`.
-   * Replace inline status string assembly in `render()`.
-   * Add unit test for formatting.
+1. Extract Status Line Formatter (COMPLETED)
+   * Implemented `core-render::status::{StatusContext, build_status(&StatusContext) -> String}`.
+   * `render()` now constructs a `StatusContext` (mode, line, col, command activity) and calls `build_status`.
+   * Inline formatting removed; unit tests added for Normal/Insert with and without command buffer.
 
-2. Introduce `CommandLineState`
-   * New struct in `core-state` (or temporary module) with fields: `buffer: String`, `active: bool`.
-   * Translator updated to read from `CommandLineState` instead of raw string.
-   * Adapt dispatcher command input logic.
+2. Introduce `CommandLineState` (COMPLETED)
+   * Added `CommandLineState` in `core-state` holding a single `buf: String`.
+   * Activity inferred via `is_active()` (checks leading ':'); no separate `active` boolean stored.
+   * Methods: `begin`, `push_char`, `backspace`, `clear`, `buffer`, `is_active`.
+   * Main loop and dispatcher updated to use `state.command_line` instead of local `pending_command`.
+   * Behavior remains identical; tests updated accordingly.
 
 3. Remove Unsafe Motion Wrappers
    * Delete `apply_motion` / `apply_vertical_motion`.
@@ -68,7 +70,7 @@ Out of Scope (Deferred to later phases):
    * Define `EditorCtx` bundling `EditorState`, `CommandLineState`, `sticky_visual_col`.
    * Adjust tests to use new API.
 
-6. Insert Run Enum
+6. Insert Run Enum (PENDING)
    * Replace `insert_run_active: bool` in `EditorState` with:
 
      ```rust
@@ -78,20 +80,20 @@ Out of Scope (Deferred to later phases):
    * Update begin/end helpers; existing semantics preserved.
    * Add rustdoc & simple tests.
 
-7. Add Motion & Translation Spans
+7. Add Motion & Translation Spans (PENDING)
    * `translate_key` -> span `translate_key` at trace level.
    * Dispatcher motion arm spans: `motion` with `kind=?kind`.
 
-8. Action Observer Hook
+8. Action Observer Hook (PENDING)
    * Define `ActionObserver` trait.
    * Add `Vec<Box<dyn ActionObserver>>` (empty for now) in main loop and call `on_action(&action)` prior to `dispatch`.
 
-9. Viewport Stub
+9. Viewport Stub (PENDING)
    * Introduce `Viewport { first_line: usize, height: usize }`.
    * `render()` calculates visible lines using viewport instead of implicit 0.
    * No scrolling yet; tests confirm unchanged output baseline.
 
-10. Channel Policy Documentation
+10. Channel Policy Documentation (PENDING)
     * Define `EVENT_CHANNEL_CAP: usize` constant (unused for now) + comment explaining deferred bounded migration (link to Phase 2 plan).
 
 ## 5. Exit Criteria

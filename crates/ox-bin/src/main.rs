@@ -3,6 +3,7 @@
 use anyhow::Result;
 use core_actions::{Action, EditKind, ModeChange, MotionKind};
 use core_events::{CommandEvent, Event, InputEvent, KeyCode, KeyEvent};
+use core_render::status::{StatusContext, build_status};
 use core_render::{Frame, Renderer};
 use core_state::EditorState;
 use core_state::Mode;
@@ -76,8 +77,7 @@ async fn main() -> Result<()> {
     let (tx, mut rx) = mpsc::unbounded_channel::<Event>();
     let _input_handle = core_input::spawn_input_thread(tx.clone());
 
-    // Simple command mode detection
-    let mut pending_command = String::new();
+    // Command line now stored within EditorState (Refactor R1 Step 2)
 
     // Sticky visual column for vertical motions (None until first j/k).
     let mut sticky_visual_col: Option<usize> = None;
@@ -99,25 +99,19 @@ async fn main() -> Result<()> {
             }
             Event::Input(InputEvent::Key(k)) => match k.code {
                 KeyCode::Colon => {
-                    pending_command.clear();
-                    pending_command.push(':');
+                    state.command_line.begin();
                 }
                 KeyCode::Char(c) => {
                     // Use translator for motions/commands (Insert edits not yet wired)
                     if let Some(act) = translate_key_wrapper(
                         state.mode,
-                        &pending_command,
+                        state.command_line.buffer(),
                         &KeyEvent {
                             code: KeyCode::Char(c),
                             mods: k.mods,
                         },
                     ) {
-                        let dr = dispatch(
-                            act,
-                            &mut state,
-                            &mut pending_command,
-                            &mut sticky_visual_col,
-                        );
+                        let dr = dispatch(act, &mut state, &mut sticky_visual_col);
                         if dr.dirty {
                             scheduler.mark_dirty();
                         }
@@ -127,13 +121,10 @@ async fn main() -> Result<()> {
                     }
                 }
                 KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
-                    if let Some(act) = translate_key_wrapper(state.mode, &pending_command, &k) {
-                        let dr = dispatch(
-                            act,
-                            &mut state,
-                            &mut pending_command,
-                            &mut sticky_visual_col,
-                        );
+                    if let Some(act) =
+                        translate_key_wrapper(state.mode, state.command_line.buffer(), &k)
+                    {
+                        let dr = dispatch(act, &mut state, &mut sticky_visual_col);
                         if dr.dirty {
                             scheduler.mark_dirty();
                         }
@@ -143,13 +134,10 @@ async fn main() -> Result<()> {
                     }
                 }
                 KeyCode::Enter => {
-                    if let Some(act) = translate_key_wrapper(state.mode, &pending_command, &k) {
-                        let dr = dispatch(
-                            act,
-                            &mut state,
-                            &mut pending_command,
-                            &mut sticky_visual_col,
-                        );
+                    if let Some(act) =
+                        translate_key_wrapper(state.mode, state.command_line.buffer(), &k)
+                    {
+                        let dr = dispatch(act, &mut state, &mut sticky_visual_col);
                         if dr.dirty {
                             scheduler.mark_dirty();
                         }
@@ -158,24 +146,21 @@ async fn main() -> Result<()> {
                         }
                     } else {
                         // Fallback: if Enter while in command mode with :q
-                        if pending_command == ":q" {
+                        if state.command_line.buffer() == ":q" {
                             break;
                         }
                         // Otherwise clear any pending command input (e.g., empty or cancelled)
-                        if pending_command.starts_with(':') {
-                            pending_command.clear();
+                        if state.command_line.is_active() {
+                            state.command_line.clear();
                             scheduler.mark_dirty();
                         }
                     }
                 }
                 KeyCode::Backspace => {
-                    if let Some(act) = translate_key_wrapper(state.mode, &pending_command, &k) {
-                        let dr = dispatch(
-                            act,
-                            &mut state,
-                            &mut pending_command,
-                            &mut sticky_visual_col,
-                        );
+                    if let Some(act) =
+                        translate_key_wrapper(state.mode, state.command_line.buffer(), &k)
+                    {
+                        let dr = dispatch(act, &mut state, &mut sticky_visual_col);
                         if dr.dirty {
                             scheduler.mark_dirty();
                         }
@@ -186,13 +171,10 @@ async fn main() -> Result<()> {
                 }
                 KeyCode::Esc => {
                     // Route through translator so Insert mode Escape triggers ModeChange::LeaveInsert
-                    if let Some(act) = translate_key_wrapper(state.mode, &pending_command, &k) {
-                        let dr = dispatch(
-                            act,
-                            &mut state,
-                            &mut pending_command,
-                            &mut sticky_visual_col,
-                        );
+                    if let Some(act) =
+                        translate_key_wrapper(state.mode, state.command_line.buffer(), &k)
+                    {
+                        let dr = dispatch(act, &mut state, &mut sticky_visual_col);
                         if dr.dirty {
                             scheduler.mark_dirty();
                         }
@@ -201,7 +183,7 @@ async fn main() -> Result<()> {
                         }
                     } else {
                         // Fallback: clear any pending (e.g. stray command buffer) and mark dirty
-                        pending_command.clear();
+                        state.command_line.clear();
                         scheduler.mark_dirty();
                     }
                 }
@@ -246,7 +228,7 @@ fn render(state: &EditorState) -> Result<()> {
             }
         }
     }
-    // Mode / status line (bottom)
+    // Mode / status line (bottom) via formatter module
     if h > 0 {
         let y = h - 1;
         let buf = state.active_buffer();
@@ -257,16 +239,13 @@ fn render(state: &EditorState) -> Result<()> {
             &line_content
         };
         let col = grapheme::visual_col(content_trim, state.position.byte);
-        let mode_str = match state.mode {
-            Mode::Normal => "NORMAL",
-            Mode::Insert => "INSERT",
-        };
-        let status = format!(
-            "[{}] Ln {}, Col {} :",
-            mode_str,
-            state.position.line + 1,
-            col + 1
-        );
+        let status = build_status(&StatusContext {
+            mode: state.mode,
+            line: state.position.line,
+            col,
+            command_active: state.command_line.is_active(),
+            command_buffer: state.command_line.buffer(),
+        });
         for (i, ch) in status.chars().enumerate() {
             if (i as u16) < w {
                 frame.set(i as u16, y, ch);
@@ -317,7 +296,6 @@ struct DispatchResult {
 fn dispatch(
     action: Action,
     state: &mut EditorState,
-    pending_command: &mut String,
     sticky_visual_col: &mut Option<usize>,
 ) -> DispatchResult {
     match action {
@@ -384,15 +362,9 @@ fn dispatch(
         }
         Action::CommandInput(ch) => {
             if ch == '\u{08}' {
-                // backspace sentinel inside command input
-                if pending_command.len() > 1 {
-                    pending_command.pop();
-                }
+                state.command_line.backspace();
             } else {
-                if pending_command.is_empty() {
-                    pending_command.push(':');
-                }
-                pending_command.push(ch);
+                state.command_line.push_char(ch);
             }
             DispatchResult {
                 dirty: true,
@@ -407,7 +379,7 @@ fn dispatch(
                 };
             }
             // Empty string or unrecognized: clear for now.
-            pending_command.clear();
+            state.command_line.clear();
             DispatchResult {
                 dirty: true,
                 quit: false,
@@ -524,20 +496,17 @@ mod tests {
     #[test]
     fn insert_newline_coalescing_boundary() {
         let mut state = mk_state("");
-        let mut pending = String::new();
         let mut sticky = None;
         // Enter insert
         dispatch(
             Action::ModeChange(ModeChange::EnterInsert),
             &mut state,
-            &mut pending,
             &mut sticky,
         );
         // Insert 'a'
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("a".to_string())),
             &mut state,
-            &mut pending,
             &mut sticky,
         );
         assert_eq!(state.active_buffer().line(0).unwrap(), "a");
@@ -546,7 +515,6 @@ mod tests {
         dispatch(
             Action::Edit(EditKind::InsertNewline),
             &mut state,
-            &mut pending,
             &mut sticky,
         );
         assert_eq!(state.active_buffer().line_count(), 2);
@@ -557,7 +525,6 @@ mod tests {
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("b".to_string())),
             &mut state,
-            &mut pending,
             &mut sticky,
         );
         assert_eq!(state.active_buffer().line(1).unwrap(), "b");
@@ -571,35 +538,26 @@ mod tests {
     #[test]
     fn backspace_stays_within_run_dispatch() {
         let mut state = mk_state("");
-        let mut pending = String::new();
         let mut sticky = None;
         dispatch(
             Action::ModeChange(ModeChange::EnterInsert),
             &mut state,
-            &mut pending,
             &mut sticky,
         );
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("a".to_string())),
             &mut state,
-            &mut pending,
             &mut sticky,
         );
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("b".to_string())),
             &mut state,
-            &mut pending,
             &mut sticky,
         );
         assert_eq!(state.active_buffer().line(0).unwrap(), "ab");
         assert_eq!(state.undo_stack.len(), 1, "still single run snapshot");
         // Backspace
-        dispatch(
-            Action::Edit(EditKind::Backspace),
-            &mut state,
-            &mut pending,
-            &mut sticky,
-        );
+        dispatch(Action::Edit(EditKind::Backspace), &mut state, &mut sticky);
         assert_eq!(state.active_buffer().line(0).unwrap(), "a");
         assert_eq!(
             state.undo_stack.len(),
@@ -610,59 +568,41 @@ mod tests {
         dispatch(
             Action::ModeChange(ModeChange::LeaveInsert),
             &mut state,
-            &mut pending,
             &mut sticky,
         );
         // Undo should revert entire sequence (buffer empty)
-        assert!(dispatch(Action::Undo, &mut state, &mut pending, &mut sticky).dirty);
+        assert!(dispatch(Action::Undo, &mut state, &mut sticky).dirty);
         assert_eq!(state.active_buffer().line(0).unwrap(), "");
     }
 
     #[test]
     fn normal_mode_delete_under_single() {
         let mut state = mk_state("abc");
-        let mut pending = String::new();
         let mut sticky = None;
         // Delete 'a'
-        dispatch(
-            Action::Edit(EditKind::DeleteUnder),
-            &mut state,
-            &mut pending,
-            &mut sticky,
-        );
+        dispatch(Action::Edit(EditKind::DeleteUnder), &mut state, &mut sticky);
         assert_eq!(state.active_buffer().line(0).unwrap(), "bc");
         assert_eq!(state.undo_stack.len(), 1, "snapshot pushed for delete");
         // Undo
-        assert!(dispatch(Action::Undo, &mut state, &mut pending, &mut sticky).dirty);
+        assert!(dispatch(Action::Undo, &mut state, &mut sticky).dirty);
         assert_eq!(state.active_buffer().line(0).unwrap(), "abc");
     }
 
     #[test]
     fn normal_mode_delete_under_multiple_and_undo() {
         let mut state = mk_state("abcd");
-        let mut pending = String::new();
         let mut sticky = None;
         // Delete 'a'
-        dispatch(
-            Action::Edit(EditKind::DeleteUnder),
-            &mut state,
-            &mut pending,
-            &mut sticky,
-        );
+        dispatch(Action::Edit(EditKind::DeleteUnder), &mut state, &mut sticky);
         // Delete 'b' (originally 'c', now at index 0 after first delete)
-        dispatch(
-            Action::Edit(EditKind::DeleteUnder),
-            &mut state,
-            &mut pending,
-            &mut sticky,
-        );
+        dispatch(Action::Edit(EditKind::DeleteUnder), &mut state, &mut sticky);
         assert_eq!(state.active_buffer().line(0).unwrap(), "cd");
         assert_eq!(state.undo_stack.len(), 2, "two discrete snapshots");
         // Undo last -> should restore to "bcd" (?) Actually sequence: start abcd -> after first delete bcd -> after second delete cd. Undo should return to bcd.
-        assert!(dispatch(Action::Undo, &mut state, &mut pending, &mut sticky).dirty);
+        assert!(dispatch(Action::Undo, &mut state, &mut sticky).dirty);
         assert_eq!(state.active_buffer().line(0).unwrap(), "bcd");
         // Undo again -> original
-        assert!(dispatch(Action::Undo, &mut state, &mut pending, &mut sticky).dirty);
+        assert!(dispatch(Action::Undo, &mut state, &mut sticky).dirty);
         assert_eq!(state.active_buffer().line(0).unwrap(), "abcd");
     }
 }
