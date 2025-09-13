@@ -12,6 +12,30 @@ use core_text::{grapheme, motion};
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
+// --- Render Scheduler Stub (Task 9.8) ---
+// Breadth-first placeholder: encapsulates 'dirty' tracking and full-frame redraw policy.
+// Future phases will extend this with coalescing, debounce timers, and diff-based damage sets.
+struct RenderScheduler {
+    dirty: bool,
+}
+
+impl RenderScheduler {
+    fn new() -> Self {
+        Self { dirty: false }
+    }
+    fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+    fn consume_dirty(&mut self) -> bool {
+        if self.dirty {
+            self.dirty = false;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Set up file logging to oxidized.log (append mode, non-blocking).
@@ -65,8 +89,9 @@ async fn main() -> Result<()> {
 
     let render_span = tracing::info_span!("event_loop");
     let _enter_loop = render_span.enter();
+    let mut scheduler = RenderScheduler::new();
     while let Some(event) = rx.recv().await {
-        let mut dirty = false; // track whether we need to render
+        // NOTE: No polling – loop wakes only on incoming events from channel.
         match event {
             Event::Input(InputEvent::CtrlC) => {
                 info!("shutdown");
@@ -94,7 +119,7 @@ async fn main() -> Result<()> {
                             &mut sticky_visual_col,
                         );
                         if dr.dirty {
-                            dirty = true;
+                            scheduler.mark_dirty();
                         }
                         if dr.quit {
                             break;
@@ -110,7 +135,7 @@ async fn main() -> Result<()> {
                             &mut sticky_visual_col,
                         );
                         if dr.dirty {
-                            dirty = true;
+                            scheduler.mark_dirty();
                         }
                         if dr.quit {
                             break;
@@ -122,11 +147,11 @@ async fn main() -> Result<()> {
                         break;
                     }
                     pending_command.clear();
-                    dirty = true;
+                    scheduler.mark_dirty();
                 }
                 KeyCode::Esc => {
                     pending_command.clear();
-                    dirty = true;
+                    scheduler.mark_dirty();
                 }
                 _ => {}
             },
@@ -139,8 +164,10 @@ async fn main() -> Result<()> {
                 break;
             }
         }
-        // Render only if dirty (motions/edit/command changes). Avoid useless redraw on no-op motions.
-        if dirty && let Err(e) = render(&state) {
+        // Ask scheduler if a redraw is needed this cycle.
+        if scheduler.consume_dirty()
+            && let Err(e) = render(&state)
+        {
             error!(?e, "render error");
         }
     }

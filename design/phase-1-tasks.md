@@ -131,7 +131,7 @@ Checklist:
 - [x] 9.5 Translation function skeleton (`translate_key`) added (no wiring yet).
 - [x] 9.6 Async tokio channel + loop.
 - [x] 9.7 Dispatcher & dirty flag (implemented ahead of 9.6 for lower-churn refactor).
-- [ ] 9.8 Render scheduler stub.
+- [x] 9.8 Render scheduler stub.
 - [ ] 9.9 Deferred multi-producer & diff hook documented.
 
 Notes: Dispatcher landed before async channel migration (9.6) to reduce simultaneous complexity. Initial render bug fixed by performing a first-frame render at startup before event loop (ensures visible buffer without input). Render scheduler stub (9.8) still pending—current dirty flag logic exists inline; it will move into a dedicated struct during 9.8.

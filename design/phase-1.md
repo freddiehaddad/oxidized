@@ -66,6 +66,7 @@ Action Abstraction (Added mid‑Phase 1):
 * Render scheduler stub decides when to flush (currently immediate full redraw; future diff integration hooks here).
 * Breadth‑first principle preserved: behavior identical after each incremental commit.
 * Ordering note: Dispatcher (Action -> state) implemented before async channel migration to minimize simultaneous behavioral + concurrency changes. Async channel migration (Task 9.6) now complete: main loop awaits `tokio::mpsc` events (still single producer) with identical user-visible behavior, enabling future background action producers without architectural rewrite. Render scheduler stub (Task 9.8) not yet extracted – current dirty tracking inline.
+* Update: Render scheduler stub (Task 9.8) now introduced as a minimal `RenderScheduler` struct encapsulating a dirty flag and providing `mark_dirty` / `consume_dirty`. Still triggers immediate full-frame redraw; future diff/debounce logic will extend this API without changing call sites.
 
 ## 5. Data Model Changes
 
