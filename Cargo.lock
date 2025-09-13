@@ -87,6 +87,8 @@ dependencies = [
  "anyhow",
  "core-events",
  "core-state",
+ "core-text",
+ "tracing",
 ]
 
 [[package]]

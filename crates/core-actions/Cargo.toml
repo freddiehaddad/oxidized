@@ -8,6 +8,8 @@ rust-version.workspace = true
 [dependencies]
 core-events = { path = "../core-events" }
 core-state = { path = "../core-state" }
+core-text = { path = "../core-text" }
+tracing = "0.1"
 
 [dev-dependencies]
 anyhow = "1.0.99"

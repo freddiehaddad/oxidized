@@ -71,10 +71,12 @@ Out of Scope (Deferred to later phases):
    * Added unit tests validating dirty consumption semantics.
    * Documentation in the module outlines future evolution (debounce, damage tracking) preserving call sites.
 
-5. Extract Dispatcher Module
-   * Create `core-actions::dispatcher` (or `core-dispatch` crate if size grows) exporting `dispatch(Action, &mut EditorCtx) -> DispatchResult`.
-   * Define `EditorCtx` bundling `EditorState`, `CommandLineState`, `sticky_visual_col`.
-   * Adjust tests to use new API.
+5. Extract Dispatcher Module (COMPLETED)
+   * Added `core-actions::dispatcher::{dispatch, DispatchResult}` module.
+   * Moved all action application logic from `ox-bin/src/main.rs` into the module unchanged semantically.
+   * Introduced unit tests for motion (dirty flag), quit via `:q`, and undo/redo cycle.
+   * Left motion helper duplication (horizontal/vertical) local to module for now; future step may centralize.
+   * Main loop now imports and calls `dispatch`, reducing `main.rs` size and isolating mutation logic for future observer insertion.
 
 6. Insert Run Enum (PENDING)
    * Replace `insert_run_active: bool` in `EditorState` with:

@@ -118,6 +118,8 @@ pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Optio
     }
 }
 
+pub mod dispatcher;
+
 #[cfg(test)]
 mod tests {
     use super::*;
