@@ -25,8 +25,6 @@ impl Position {
     pub fn origin() -> Self {
         Self { line: 0, byte: 0 }
     }
-
-    /// Clamp this position to the provided line count and byte length accessor for the current line.
     pub fn clamp_to<F>(&mut self, line_count: usize, mut line_len_fn: F)
     where
         F: FnMut(usize) -> usize,
@@ -45,6 +43,8 @@ impl Position {
         }
     }
 }
+
+pub mod motion;
 
 impl Buffer {
     /// Construct a buffer from an in-memory string slice.
