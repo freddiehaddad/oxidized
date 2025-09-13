@@ -1,0 +1,10 @@
+[package]
+name = "core-terminal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+crossterm = "0.29"

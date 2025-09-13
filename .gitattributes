@@ -1,0 +1,4 @@
+# Enforce LF endings for hooks and shell scripts on all platforms
+.githooks/* text eol=lf
+*.sh text eol=lf
+.gitattributes eol=lf

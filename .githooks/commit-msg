@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# Enforce commit message format:
+#  Subject (max 50 chars):
+#    <type>: <summary>
+#    <type>(<scope>): <summary>
+#      - <type> is lowercase letters [a-z]+
+#      - <scope> is [a-z0-9._-]+
+#  <single blank line if body exists>
+#  Body:
+#    - Each non-empty line hard-wrapped at <= 72 characters
+#    - Paragraphs separated by exactly one blank line (no consecutive blanks)
+#  Trailer:
+#    - No trailing blank lines at the end of the commit message
+#
+# Usage: Git calls this with the path to the temporary commit message file.
+
+set -euo pipefail
+
+msg_file="${1}"
+
+# ---------------- Configuration ----------------
+ALLOW_FIXUP_SQUASH=true   # allow 'fixup!' and 'squash!' commits to bypass checks
+ALLOW_MERGE_COMMITS=true  # allow merge commits to bypass checks
+MAX_SUBJECT=50
+MAX_BODY_LINE=72
+# ------------------------------------------------
+
+# ------------- Colors (if terminal) -------------
+if [ -t 1 ]; then
+  RED="$(printf '\033[31m')"
+  YELLOW="$(printf '\033[33m')"
+  GREEN="$(printf '\033[32m')"
+  BOLD="$(printf '\033[1m')"
+  NC="$(printf '\033[0m')"
+else
+  RED=""; YELLOW=""; GREEN=""; BOLD=""; NC=""
+fi
+
+fail() { echo -e "${RED}${1}${NC}" >&2; exit 1; }
+warn() { echo -e "${YELLOW}${1}${NC}" >&2; }
+info() { echo -e "${GREEN}${1}${NC}" >&2; }
+
+# --------- Helper: detect merge commits ---------
+is_merge_commit() {
+  # If MERGE_HEAD exists, we are finalizing a merge commit
+  git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1
+}
+
+# --------- Load and normalize message lines -----
+# - Strip CR from CRLF
+# - Strip trailing whitespace
+# - Drop comment lines beginning with optional spaces then '#'
+# - Preserve empty lines (needed for paragraph validation)
+mapfile -t lines < <(sed -e 's/\r$//' -e 's/[[:space:]]*$//' -- "${msg_file}" | grep -v '^[[:space:]]*#')
+
+# Early checks for empty message
+if [ "${#lines[@]}" -eq 0 ] || [ -z "${lines[0]:-}" ]; then
+  fail "Commit message is empty. Please provide a subject."
+fi
+
+subject="${lines[0]}"
+
+# -------- Bypass modes (optional & common) -------
+if $ALLOW_MERGE_COMMITS && is_merge_commit; then
+  info "Bypassing checks for merge commit."
+  exit 0
+fi
+
+if $ALLOW_FIXUP_SQUASH; then
+  if [[ "${subject}" =~ ^(fixup\!|squash\!).* ]]; then
+    info "Bypassing checks for '${BOLD}${subject%% *}${NC}' commit."
+    exit 0
+  fi
+fi
+
+# ---------------- Subject checks -----------------
+# 1) Length <= 50
+if ((${#subject} > MAX_SUBJECT)); then
+  fail "Subject too long: ${#subject} chars (max ${MAX_SUBJECT}).\nSubject: '${subject}'"
+fi
+
+# 2) Pattern: <type>: <summary> OR <type>(<scope>): <summary>
+#    - type = [a-z]+
+#    - scope = [a-z0-9._-]+
+#    - require a single space after colon
+subject_re='^[a-z]+(\([a-z0-9._-]+\))?: .+$'
+if ! [[ "${subject}" =~ ${subject_re} ]]; then
+  cat >&2 <<EOF
+${RED}Invalid subject format.${NC}
+Expected one of:
+  - type: summary
+  - type(scope): summary
+
+Rules:
+  - type is lowercase letters [a-z]+
+  - scope matches [a-z0-9._-]+
+  - require a space after the colon
+
+Got:
+  '${subject}'
+EOF
+  exit 1
+fi
+
+# --------- Exactly one blank line after subject --
+if [ "${#lines[@]}" -ge 2 ]; then
+  second="${lines[1]}"
+  if [ -n "${second}" ]; then
+    fail "Missing blank line after subject. Line 2 must be empty."
+  fi
+  # If a body exists, enforce exactly one blank line (i.e., line 3 must be non-empty)
+  if [ "${#lines[@]}" -ge 3 ] && [ -z "${lines[2]}" ]; then
+    fail "Only one blank line allowed between subject and body."
+  fi
+fi
+
+# -------- Reject trailing blank lines (anywhere at end) --------
+last_idx=$((${#lines[@]} - 1))
+if [ -z "${lines[$last_idx]}" ]; then
+  fail "Commit message must not end with blank line(s). Remove trailing blank lines."
+fi
+
+# ----------------- Body checks -------------------
+# Body starts at index 2 (0-based) if present
+if [ "${#lines[@]}" -gt 2 ]; then
+  bad_len_lines=()
+  bad_blank_lines=()
+
+  prev_blank=false
+  # Iterate over body lines (index >= 2)
+  for ((i=2; i<${#lines[@]}; i++)); do
+    line="${lines[i]}"
+
+    if [ -z "${line}" ]; then
+      if $prev_blank; then
+        # Human-friendly body line numbers:
+        body_ln=$((i-1))        # current blank line number in body
+        prev_body_ln=$((i-2))   # previous line number in body
+        bad_blank_lines+=("Multiple blank lines between body lines ${prev_body_ln} and ${body_ln}. Use exactly one blank line between paragraphs.")
+      fi
+      prev_blank=true
+      continue
+    fi
+
+    # Non-empty line
+    prev_blank=false
+
+    if ((${#line} > MAX_BODY_LINE)); then
+      body_ln=$((i-1))
+      bad_len_lines+=("Body line ${body_ln} is ${#line} chars (max ${MAX_BODY_LINE}): '${line}'")
+    fi
+  done
+
+  if [ "${#bad_blank_lines[@]}" -gt 0 ] || [ "${#bad_len_lines[@]}" -gt 0 ]; then
+    {
+      if [ "${#bad_blank_lines[@]}" -gt 0 ]; then
+        echo -e "${RED}Paragraph spacing violations:${NC}"
+        for bl in "${bad_blank_lines[@]}"; do
+          echo "  - ${bl}"
+        done
+        echo ""
+      fi
+      if [ "${#bad_len_lines[@]}" -gt 0 ]; then
+        echo -e "${RED}Body lines exceed ${MAX_BODY_LINE} characters:${NC}"
+        for bl in "${bad_len_lines[@]}"; do
+          echo "  - ${bl}"
+        done
+        echo ""
+      fi
+      echo "Fix: wrap lines to ${MAX_BODY_LINE} and use exactly one blank line between paragraphs. No trailing blank lines at end."
+    } >&2
+    exit 1
+  fi
+fi
+
+# -------------------- Success --------------------
+exit 0

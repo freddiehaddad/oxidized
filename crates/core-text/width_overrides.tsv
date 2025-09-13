@@ -1,0 +1,10 @@
+# sequence	width	reason
+# Basic representative emoji sequences and known wide clusters.
+😀	2	emoji_default
+👨‍👩‍👧‍👦	2	emoji_family_zwj
+🇺🇸	2	emoji_flag
+1️⃣	2	emoji_keycap
+👍	2	emoji_default
+👍🏻	2	emoji_tone
+é	1	combining_mark_normalized
+界	2	cjk_wide

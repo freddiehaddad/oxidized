@@ -1,0 +1,18 @@
+# Oxidized editor configuration (Phase 2)
+# This sample file documents currently supported settings.
+# Additional tables/keys will be introduced in later phases.
+
+[scroll.margin]
+# Keep the cursor at least this many lines away from the top/bottom when possible.
+# Effective value is clamped internally to (viewport_height - 2)/2. Default = 0.
+vertical = 0
+
+[input]
+# Vim-compatible key mapping timeout behavior.
+# When true, ambiguous multi-key mapping prefixes will wait at most `timeoutlen`
+# milliseconds for the next key before being flushed/resolved. Operators (d,y,c)
+# and count prefixes are NOT timed out (they wait indefinitely) matching Vim.
+timeout = true
+# Maximum wait time (milliseconds) for the next key in an ambiguous mapping
+# sequence when `timeout = true`. Default mirrors Vim's typical 1000ms.
+timeoutlen = 1000

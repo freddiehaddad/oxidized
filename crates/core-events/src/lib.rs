@@ -1,0 +1,385 @@
+//! Core event types and channel helpers for Oxidized.
+//! Phase 0 scope: minimal input + control events.
+
+use std::fmt;
+use std::sync::atomic::AtomicU64;
+use tokio::sync::mpsc::Sender;
+use tokio::task::JoinHandle;
+
+// -------------------------------------------------------------------------------------------------
+// Channel Policy (Phase 2 Step 16 – Activated)
+// -------------------------------------------------------------------------------------------------
+// The event loop now uses a bounded mpsc channel sized by `EVENT_CHANNEL_CAP` to provide memory
+// safety and natural producer backpressure. Initial policy: the blocking input thread uses
+// `blocking_send` which will park the thread until space is available rather than dropping events.
+// Rationale: with a single producer (input) and single consumer (main loop) latency remains low and
+// preserving motion / edit fidelity is preferred over lossy drop strategies. Future multi‑producer
+// scenarios (timers, LSP, watchers) may introduce a priority control channel + selective drop of
+// low‑value motion bursts. Telemetry counters record send failures (closed channel) and will later
+// record explicit backpressure timings once multiple producers exist.
+// -------------------------------------------------------------------------------------------------
+pub const EVENT_CHANNEL_CAP: usize = 8192;
+
+// -------------------------------------------------------------------------------------------------
+// Telemetry (Phase 2 Step 16)
+// -------------------------------------------------------------------------------------------------
+// Simple atomic counters (no locking, fetch_add relaxed). These are intentionally minimal; a future
+// metrics crate integration can export them via structured events. For now they can be inspected in
+// unit tests or periodically logged.
+// -------------------------------------------------------------------------------------------------
+pub static CHANNEL_SEND_FAILURES: AtomicU64 = AtomicU64::new(0);
+pub static CHANNEL_BLOCKING_SENDS: AtomicU64 = AtomicU64::new(0); // increments for each successful blocking_send (backpressure aware later)
+// NGI Step 8: paste streaming telemetry
+pub static PASTE_SESSIONS: AtomicU64 = AtomicU64::new(0); // number of PasteStart events
+pub static PASTE_CHUNKS: AtomicU64 = AtomicU64::new(0); // number of PasteChunk events
+pub static PASTE_BYTES: AtomicU64 = AtomicU64::new(0); // total bytes across all chunks
+
+/// Top-level event enum consumed by the central event loop.
+#[derive(Debug, Clone)]
+pub enum Event {
+    Input(InputEvent),
+    Command(CommandEvent),
+    RenderRequested,
+    /// Periodic monotonic tick (Phase 4 Step 14) used to drive ephemeral expiry
+    /// and future lightweight refresh tasks without busy polling.
+    Tick,
+    Shutdown,
+}
+
+// -------------------------------------------------------------------------------------------------
+// Event Transform Hooks (no-op scaffolding)
+// -------------------------------------------------------------------------------------------------
+/// Optional hooks that can observe or transform events at the loop boundary.
+///
+/// Initial implementation is a no-op; consumers can provide their own impls in
+/// higher layers. Kept minimal to avoid cross-crate coupling and to align with
+/// breadth-first development. These hooks should not block.
+pub trait EventHooks: Send + Sync + 'static {
+    fn pre_handle(&self, _event: &Event) {}
+    fn post_handle(&self, _event: &Event) {}
+}
+
+/// Default no-op hooks implementation.
+pub struct NoopEventHooks;
+
+impl EventHooks for NoopEventHooks {}
+
+// -------------------------------------------------------------------------------------------------
+// Async Event Sources (Refactor R4 Step 14)
+// -------------------------------------------------------------------------------------------------
+// Rationale: generalize the ad-hoc tick tokio::spawn task into a unified trait so future providers
+// (LSP notifications, file watchers, plugin hosts, diagnostics) register uniformly. Each source is
+// responsible for its own async task lifecycle; on channel send failure (consumer dropped) it must
+// terminate promptly. Backpressure: bounded channel already provides flow control; higher-level
+// prioritization (e.g. dropping low value motion bursts) can layer later without changing this API.
+// Simplicity: minimal surface (spawn + name) to avoid premature abstraction; restart policies and
+// dynamic enable/disable can be layered on top by keeping the registry handle.
+
+/// Trait implemented by any async event producer. Implementors usually hold configuration and
+/// spawn one background task that pushes `Event`s into the shared channel.
+///
+/// Design (Refactor R4 Step 14): minimal surface (name + spawn) to keep early
+/// integration friction low. The `core-plugin` crate will later supply a
+/// `PluginHost` whose discovered plugins can contribute additional sources (e.g.
+/// LSP notifications, file watchers, diagnostics). Each source remains
+/// independent and failure-isolated; higher-level supervision / restart policy
+/// can wrap the registry without altering this contract.
+pub trait AsyncEventSource: Send + 'static {
+    /// Human-readable stable identifier (used for logging / diagnostics).
+    fn name(&self) -> &'static str;
+    /// Consume self and spawn the background task, returning a JoinHandle. Implementors should
+    /// stop when `tx.send(..).await` returns Err (channel closed) or on their own internal stop
+    /// condition. They should avoid busy loops by awaiting timers or external IO futures.
+    fn spawn(self: Box<Self>, tx: Sender<Event>) -> JoinHandle<()>;
+}
+
+/// Registry of event sources. In this initial scaffold it stores boxed trait objects and can spawn
+/// them all at startup. Later we can add dynamic add/remove and fine grained control.
+pub struct EventSourceRegistry {
+    sources: Vec<Box<dyn AsyncEventSource>>,
+}
+
+impl Default for EventSourceRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Built-in monotonic tick source (replaces ad-hoc spawn in main.rs). Emits `Event::Tick` every
+/// configured interval.
+pub struct TickEventSource {
+    interval: std::time::Duration,
+}
+
+impl TickEventSource {
+    pub fn new(interval: std::time::Duration) -> Self {
+        Self { interval }
+    }
+}
+
+#[cfg(test)]
+mod tests_async_sources {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    struct MockOnceSource {
+        emitted: bool,
+    }
+    impl MockOnceSource {
+        fn new() -> Self {
+            Self { emitted: false }
+        }
+    }
+    impl AsyncEventSource for MockOnceSource {
+        fn name(&self) -> &'static str {
+            "mock_once"
+        }
+        fn spawn(mut self: Box<Self>, tx: Sender<Event>) -> JoinHandle<()> {
+            tokio::spawn(async move {
+                if !self.emitted {
+                    let _ = tx.send(Event::RenderRequested).await;
+                    self.emitted = true;
+                }
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn registry_spawns_and_emits() {
+        let (tx, mut rx) = mpsc::channel::<Event>(8);
+        let mut reg = EventSourceRegistry::new();
+        reg.register(MockOnceSource::new());
+        reg.register(TickEventSource::new(std::time::Duration::from_millis(10)));
+        let _handles = reg.spawn_all(tx);
+        // Expect at least one event quickly.
+        let mut got_any = false;
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_millis(100) {
+            if let Ok(ev) =
+                tokio::time::timeout(std::time::Duration::from_millis(5), rx.recv()).await
+                && ev.is_some()
+            {
+                got_any = true;
+                break;
+            }
+        }
+        assert!(got_any, "expected at least one event from sources");
+    }
+}
+
+impl AsyncEventSource for TickEventSource {
+    fn name(&self) -> &'static str {
+        "tick"
+    }
+    fn spawn(self: Box<Self>, tx: Sender<Event>) -> JoinHandle<()> {
+        let dur = self.interval;
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(dur);
+            loop {
+                interval.tick().await;
+                if tx.send(Event::Tick).await.is_err() {
+                    break;
+                }
+            }
+        })
+    }
+}
+
+impl EventSourceRegistry {
+    pub fn new() -> Self {
+        Self {
+            sources: Vec::new(),
+        }
+    }
+    pub fn register<S: AsyncEventSource>(&mut self, src: S) {
+        self.sources.push(Box::new(src));
+    }
+    /// Spawn all registered sources, returning their JoinHandles. Caller owns the handles (may
+    /// choose to detach or await during shutdown sequence).
+    pub fn spawn_all(&mut self, tx: Sender<Event>) -> Vec<JoinHandle<()>> {
+        // Take ownership so duplicate spawns are prevented if called twice.
+        let mut out = Vec::with_capacity(self.sources.len());
+        for src in self.sources.drain(..) {
+            let name = src.name();
+            tracing::info!(target: "runtime.events", source = name, "spawning event source");
+            out.push(src.spawn(tx.clone()));
+        }
+        out
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum CommandEvent {
+    Quit,
+}
+
+/// Normalized input events.
+///
+/// When the `ngi-input` feature is enabled this enum is expanded with additional
+/// variants required by the Next-Gen Input (NGI) design. The legacy variants remain
+/// unchanged so existing translation & dispatcher code compiles without modification
+/// until the full Phase A–D migration completes.
+#[derive(Debug, Clone)]
+pub enum InputEvent {
+    /// Legacy key event (pre-NGI). Still emitted by the current blocking input thread.
+    Key(KeyEvent),
+    /// Terminal resize (columns, rows).
+    Resize(u16, u16),
+    /// Synthetic interrupt (Ctrl-C) surfaced distinctly for future job control.
+    CtrlC,
+    // --- NGI variants (feature gated) ---------------------------------------------------------
+    /// Logical key press with richer token model + timestamp + repeat flag.
+    KeyPress(KeyEventExt),
+    /// One or more extended grapheme clusters ready for insertion (already NFC normalized).
+    TextCommit(String),
+    /// Start of a bracketed paste sequence (size unknown until end). Mapping layer can choose
+    /// to treat the entire paste as a single atomic insertion for undo grouping.
+    PasteStart,
+    /// A chunk within a bracketed paste (never logged verbatim per logging.md guidance; callers
+    /// must only log length / size_bytes if instrumenting).
+    PasteChunk(String),
+    /// End of a bracketed paste sequence.
+    PasteEnd,
+    /// Mouse event (position + kind + modifiers). Initial scope: logging + potential selection
+    /// experimentation; mapping layer may ignore until explicit mouse support phase.
+    Mouse(MouseEvent),
+    /// Focus gained (terminal window became active).
+    FocusGained,
+    /// Focus lost (terminal window deactivated). Future use: auto-blur modes, UI dimming.
+    FocusLost,
+    /// Raw uninterpreted bytes (escape sequences or unknown terminal reports) surfaced to allow
+    /// incremental support without blocking the input thread.
+    RawBytes(Vec<u8>),
+    /// In-progress IME / composition preedit update. UI layers can surface the preedit string;
+    /// final committed text will arrive as `TextCommit`.
+    CompositionUpdate { preedit: String },
+}
+
+// -------------------------------------------------------------------------------------------------
+// NGI Supporting Types
+// -------------------------------------------------------------------------------------------------
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct KeyEventExt {
+    pub token: KeyToken,
+    pub repeat: bool,
+    pub timestamp: std::time::Instant,
+}
+
+bitflags::bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct ModMask: u16 { const CTRL=1; const ALT=2; const SHIFT=4; const META=8; const SUPER=16; }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NamedKey {
+    Enter,
+    Esc,
+    Backspace,
+    Tab,
+    F(u8),
+    Up,
+    Down,
+    Left,
+    Right,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    Insert,
+    Delete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum KeyToken {
+    Char(char),
+    Named(NamedKey),
+    Chord { base: Box<KeyToken>, mods: ModMask },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MouseEvent {
+    pub kind: MouseEventKind,
+    pub column: u16,
+    pub row: u16,
+    pub mods: ModMask,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MouseEventKind {
+    Down(MouseButton),
+    Up(MouseButton),
+    Drag(MouseButton),
+    ScrollUp,
+    ScrollDown,
+    Moved,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MouseButton {
+    Left,
+    Middle,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct KeyEvent {
+    pub code: KeyCode,
+    pub mods: KeyModifiers,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// KeyCode enumerates normalized logical key representations consumed by higher layers.
+/// (Historic note) Earlier phases briefly carried a dedicated `Colon` variant; Refactor R2
+/// Step 8 removed it in favor of a normalization shim to ensure a single printable path.
+pub enum KeyCode {
+    Char(char),
+    Enter,
+    Esc,
+    Backspace,
+    Tab,
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+/// Normalize a raw KeyCode that may have historically used dedicated printable variants
+/// (Refactor R2 Step 8). After this step, callers should construct only standard forms
+/// (e.g., ':' becomes `KeyCode::Char(':')`). Retained as a future extension point if
+/// additional raw platform translations are introduced.
+pub fn normalize_keycode(code: KeyCode) -> KeyCode {
+    // Currently identity; future raw variants can map here.
+    code
+}
+
+bitflags::bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct KeyModifiers: u8 {
+        const CTRL = 0b0000_0001;
+        const ALT  = 0b0000_0010;
+        const SHIFT= 0b0000_0100;
+    }
+}
+
+impl fmt::Display for KeyEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}{:?}", self.code, self.mods)
+    }
+}
+
+/// Helper result type for channel creation (future phases may add bounded channels here).
+pub type EventResult<T> = anyhow::Result<T>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn key_event_display() {
+        let k = KeyEvent {
+            code: KeyCode::Char('x'),
+            mods: KeyModifiers::CTRL,
+        };
+        let s = format!("{}", k);
+        assert!(s.contains("Char"));
+    }
+}

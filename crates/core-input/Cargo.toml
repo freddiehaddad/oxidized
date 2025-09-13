@@ -1,0 +1,16 @@
+[package]
+name = "core-input"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+crossterm = "0.29.0"
+core-events = { path = "../core-events" }
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

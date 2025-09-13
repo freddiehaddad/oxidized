@@ -1,0 +1,19 @@
+[package]
+name = "core-text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true
+unicode-normalization.workspace = true
+ropey = "1.6.1"
+
+[features]
+# Optional runtime terminal probe for width overrides (Refactor R4 Step 4.4 scaffold).
+# Disabled by default; when enabled, a small probe may attempt to discover
+# terminal-specific emoji width deviations.
+term-probe = []

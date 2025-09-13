@@ -1,0 +1,14 @@
+[package]
+name = "core-keymap"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+tracing.workspace = true
+smallvec = "1.15.1"
+core-events = { path = "../core-events", optional = true }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"

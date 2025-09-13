@@ -1,0 +1,20 @@
+[package]
+name = "core-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+ahash = "0.8.12" # Phase 3 Step 2: fast non-cryptographic hashing for line snapshots
+bitflags = "2.9.4"
+crossterm = "0.29.0"
+core-state = { path = "../core-state" }
+core-terminal = { path = "../core-terminal" }
+core-text = { path = "../core-text" }
+core-model = { path = "../core-model" }
+
+[dev-dependencies]
+proptest = "1.8.0"

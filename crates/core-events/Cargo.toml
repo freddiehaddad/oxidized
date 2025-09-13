@@ -1,0 +1,13 @@
+[package]
+name = "core-events"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# channel + async utilities (tokio supplied from workspace)
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+bitflags = "2.9.4"

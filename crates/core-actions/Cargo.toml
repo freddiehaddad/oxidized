@@ -1,0 +1,19 @@
+[package]
+name = "core-actions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tracing.workspace = true
+core-events = { path = "../core-events" }
+core-state = { path = "../core-state" }
+core-text = { path = "../core-text" }
+core-model = { path = "../core-model" }
+core-keymap = { path = "../core-keymap" }
+core-config = { path = "../core-config" }
+
+[dev-dependencies]
+anyhow.workspace = true
+tempfile = "3.23.0"

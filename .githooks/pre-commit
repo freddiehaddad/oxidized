@@ -1,0 +1,36 @@
+#!/usr/bin/env sh
+# Shell-only pre-commit hook for Rust projects.
+# Enforces:
+#  - cargo fmt -- --check
+#  - cargo clippy --all-targets --all-features -- -D warnings
+#  - cargo nextest run --all-targets --all-features --no-fail-fast
+# Works on macOS/Linux and Windows (Git for Windows' sh.exe).
+set -eu
+
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+cd "$REPO_ROOT"
+
+# Ensure required tools exist
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "❌ 'cargo' not found. Install Rust toolchain (https://rustup.rs)." >&2
+  exit 1
+fi
+
+# Format
+echo "▶ cargo fmt -- --check"
+cargo fmt -- --check
+
+# Clippy (deny warnings)
+echo "▶ cargo clippy --all-targets --all-features -- -D warnings"
+cargo clippy --all-targets --all-features -- -D warnings
+
+# Nextest
+cargo nextest --version >/dev/null 2>&1 || {
+  echo "❌ 'cargo-nextest' not found. Install it: cargo install cargo-nextest --locked" >&2
+  exit 1
+}
+
+echo "▶ cargo nextest run --all-targets --all-features --no-fail-fast"
+cargo nextest run --all-targets --all-features --no-fail-fast
+
+exit 0

@@ -1,0 +1,10 @@
+[package]
+name = "core-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+core-state = { path = "../core-state" }
+core-text = { path = "../core-text" }
