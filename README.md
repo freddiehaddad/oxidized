@@ -1,12 +1,12 @@
 # Oxidized
 
-⚙️ A friendly, modern re‑imagining of Vim/Neovim in pure Rust — currently in active development.
+⚙️ A friendly, modern re‑imagining of Vim/Neovim in pure Rust -- currently in active development.
 
 *Nothing is stable. Everything can change. Come build it with us.*
 
 ## Status
 
-Early days. Expect sharp edges, missing features, and intentional breakage while the core shape settles. If you want a daily driver: not yet. If you like watching (and influencing) a clean architecture grow from the ground up: welcome.
+Still very early. Expect sharp edges, missing pieces, and occasional intentional breakage while the core shape settles. Not a daily driver yet—perfect if you enjoy watching (and nudging) a clean architecture grow.
 
 ## Why remake a legend?
 
@@ -15,8 +15,13 @@ Vim/Neovim are incredible, but decades of layered behavior + historical constrai
 ## Trying it (for the curious)
 
 ```console
-cargo run -- some_file.rs
+git clone https://github.com/freddiehaddad/oxidized
+cd oxidized
+cargo test
+cargo run
 ```
+
+That’s it. No special flags, no build script surprises.
 
 ## Contributing
 
@@ -26,16 +31,15 @@ Right now the best help is feedback on architecture, clarity of crate boundaries
 
 ## FAQ (tiny & growing)
 
-**Is this a Neovim fork?** No — completely fresh Rust code.
-
-**Will it embed Vimscript / Lua?** Probably not as‑is. A small, capability‑scoped extension layer will come later.
-
-**Why rewrite instead of contribute to Neovim?** Different experiment: see how far a fully value‑oriented, aggressively modular design can go without legacy ballast.
+1. **Is this a Neovim fork?** No — completely fresh Rust code.
+2. **Does it do much yet?** Enough to move around, insert text, undo/redo, and quit. That’s the point: breadth first.
+3. **Will it embed Vimscript / Lua?** Likely not directly. A lean, capability‑scoped extension layer will arrive later.
+4. **Why rewrite instead of contribute to Neovim?** Different experiment: explore how far a fresh, aggressively modular Rust design can go without legacy ballast.
+5. **Should I daily‑drive it?** Not yet. Follow along, kick the tires, file issues.
 
 ## Dual License
 
-* [MIT](LICENSE-MIT.txt).
-* [Apache 2.0](LICENSE-APACHE.txt).
+Licensed under [Apache 2.0](LICENSE-APACHE.txt) or [MIT](LICENSE-MIT.txt) -- pick whichever suits your project.
 
 ---
 If this kind of clean-slate editor architecture excites you: star, watch, and drop ideas. The fun part (real features) is just getting started.
