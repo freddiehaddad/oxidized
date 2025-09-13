@@ -47,6 +47,8 @@ pub fn dispatch(
 ) -> DispatchResult {
     match action {
         Action::Motion(kind) => {
+            let span = tracing::trace_span!("motion", kind = ?kind, line = state.position.line, byte = state.position.byte);
+            let _e = span.enter();
             let before = state.position;
             match kind {
                 MotionKind::Left => {

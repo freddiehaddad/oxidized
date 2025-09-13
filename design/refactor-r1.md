@@ -89,9 +89,10 @@ Out of Scope (Deferred to later phases):
     * Dispatcher now calls `note_insert_edit()` on insert, newline, backspace.
     * Existing undo/coalescing semantics unchanged (boundaries: Esc, newline). Additional tests assert edit count increments and run reset across boundaries.
 
-7. Add Motion & Translation Spans (PENDING)
-   * `translate_key` -> span `translate_key` at trace level.
-   * Dispatcher motion arm spans: `motion` with `kind=?kind`.
+7. Add Motion & Translation Spans (COMPLETED)
+   * Added trace-level span in `translate_key` capturing mode, pending command length, key code, ctrl modifier.
+   * Added `motion` span in dispatcher `Action::Motion` arm with kind + pre-motion position.
+   * Provides telemetry groundwork for future performance profiling and macro recording hooks.
 
 8. Action Observer Hook (PENDING)
    * Define `ActionObserver` trait.

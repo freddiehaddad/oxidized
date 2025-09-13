@@ -45,6 +45,14 @@ pub enum ModeChange {
 /// Pure translation from a key event + editor mode + current command buffer into an Action.
 /// This does NOT mutate state and is safe to unit test in isolation.
 pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Option<Action> {
+    let span = tracing::trace_span!(
+        "translate_key",
+        mode = ?mode,
+        pending_len = pending_command.len(),
+        key = ?key.code,
+        ctrl = key.mods.contains(KeyModifiers::CTRL),
+    );
+    let _e = span.enter();
     match key.code {
         KeyCode::Char(':') => {
             if pending_command.is_empty() {
