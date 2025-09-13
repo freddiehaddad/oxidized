@@ -408,9 +408,13 @@ fn dispatch(
             }
         }
         Action::Undo | Action::Redo => {
-            // Placeholder until undo stack implemented
+            let applied = match action {
+                Action::Undo => state.undo(),
+                Action::Redo => state.redo(),
+                _ => false,
+            };
             DispatchResult {
-                dirty: false,
+                dirty: applied,
                 quit: false,
             }
         }

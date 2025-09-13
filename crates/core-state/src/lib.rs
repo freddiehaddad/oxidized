@@ -1,6 +1,7 @@
 //! Editor state: buffer collection, mode, and caret position (Cursor moved to core-text as Position).
 
 use core_text::{Buffer, Position};
+use tracing::trace;
 
 /// Maximum number of snapshots retained in undo history.
 const UNDO_HISTORY_MAX: usize = 200;
@@ -73,12 +74,21 @@ impl EditorState {
             position: self.position,
             mode: self.mode,
         };
+        let rope_chars_before = self.active_buffer().line_count(); // coarse metric (lines)
         self.undo_stack.push(snap);
+        trace!(
+            undo_depth = self.undo_stack.len(),
+            redo_depth = self.redo_stack.len(),
+            lines = rope_chars_before,
+            "push_snapshot"
+        );
         if self.undo_stack.len() > UNDO_HISTORY_MAX {
             let _ = self.undo_stack.remove(0);
+            trace!("undo_stack_trimmed oldest removed");
         }
         // New edit invalidates redo stack.
         self.redo_stack.clear();
+        trace!("redo_stack_cleared_on_new_edit");
     }
 
     /// Begin an Insert-mode coalescing run: push a pre-edit snapshot only once.
@@ -110,6 +120,11 @@ impl EditorState {
     /// Restore previously captured snapshot (caller ensures existence). Returns true if restored.
     pub fn undo(&mut self) -> bool {
         if let Some(last) = self.undo_stack.pop() {
+            trace!(
+                undo_depth = self.undo_stack.len(),
+                redo_depth = self.redo_stack.len(),
+                "undo_pop"
+            );
             // Push current state to redo before replacing.
             let current = EditSnapshot {
                 buffer: self.active_buffer().clone(),
@@ -117,6 +132,7 @@ impl EditorState {
                 mode: self.mode,
             };
             self.redo_stack.push(current);
+            trace!(redo_depth = self.redo_stack.len(), "redo_push_from_undo");
             self.buffers[self.active] = last.buffer;
             self.position = last.position;
             self.mode = last.mode; // mode restore is simplistic; acceptable Phase 1.
@@ -129,6 +145,11 @@ impl EditorState {
     /// Redo previously undone snapshot. Returns true if applied.
     pub fn redo(&mut self) -> bool {
         if let Some(next) = self.redo_stack.pop() {
+            trace!(
+                redo_depth = self.redo_stack.len(),
+                undo_depth = self.undo_stack.len(),
+                "redo_pop"
+            );
             // Save current to undo stack.
             let current = EditSnapshot {
                 buffer: self.active_buffer().clone(),
@@ -136,6 +157,7 @@ impl EditorState {
                 mode: self.mode,
             };
             self.undo_stack.push(current);
+            trace!(undo_depth = self.undo_stack.len(), "undo_push_from_redo");
             self.buffers[self.active] = next.buffer;
             self.position = next.position;
             self.mode = next.mode;
@@ -145,6 +167,10 @@ impl EditorState {
         }
     }
 }
+
+// NOTE (4.11 Deferred): Time-based coalescing for Insert runs is intentionally not implemented yet.
+// Future work: maintain timestamp of last inserted grapheme; if elapsed > THRESHOLD_MS, begin a new coalescing run.
+// This will integrate with an async timer or action producer feeding a boundary Action without blocking input.
 
 #[cfg(test)]
 mod tests {
@@ -270,5 +296,45 @@ mod tests {
             let _ = i; // silence unused warning if any
         }
         assert_eq!(st.undo_stack.len(), UNDO_HISTORY_MAX);
+    }
+
+    #[test]
+    fn coalesced_insert_run_undo_redo() {
+        // Simulate minimal insert mode run: enter Insert, type 'a','b','c', Esc boundary.
+        let buf = Buffer::from_str("t", "").unwrap();
+        let mut st = EditorState::new(buf);
+        st.mode = Mode::Insert;
+        // First insert triggers snapshot
+        st.begin_insert_coalescing();
+        {
+            let mut modified = st.active_buffer().clone();
+            let mut pos = st.position;
+            modified.insert_grapheme(&mut pos, "a");
+            st.buffers[st.active] = modified;
+            st.position = pos;
+        }
+        // Additional inserts in same run (should not push extra snapshots)
+        for ch in ["b", "c"] {
+            let mut modified = st.active_buffer().clone();
+            let mut pos = st.position;
+            modified.insert_grapheme(&mut pos, ch);
+            st.buffers[st.active] = modified;
+            st.position = pos;
+            st.begin_insert_coalescing(); // no-op while active
+        }
+        // End run via Esc boundary semantics
+        st.end_insert_coalescing();
+        assert_eq!(st.undo_stack.len(), 1, "expected single snapshot for run");
+        // Perform undo: buffer should become empty again
+        assert!(st.undo());
+        assert_eq!(st.active_buffer().line(0).unwrap_or_default(), "");
+        // Redo should restore 'abc'
+        assert!(st.redo());
+        assert!(
+            st.active_buffer()
+                .line(0)
+                .unwrap_or_default()
+                .starts_with("abc")
+        );
     }
 }
