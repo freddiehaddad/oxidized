@@ -4,6 +4,7 @@ use anyhow::Result;
 use ropey::Rope;
 
 /// A text buffer backed by a `ropey::Rope`.
+#[derive(Clone)]
 pub struct Buffer {
     rope: Rope,
     pub name: String,
