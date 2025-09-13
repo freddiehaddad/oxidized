@@ -174,7 +174,7 @@ Checklist:
 - [x] 9.8 Render scheduler stub.
 - [x] 9.9 Deferred multi-producer & diff hook documented.
 
-Notes: Dispatcher landed before async channel migration (9.6) to reduce simultaneous complexity. Initial render bug fixed by performing a first-frame render at startup before event loop (ensures visible buffer without input). Render scheduler stub (9.8) still pending—current dirty flag logic exists inline; it will move into a dedicated struct during 9.8.
+Notes: Dispatcher landed before async channel migration (9.6) to reduce simultaneous complexity. Initial render bug fixed by performing a first-frame render at startup before event loop (ensures visible buffer without input). Render scheduler stub (9.8) implemented and extracted into `core-render::scheduler` during Refactor R1. Viewport stub and `ActionObserver` hook also added via R1 without altering user-visible behavior.
 
 Notes: Replaced temporary unsafe raw pointer borrowing with safe helper functions (`apply_motion`, `apply_vertical_motion`) before proceeding to Undo/Redo to avoid accruing technical debt. Introduced new `core-actions` crate for semantic intent separation (motions/edits/mode changes) per modularity goal.
 

@@ -1,4 +1,4 @@
-# Refactor Checkpoint R1: Structural Extraction & Readiness
+# Refactor Checkpoint R1: Structural Extraction & Readiness (Completed)
 
 ## 1. Objective
 
@@ -15,7 +15,7 @@ In Scope:
 * Add status line formatter module (`core-render::status`) returning a status string.
 * Introduce `InsertRun` enum (replaces boolean) in `core-state` (inactive / active { started_at, edits }). Behavior unchanged (Esc/newline boundaries still only triggers) but struct supports future time-based coalescing.
 * Add lightweight motion & translation spans (`motion`, `translate_key`) for telemetry completeness.
-* Add bounded event channel constant + TODO for backpressure policy (still unbounded until second producer lands – we codify decision and single change site).
+* Add bounded event channel constant & document backpressure policy (still unbounded until second producer lands – we codify decision and single change site).
 * Provide `ActionObserver` trait + no-op list hook in main loop (enable future macro/recording without loop surgery).
 * Document viewport abstraction placeholder (`Viewport { first_line, height }`) and integrate a fixed instance (no scrolling yet).
 
@@ -106,8 +106,15 @@ Out of Scope (Deferred to later phases):
    * `clamp_cursor_into_view` stub present (no scrolling yet) ready for future cursor-follow behavior.
    * No behavior change for small files fitting on screen; sets API surface for future scrolling & split support.
 
-10. Channel Policy Documentation (PENDING)
-    * Define `EVENT_CHANNEL_CAP: usize` constant (unused for now) + comment explaining deferred bounded migration (link to Phase 2 plan).
+10. Channel Policy Documentation (COMPLETED)
+      * Added `EVENT_CHANNEL_CAP` (8192) constant + exhaustive commentary in `core-events/src/lib.rs` describing:
+         * Rationale for starting unbounded (single producer simplicity, zero backpressure churn early).
+         * Future bounded migration trigger: introduction of a second async producer (config watcher, timers, LSP, plugin host, etc.).
+         * Proposed capacity rationale (2^13 = 8192: generous for bursty input, trivially bounded memory, power-of-two for potential ring optimization).
+         * Planned backpressure / drop strategy (decision deferred until real workload): either await send (natural backpressure) or drop oldest non-critical events; critical control events may leverage separate control channel.
+         * Telemetry plan (increment counter on backpressure/drops) to surface tuning needs.
+      * `ox-bin/src/main.rs` updated with TODO referencing the constant and planned swap to `mpsc::channel(EVENT_CHANNEL_CAP)`.
+      * No functional change yet (channel remains unbounded) preserving breadth-first stability; single change site established for future activation.
 
 ## 5. Exit Criteria
 
@@ -142,4 +149,4 @@ Out of Scope (Deferred to later phases):
 
 ## 9. Notes
 
-Breadth-first preserved: each step is a behavior-neutral refactor. R1 completes before resuming Phase 1 Task 7 feature work so that upcoming status line enhancements land on a cleaner substrate.
+Breadth-first preserved: each step is a behavior-neutral refactor. All ten steps are now complete; R1 exits and Phase 1 Task 7 feature work can resume on the hardened substrate.

@@ -5,6 +5,10 @@ use core_actions::Action;
 use core_actions::ActionObserver; // trait (currently unused in main but stored for future use)
 use core_actions::dispatcher::dispatch;
 use core_events::{CommandEvent, Event, InputEvent, KeyCode, KeyEvent};
+// NOTE: `EVENT_CHANNEL_CAP` lives in `core-events` (currently unused while channel is unbounded).
+// When introducing additional async producers, migrate to `mpsc::channel(EVENT_CHANNEL_CAP)` and
+// implement documented backpressure policy (Refactor R1 Step 10).
+// use core_events::EVENT_CHANNEL_CAP; // (future bounded channel capacity activation point)
 use core_render::scheduler::RenderScheduler;
 use core_render::status::{StatusContext, build_status};
 use core_render::viewport::Viewport;
@@ -55,7 +59,9 @@ async fn main() -> Result<()> {
         "Welcome to Oxidized (Phase 0)\nPress :q to quit.",
     )?;
     let mut state = EditorState::new(buffer);
-    // Async unbounded channel (single consumer main loop). Input thread forwards blocking crossterm events.
+    // Async unbounded channel (single consumer main loop). Input thread forwards blocking
+    // crossterm events. Future bounded migration: swap to `mpsc::channel(EVENT_CHANNEL_CAP)` when
+    // the first additional async producer (config watcher, timers, LSP, plugin host) lands.
     let (tx, mut rx) = mpsc::unbounded_channel::<Event>();
     let _input_handle = core_input::spawn_input_thread(tx.clone());
 

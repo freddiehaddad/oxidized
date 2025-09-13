@@ -172,6 +172,7 @@ Refer to the separate plan for the ordered commit breakdown. Task 7 will resume 
 
 * Keep architecture event-driven: key/input -> translate -> Action -> dispatch -> (mark dirty) -> render.
 * No polling introduced; input thread remains blocking; channel migration to `tokio::mpsc` enables async producers later without redesign.
+* Channel policy constant (`EVENT_CHANNEL_CAP`) established during Refactor R1 (unbounded channel still in use; single change site prepared for future bounded migration/backpressure once additional producers land).
 * Maintain press-only key filtering for determinism; revisit auto-repeat after diffed rendering arrives.
 * Simplicity over optimality: full snapshots and full redraws.
 * 9.9 (Documented, deferred): Multi-producer readiness & render diff hook. Additional async producers (config watcher, timers, future LSP, plugin host) will feed actions through either an added `Event::Action(Action)` variant or a parallel action channel merged with `tokio::select!`. Decision intentionally deferred until first new producer to avoid dormant enum variants. `RenderScheduler` will evolve from a boolean dirty flag to collecting `RenderDelta` values (Full, Lines(range), Status, CursorOnly) merged into a `Damage` set consumed by a future diff-capable renderer. Current full-frame redraw semantics preserved until structured deltas exist.
