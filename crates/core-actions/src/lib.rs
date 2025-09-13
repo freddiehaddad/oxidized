@@ -69,6 +69,7 @@ pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Optio
                     'b' => Some(Action::Motion(MotionKind::WordBackward)),
                     'i' => Some(Action::ModeChange(ModeChange::EnterInsert)),
                     'u' if !key.mods.contains(KeyModifiers::CTRL) => Some(Action::Undo),
+                    'x' => Some(Action::Edit(EditKind::DeleteUnder)),
                     _ => None,
                 },
                 Mode::Insert => {

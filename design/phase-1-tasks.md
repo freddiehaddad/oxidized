@@ -77,7 +77,7 @@ Checklist (Hybrid Sequencing):
 - [x] 4.6 (4b) Wire `Action::Undo` (`u`) and `Action::Redo` (`Ctrl-R`) in dispatcher after minimal Insert (5a) merged.
 - [x] 4.7 (4b) Integration tests: perform inserts -> undo -> redo path; ensure cursor restored.
 - [x] 4.8 (4b) Coalescing logic (boundary-based): character inserts while in Insert mode coalesce until Esc or newline (newline added in 5b). Implementation: track `coalescing_active` flag; Esc/newline toggles off.
-- [ ] 4.9 (4b) Snapshot push for Normal mode edits (`x`) always discrete (implemented later in Task 6).
+- [x] 4.9 (4b) Snapshot push for Normal mode edits (`x`) always discrete (implemented in Task 6).
 - [x] 4.10 (4b) Logging: trace each snapshot push/pop with stack sizes.
 - [x] 4.11 (Deferred) Time-based coalescing placeholder comment (no timers yet) referencing future diff rendering.
 - [x] 4c Snapshot mode semantics refinement: introduce `SnapshotKind`; edit undos do not restore Insert mode. Tests: `iabc<Esc>u` leaves Normal; redo restores text but remains Normal. Update design docs.
@@ -93,7 +93,7 @@ Acceptance:
 
 ## 5. Insert Mode Mechanics
 
-**Status:** [x] 5a complete / [x] core 5b (newline, backspace, boundaries) done; logging + rustdoc (5.11–5.12) pending
+**Status:** [x] 5a complete / [x] 5b complete (newline, backspace, boundaries, logging, rustdoc)
 
 Goal: Introduce a minimal Insert experience (5a) to validate snapshot infra, then expand to full mechanics (5b) including newline/backspace and coalescing boundaries.
 
@@ -109,8 +109,8 @@ Checklist:
 - [x] 5.8 (5b) Ensure backspace within a run does NOT prematurely end coalescing; newline or Esc only.
 - [x] 5.9 (5b) Cursor adjustment rules after newline/backspace validated (stay at start of new line after newline; at join offset after join).
 - [x] 5.10 (5b) Tests: newline mid-line split; backspace at start of line joins; multi-grapheme clusters (emoji) deleted as single unit.
-- [ ] 5.11 (5b) Logging/tracing: insert, newline, backspace spans.
-- [ ] 5.12 (5b) Rustdoc comments for Insert semantics & coalescing boundaries.
+- [x] 5.11 (5b) Logging/tracing: insert, newline, backspace spans.
+- [x] 5.12 (5b) Rustdoc comments for Insert semantics & coalescing boundaries.
 
 Acceptance:
 
@@ -122,8 +122,10 @@ Acceptance:
 
 ## 6. Normal Mode Editing
 
-6.1 `x` -> delete_grapheme_at (no-op at end).
-6.2 Snapshot capture before first `x` in a run (simplest: every x).
+**Status:** [x] complete (2025-09-13)
+
+- [x] 6.1 `x` -> delete_grapheme_at (no-op at end).
+- [x] 6.2 Snapshot capture before each `x` (discrete snapshots, simplest approach).
 Tests: multiple x + undos.
 
 ---

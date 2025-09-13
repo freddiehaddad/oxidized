@@ -1,4 +1,22 @@
-//! Editor state: buffer collection, mode, and caret position (Cursor moved to core-text as Position).
+//! Editor state: buffer collection, mode, and caret position.
+//!
+//! Insert Coalescing (Phase 1):
+//! - A contiguous run of Insert-mode text entry (grapheme inserts and backspaces) is captured
+//!   by a *single* undo snapshot taken lazily at the first mutation in the run.
+//! - Coalescing boundaries: pressing `Esc` to leave Insert mode or inserting a newline.
+//!   Backspace does NOT end a run; it mutates within the same coalesced unit.
+//! - After a boundary, the next Insert edit begins a fresh run and takes a new snapshot.
+//! - Rationale: Most typing bursts should undo as atomic units while keeping implementation
+//!   simple (no timers yet). Newline chosen as a structural boundary for intuitive multi-line undo.
+//! - Future: time-based boundaries and differential snapshots (to avoid whole-buffer cloning).
+//!
+//! Normal Mode discrete edits (currently just `x`) always push an immediate snapshot per action
+//! so each delete can be undone individually. This fulfills Task 4.9/6.2 semantics.
+//!
+//! SnapshotKind & Mode Restoration:
+//! - `SnapshotKind::Edit` ignores restoring the editor mode on undo/redo so that leaving Insert
+//!   mode with `Esc` then undoing the last run does not unexpectedly re-enter Insert mode.
+//! - Future kinds (mode transitions, structural operations) can opt-in to mode restoration.
 
 use core_text::{Buffer, Position};
 use tracing::trace;
@@ -107,6 +125,12 @@ impl EditorState {
     /// Insert mode (or after a newline / Esc boundary ends a prior run).
     /// Subsequent inserts in the same run MUST NOT call this again until
     /// `end_insert_coalescing` is invoked.
+    /// Begin (or continue) an Insert-mode coalescing run.
+    ///
+    /// On the *first* call in a run a snapshot of the pre-edit state is pushed. Subsequent
+    /// calls while `insert_run_active` is true are no-ops. Call this immediately before applying
+    /// an Insert mutation (insert grapheme, backspace, newline) so the pre-edit state is captured
+    /// exactly once.
     pub fn begin_insert_coalescing(&mut self) {
         if !self.insert_run_active {
             self.push_snapshot(SnapshotKind::Edit);
@@ -117,12 +141,18 @@ impl EditorState {
     /// Ends the current Insert-mode coalescing run. Boundary triggers:
     /// * Leaving Insert mode (Esc)
     /// * Inserting a newline (treated as a boundary in 5b)
+    ///   End the current Insert run (called on Esc or newline).
+    ///
+    /// The next Insert mutation will start a new run and thus push a new snapshot via
+    /// `begin_insert_coalescing`.
     pub fn end_insert_coalescing(&mut self) {
         self.insert_run_active = false;
     }
 
     /// Push a discrete edit snapshot (used for Normal mode edits like `x` or
     /// other non-coalesced operations). Always pushes regardless of coalescing flag.
+    /// Push a discrete (non-coalesced) edit snapshot. Used for Normal mode edits like `x` where
+    /// each action should undo independently. Ignores any Insert coalescing state.
     pub fn push_discrete_edit_snapshot(&mut self) {
         self.push_snapshot(SnapshotKind::Edit);
     }

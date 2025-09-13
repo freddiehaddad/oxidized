@@ -417,6 +417,8 @@ fn dispatch(
             match kind {
                 EditKind::InsertGrapheme(g) => {
                     if matches!(state.mode, Mode::Insert) {
+                        let span = tracing::trace_span!("edit_insert", grapheme = %g);
+                        let _enter = span.enter();
                         state.begin_insert_coalescing();
                         let mut pos = state.position;
                         state.active_buffer_mut().insert_grapheme(&mut pos, &g);
@@ -429,6 +431,8 @@ fn dispatch(
                 }
                 EditKind::InsertNewline => {
                     if matches!(state.mode, Mode::Insert) {
+                        let span = tracing::trace_span!("edit_newline");
+                        let _enter = span.enter();
                         // Newline is a coalescing boundary: ensure snapshot for prior run, then end it.
                         state.begin_insert_coalescing(); // if first action in run, capture pre-edit
                         let mut pos = state.position;
@@ -444,6 +448,8 @@ fn dispatch(
                 }
                 EditKind::Backspace => {
                     if matches!(state.mode, Mode::Insert) {
+                        let span = tracing::trace_span!("edit_backspace");
+                        let _enter = span.enter();
                         // Backspace stays within current coalescing run (does NOT end it).
                         // If this is the first edit in a new run, capture snapshot.
                         state.begin_insert_coalescing();
@@ -457,7 +463,19 @@ fn dispatch(
                     }
                 }
                 EditKind::DeleteUnder => {
-                    // Will be implemented in Task 6.
+                    if matches!(state.mode, Mode::Normal) {
+                        let span = tracing::trace_span!("edit_delete_under");
+                        let _enter = span.enter();
+                        // Always discrete snapshot per Task 6 simple spec (no coalescing for now).
+                        state.push_discrete_edit_snapshot();
+                        let mut pos = state.position;
+                        state.active_buffer_mut().delete_grapheme_at(&mut pos);
+                        state.position = pos;
+                        return DispatchResult {
+                            dirty: true,
+                            quit: false,
+                        };
+                    }
                 }
             }
             DispatchResult {
@@ -466,6 +484,11 @@ fn dispatch(
             }
         }
         Action::Undo | Action::Redo => {
+            let _e = if matches!(action, Action::Undo) {
+                tracing::trace_span!("undo").entered()
+            } else {
+                tracing::trace_span!("redo").entered()
+            };
             let applied = match action {
                 Action::Undo => state.undo(),
                 Action::Redo => state.redo(),
@@ -593,5 +616,53 @@ mod tests {
         // Undo should revert entire sequence (buffer empty)
         assert!(dispatch(Action::Undo, &mut state, &mut pending, &mut sticky).dirty);
         assert_eq!(state.active_buffer().line(0).unwrap(), "");
+    }
+
+    #[test]
+    fn normal_mode_delete_under_single() {
+        let mut state = mk_state("abc");
+        let mut pending = String::new();
+        let mut sticky = None;
+        // Delete 'a'
+        dispatch(
+            Action::Edit(EditKind::DeleteUnder),
+            &mut state,
+            &mut pending,
+            &mut sticky,
+        );
+        assert_eq!(state.active_buffer().line(0).unwrap(), "bc");
+        assert_eq!(state.undo_stack.len(), 1, "snapshot pushed for delete");
+        // Undo
+        assert!(dispatch(Action::Undo, &mut state, &mut pending, &mut sticky).dirty);
+        assert_eq!(state.active_buffer().line(0).unwrap(), "abc");
+    }
+
+    #[test]
+    fn normal_mode_delete_under_multiple_and_undo() {
+        let mut state = mk_state("abcd");
+        let mut pending = String::new();
+        let mut sticky = None;
+        // Delete 'a'
+        dispatch(
+            Action::Edit(EditKind::DeleteUnder),
+            &mut state,
+            &mut pending,
+            &mut sticky,
+        );
+        // Delete 'b' (originally 'c', now at index 0 after first delete)
+        dispatch(
+            Action::Edit(EditKind::DeleteUnder),
+            &mut state,
+            &mut pending,
+            &mut sticky,
+        );
+        assert_eq!(state.active_buffer().line(0).unwrap(), "cd");
+        assert_eq!(state.undo_stack.len(), 2, "two discrete snapshots");
+        // Undo last -> should restore to "bcd" (?) Actually sequence: start abcd -> after first delete bcd -> after second delete cd. Undo should return to bcd.
+        assert!(dispatch(Action::Undo, &mut state, &mut pending, &mut sticky).dirty);
+        assert_eq!(state.active_buffer().line(0).unwrap(), "bcd");
+        // Undo again -> original
+        assert!(dispatch(Action::Undo, &mut state, &mut pending, &mut sticky).dirty);
+        assert_eq!(state.active_buffer().line(0).unwrap(), "abcd");
     }
 }
