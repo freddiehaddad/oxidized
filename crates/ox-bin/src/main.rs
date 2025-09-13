@@ -4,8 +4,10 @@ use anyhow::Result;
 use core_events::{CommandEvent, Event, InputEvent, KeyCode};
 use core_render::{Frame, Renderer};
 use core_state::EditorState;
+use core_state::Mode;
 use core_terminal::{CrosstermBackend, TerminalBackend};
 use core_text::Buffer;
+use core_text::{grapheme, motion};
 use std::sync::mpsc;
 use tracing::{error, info};
 
@@ -44,12 +46,15 @@ async fn main() -> Result<()> {
         "welcome",
         "Welcome to Oxidized (Phase 0)\nPress :q to quit.",
     )?;
-    let state = EditorState::new(buffer);
+    let mut state = EditorState::new(buffer);
     let (tx, rx) = mpsc::channel::<Event>();
     let _input_handle = core_input::spawn_input_thread(tx.clone());
 
     // Simple command mode detection
     let mut pending_command = String::new();
+
+    // Sticky visual column for vertical motions (None until first j/k).
+    let mut sticky_visual_col: Option<usize> = None;
 
     let render_span = tracing::info_span!("event_loop");
     let _enter_loop = render_span.enter();
@@ -67,8 +72,69 @@ async fn main() -> Result<()> {
                 KeyCode::Char(c) => {
                     if pending_command.starts_with(':') {
                         pending_command.push(c);
+                    } else if matches!(state.mode, Mode::Normal) {
+                        match c {
+                            'h' => {
+                                apply_motion(&mut state, motion::left);
+                                sticky_visual_col = None;
+                            }
+                            'l' => {
+                                apply_motion(&mut state, motion::right);
+                                sticky_visual_col = None;
+                            }
+                            '0' => {
+                                apply_motion(&mut state, motion::line_start);
+                                sticky_visual_col = None;
+                            }
+                            '$' => {
+                                apply_motion(&mut state, motion::line_end);
+                                sticky_visual_col = None;
+                            }
+                            'j' => {
+                                sticky_visual_col = apply_vertical_motion(
+                                    &mut state,
+                                    sticky_visual_col,
+                                    motion::down,
+                                );
+                            }
+                            'k' => {
+                                sticky_visual_col = apply_vertical_motion(
+                                    &mut state,
+                                    sticky_visual_col,
+                                    motion::up,
+                                );
+                            }
+                            'w' => {
+                                apply_motion(&mut state, motion::word_forward);
+                                sticky_visual_col = None;
+                            }
+                            'b' => {
+                                apply_motion(&mut state, motion::word_backward);
+                                sticky_visual_col = None;
+                            }
+                            _ => {}
+                        }
                     }
                 }
+                KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => match k.code {
+                    KeyCode::Left => {
+                        apply_motion(&mut state, motion::left);
+                        sticky_visual_col = None;
+                    }
+                    KeyCode::Right => {
+                        apply_motion(&mut state, motion::right);
+                        sticky_visual_col = None;
+                    }
+                    KeyCode::Up => {
+                        sticky_visual_col =
+                            apply_vertical_motion(&mut state, sticky_visual_col, motion::up);
+                    }
+                    KeyCode::Down => {
+                        sticky_visual_col =
+                            apply_vertical_motion(&mut state, sticky_visual_col, motion::down);
+                    }
+                    _ => {}
+                },
                 KeyCode::Enter => {
                     if pending_command == ":q" {
                         break;
@@ -118,11 +184,19 @@ fn render(state: &EditorState) -> Result<()> {
             }
         }
     }
-    // Mode indicator (bottom line)
+    // Mode / status line (bottom)
     if h > 0 {
-        let mode_str = "-- NORMAL --";
-        let y = h - 1; // last line
-        for (i, ch) in mode_str.chars().enumerate() {
+        let y = h - 1;
+        let buf = state.active_buffer();
+        let line_content = buf.line(state.position.line).unwrap_or_default();
+        let content_trim = if line_content.ends_with('\n') {
+            &line_content[..line_content.len() - 1]
+        } else {
+            &line_content
+        };
+        let col = grapheme::visual_col(content_trim, state.position.byte);
+        let status = format!("[NORMAL] Ln {}, Col {} :", state.position.line + 1, col + 1);
+        for (i, ch) in status.chars().enumerate() {
             if (i as u16) < w {
                 frame.set(i as u16, y, ch);
             }
@@ -132,4 +206,33 @@ fn render(state: &EditorState) -> Result<()> {
     let _e = span.enter();
     Renderer::render(&frame)?;
     Ok(())
+}
+
+// Helper to apply a simple motion function without violating borrow rules.
+// Extracts the position out temporarily to ensure the buffer (&self) borrow ends
+// before we mutably borrow the position.
+fn apply_motion<F>(state: &mut EditorState, f: F)
+where
+    F: Fn(&core_text::Buffer, &mut core_text::Position),
+{
+    use std::mem;
+    let buf_ptr: *const core_text::Buffer = state.active_buffer(); // immutable borrow ends after this line
+    // Move position out, operate, then move back.
+    let mut pos = mem::replace(&mut state.position, core_text::Position::origin());
+    unsafe {
+        f(&*buf_ptr, &mut pos);
+    }
+    state.position = pos;
+}
+
+fn apply_vertical_motion<F>(state: &mut EditorState, sticky: Option<usize>, f: F) -> Option<usize>
+where
+    F: Fn(&core_text::Buffer, &mut core_text::Position, Option<usize>) -> Option<usize>,
+{
+    use std::mem;
+    let buf_ptr: *const core_text::Buffer = state.active_buffer();
+    let mut pos = mem::replace(&mut state.position, core_text::Position::origin());
+    let new_sticky = unsafe { f(&*buf_ptr, &mut pos, sticky) };
+    state.position = pos;
+    new_sticky
 }

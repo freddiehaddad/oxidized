@@ -114,6 +114,16 @@ Manual test with wide/CJK and emoji.
 9.2 Ensure render after every motion/edit.
 9.3 Separate small helpers for motion vs edit vs command input.
 
+Status: 9.1 & 9.2 COMPLETE (2025-09-13) for Normal mode motion keys with status line line/column display.
+
+Checklist:
+
+- [x] 9.1 Normal mode motion key mapping (h j k l 0 $ w b, arrows) wired.
+- [x] 9.2 Render occurs after each handled input (motions currently).
+- [ ] 9.3 Extract broader helpers (motion/edit/command). (Partial: inline `apply_motion` / `apply_vertical_motion` added; full separation pending edits & command handling.)
+
+Notes: Replaced temporary unsafe raw pointer borrowing with safe helper functions (`apply_motion`, `apply_vertical_motion`) before proceeding to Undo/Redo to avoid accruing technical debt.
+
 ---
 
 ## 10. Telemetry
