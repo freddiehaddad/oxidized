@@ -143,11 +143,46 @@ async fn main() -> Result<()> {
                     }
                 }
                 KeyCode::Enter => {
-                    if pending_command == ":q" {
-                        break;
+                    if let Some(act) = translate_key_wrapper(state.mode, &pending_command, &k) {
+                        let dr = dispatch(
+                            act,
+                            &mut state,
+                            &mut pending_command,
+                            &mut sticky_visual_col,
+                        );
+                        if dr.dirty {
+                            scheduler.mark_dirty();
+                        }
+                        if dr.quit {
+                            break;
+                        }
+                    } else {
+                        // Fallback: if Enter while in command mode with :q
+                        if pending_command == ":q" {
+                            break;
+                        }
+                        // Otherwise clear any pending command input (e.g., empty or cancelled)
+                        if pending_command.starts_with(':') {
+                            pending_command.clear();
+                            scheduler.mark_dirty();
+                        }
                     }
-                    pending_command.clear();
-                    scheduler.mark_dirty();
+                }
+                KeyCode::Backspace => {
+                    if let Some(act) = translate_key_wrapper(state.mode, &pending_command, &k) {
+                        let dr = dispatch(
+                            act,
+                            &mut state,
+                            &mut pending_command,
+                            &mut sticky_visual_col,
+                        );
+                        if dr.dirty {
+                            scheduler.mark_dirty();
+                        }
+                        if dr.quit {
+                            break;
+                        }
+                    }
                 }
                 KeyCode::Esc => {
                     // Route through translator so Insert mode Escape triggers ModeChange::LeaveInsert
@@ -393,10 +428,33 @@ fn dispatch(
                     }
                 }
                 EditKind::InsertNewline => {
-                    // Not part of minimal 5a subset yet.
+                    if matches!(state.mode, Mode::Insert) {
+                        // Newline is a coalescing boundary: ensure snapshot for prior run, then end it.
+                        state.begin_insert_coalescing(); // if first action in run, capture pre-edit
+                        let mut pos = state.position;
+                        state.active_buffer_mut().insert_newline(&mut pos);
+                        state.position = pos;
+                        // End current run so subsequent inserts start a new snapshot sequence.
+                        state.end_insert_coalescing();
+                        return DispatchResult {
+                            dirty: true,
+                            quit: false,
+                        };
+                    }
                 }
                 EditKind::Backspace => {
-                    // Deferred to 5b.
+                    if matches!(state.mode, Mode::Insert) {
+                        // Backspace stays within current coalescing run (does NOT end it).
+                        // If this is the first edit in a new run, capture snapshot.
+                        state.begin_insert_coalescing();
+                        let mut pos = state.position;
+                        state.active_buffer_mut().delete_grapheme_before(&mut pos);
+                        state.position = pos;
+                        return DispatchResult {
+                            dirty: true,
+                            quit: false,
+                        };
+                    }
                 }
                 EditKind::DeleteUnder => {
                     // Will be implemented in Task 6.
@@ -427,4 +485,113 @@ fn dispatch(
 
 fn translate_key_wrapper(mode: Mode, pending_command: &str, key: &KeyEvent) -> Option<Action> {
     core_actions::translate_key(mode, pending_command, key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core_actions::{EditKind, ModeChange};
+    use core_text::Buffer;
+
+    fn mk_state(initial: &str) -> EditorState {
+        let buf = Buffer::from_str("test", initial).unwrap();
+        EditorState::new(buf)
+    }
+
+    #[test]
+    fn insert_newline_coalescing_boundary() {
+        let mut state = mk_state("");
+        let mut pending = String::new();
+        let mut sticky = None;
+        // Enter insert
+        dispatch(
+            Action::ModeChange(ModeChange::EnterInsert),
+            &mut state,
+            &mut pending,
+            &mut sticky,
+        );
+        // Insert 'a'
+        dispatch(
+            Action::Edit(EditKind::InsertGrapheme("a".to_string())),
+            &mut state,
+            &mut pending,
+            &mut sticky,
+        );
+        assert_eq!(state.active_buffer().line(0).unwrap(), "a");
+        assert_eq!(state.undo_stack.len(), 1, "expected first snapshot");
+        // Newline
+        dispatch(
+            Action::Edit(EditKind::InsertNewline),
+            &mut state,
+            &mut pending,
+            &mut sticky,
+        );
+        assert_eq!(state.active_buffer().line_count(), 2);
+        assert_eq!(state.active_buffer().line(0).unwrap(), "a\n");
+        assert_eq!(state.position.line, 1);
+        assert_eq!(state.position.byte, 0);
+        // Insert 'b' (new run -> new snapshot)
+        dispatch(
+            Action::Edit(EditKind::InsertGrapheme("b".to_string())),
+            &mut state,
+            &mut pending,
+            &mut sticky,
+        );
+        assert_eq!(state.active_buffer().line(1).unwrap(), "b");
+        assert_eq!(
+            state.undo_stack.len(),
+            2,
+            "expected second snapshot after new run"
+        );
+    }
+
+    #[test]
+    fn backspace_stays_within_run_dispatch() {
+        let mut state = mk_state("");
+        let mut pending = String::new();
+        let mut sticky = None;
+        dispatch(
+            Action::ModeChange(ModeChange::EnterInsert),
+            &mut state,
+            &mut pending,
+            &mut sticky,
+        );
+        dispatch(
+            Action::Edit(EditKind::InsertGrapheme("a".to_string())),
+            &mut state,
+            &mut pending,
+            &mut sticky,
+        );
+        dispatch(
+            Action::Edit(EditKind::InsertGrapheme("b".to_string())),
+            &mut state,
+            &mut pending,
+            &mut sticky,
+        );
+        assert_eq!(state.active_buffer().line(0).unwrap(), "ab");
+        assert_eq!(state.undo_stack.len(), 1, "still single run snapshot");
+        // Backspace
+        dispatch(
+            Action::Edit(EditKind::Backspace),
+            &mut state,
+            &mut pending,
+            &mut sticky,
+        );
+        assert_eq!(state.active_buffer().line(0).unwrap(), "a");
+        assert_eq!(
+            state.undo_stack.len(),
+            1,
+            "backspace should not create new snapshot"
+        );
+        // Leave insert -> ends run
+        dispatch(
+            Action::ModeChange(ModeChange::LeaveInsert),
+            &mut state,
+            &mut pending,
+            &mut sticky,
+        );
+        // Undo should revert entire sequence (buffer empty)
+        assert!(dispatch(Action::Undo, &mut state, &mut pending, &mut sticky).dirty);
+        assert_eq!(state.active_buffer().line(0).unwrap(), "");
+    }
 }

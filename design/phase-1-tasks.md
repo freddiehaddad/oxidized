@@ -76,7 +76,7 @@ Checklist (Hybrid Sequencing):
 - [x] 4.5 (4a) Unit tests: single insert sequence captured once; multiple snapshots capped; redo cleared after new edit.
 - [x] 4.6 (4b) Wire `Action::Undo` (`u`) and `Action::Redo` (`Ctrl-R`) in dispatcher after minimal Insert (5a) merged.
 - [x] 4.7 (4b) Integration tests: perform inserts -> undo -> redo path; ensure cursor restored.
-- [ ] 4.8 (4b) Coalescing logic (boundary-based): character inserts while in Insert mode coalesce until Esc or newline (newline added in 5b). Implementation: track `coalescing_active` flag; Esc/newline toggles off.
+- [x] 4.8 (4b) Coalescing logic (boundary-based): character inserts while in Insert mode coalesce until Esc or newline (newline added in 5b). Implementation: track `coalescing_active` flag; Esc/newline toggles off.
 - [ ] 4.9 (4b) Snapshot push for Normal mode edits (`x`) always discrete (implemented later in Task 6).
 - [x] 4.10 (4b) Logging: trace each snapshot push/pop with stack sizes.
 - [x] 4.11 (Deferred) Time-based coalescing placeholder comment (no timers yet) referencing future diff rendering.
@@ -93,7 +93,7 @@ Acceptance:
 
 ## 5. Insert Mode Mechanics
 
-**Status:** [~] 5a partial (printable inserts + Esc); newline/backspace pending (5b)
+**Status:** [x] 5a complete / [x] core 5b (newline, backspace, boundaries) done; logging + rustdoc (5.11–5.12) pending
 
 Goal: Introduce a minimal Insert experience (5a) to validate snapshot infra, then expand to full mechanics (5b) including newline/backspace and coalescing boundaries.
 
@@ -104,11 +104,11 @@ Checklist:
 - [x] 5.3 (5a) Dispatcher inserts grapheme, marks dirty, sets/maintains an `insert_run_active` flag (begins with first inserted char after entering Insert).
 - [x] 5.4 (5a) Esc handling: translate to `Action::ModeChange(LeaveInsert)`; dispatcher ends insert run (coalescing boundary) without modifying cursor position (Phase 1 simplicity).
 - [x] 5.5 (5a) Tests: type "abc" Esc => one undo restores empty buffer; redo replays all.
-- [ ] 5.6 (5b) Enter key -> newline insertion (`Action::Edit(InsertNewline)`), ends coalescing run (boundary) and starts a fresh run after next char.
-- [ ] 5.7 (5b) Backspace -> delete previous full grapheme or join with previous line (cursor moves to join point).
-- [ ] 5.8 (5b) Ensure backspace within a run does NOT prematurely end coalescing; newline or Esc only.
-- [ ] 5.9 (5b) Cursor adjustment rules after newline/backspace validated (stay at start of new line after newline; at join offset after join).
-- [ ] 5.10 (5b) Tests: newline mid-line split; backspace at start of line joins; multi-grapheme clusters (emoji) deleted as single unit.
+- [x] 5.6 (5b) Enter key -> newline insertion (`Action::Edit(InsertNewline)`), ends coalescing run (boundary) and starts a fresh run after next char.
+- [x] 5.7 (5b) Backspace -> delete previous full grapheme or join with previous line (cursor moves to join point).
+- [x] 5.8 (5b) Ensure backspace within a run does NOT prematurely end coalescing; newline or Esc only.
+- [x] 5.9 (5b) Cursor adjustment rules after newline/backspace validated (stay at start of new line after newline; at join offset after join).
+- [x] 5.10 (5b) Tests: newline mid-line split; backspace at start of line joins; multi-grapheme clusters (emoji) deleted as single unit.
 - [ ] 5.11 (5b) Logging/tracing: insert, newline, backspace spans.
 - [ ] 5.12 (5b) Rustdoc comments for Insert semantics & coalescing boundaries.
 

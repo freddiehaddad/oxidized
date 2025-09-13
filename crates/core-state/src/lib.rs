@@ -385,4 +385,79 @@ mod tests {
         assert!(st.redo());
         assert!(matches!(st.mode, Mode::Normal));
     }
+
+    #[test]
+    fn newline_is_coalescing_boundary() {
+        let buf = Buffer::from_str("t", "").unwrap();
+        let mut st = EditorState::new(buf);
+        st.mode = Mode::Insert;
+        // Insert 'a' then newline then 'b'; expect two snapshots (one for first run before 'a', one for second run after newline)
+        st.begin_insert_coalescing();
+        {
+            let mut modified = st.active_buffer().clone();
+            let mut pos = st.position;
+            modified.insert_grapheme(&mut pos, "a");
+            st.buffers[st.active] = modified;
+            st.position = pos;
+        }
+        // Newline ends run
+        {
+            let mut modified = st.active_buffer().clone();
+            let mut pos = st.position;
+            modified.insert_newline(&mut pos);
+            st.buffers[st.active] = modified;
+            st.position = pos;
+        }
+        st.end_insert_coalescing();
+        // Start second run after boundary
+        st.begin_insert_coalescing();
+        {
+            let mut modified = st.active_buffer().clone();
+            let mut pos = st.position;
+            modified.insert_grapheme(&mut pos, "b");
+            st.buffers[st.active] = modified;
+            st.position = pos;
+        }
+        assert_eq!(
+            st.undo_stack.len(),
+            2,
+            "expected two snapshots across newline boundary"
+        );
+    }
+
+    #[test]
+    fn backspace_stays_in_run() {
+        let buf = Buffer::from_str("t", "").unwrap();
+        let mut st = EditorState::new(buf);
+        st.mode = Mode::Insert;
+        st.begin_insert_coalescing();
+        // Insert two characters
+        for ch in ["a", "b"] {
+            let mut modified = st.active_buffer().clone();
+            let mut pos = st.position;
+            modified.insert_grapheme(&mut pos, ch);
+            st.buffers[st.active] = modified;
+            st.position = pos;
+            st.begin_insert_coalescing();
+        }
+        // Backspace one character (should not end run or create new snapshot)
+        {
+            let mut modified = st.active_buffer().clone();
+            let mut pos = st.position;
+            modified.delete_grapheme_before(&mut pos);
+            st.buffers[st.active] = modified;
+            st.position = pos;
+            st.begin_insert_coalescing(); // still active
+        }
+        assert_eq!(
+            st.undo_stack.len(),
+            1,
+            "backspace created unexpected snapshot"
+        );
+        // End run and undo should revert to empty buffer
+        st.end_insert_coalescing();
+        st.mode = Mode::Normal;
+        assert!(st.undo());
+        assert_eq!(st.active_buffer().line(0).unwrap_or_default(), "");
+    }
 }
