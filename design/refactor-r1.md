@@ -100,10 +100,11 @@ Out of Scope (Deferred to later phases):
    * `ox-bin` maintains an empty observers vector (breadth-first) – future macro recorder / analytics will register here.
    * Unit test (`observer_invoked`) asserts observer receives actions.
 
-9. Viewport Stub (PENDING)
-   * Introduce `Viewport { first_line: usize, height: usize }`.
-   * `render()` calculates visible lines using viewport instead of implicit 0.
-   * No scrolling yet; tests confirm unchanged output baseline.
+9. Viewport Stub (COMPLETED)
+   * Added `core-render::viewport::Viewport { first_line, height }`.
+   * Main rendering now instantiates a viewport reserving one row for the status line and iterates only visible lines.
+   * `clamp_cursor_into_view` stub present (no scrolling yet) ready for future cursor-follow behavior.
+   * No behavior change for small files fitting on screen; sets API surface for future scrolling & split support.
 
 10. Channel Policy Documentation (PENDING)
     * Define `EVENT_CHANNEL_CAP: usize` constant (unused for now) + comment explaining deferred bounded migration (link to Phase 2 plan).

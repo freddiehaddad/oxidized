@@ -7,6 +7,7 @@ use core_actions::dispatcher::dispatch;
 use core_events::{CommandEvent, Event, InputEvent, KeyCode, KeyEvent};
 use core_render::scheduler::RenderScheduler;
 use core_render::status::{StatusContext, build_status};
+use core_render::viewport::Viewport;
 use core_render::{Frame, Renderer};
 use core_state::EditorState;
 use core_state::Mode;
@@ -198,15 +199,21 @@ fn render(state: &EditorState) -> Result<()> {
     let (w, h) = size()?;
     let mut frame = Frame::new(w, h);
 
+    // Viewport: reserve one line for status if possible
+    let text_height = if h > 0 { h - 1 } else { 0 };
+    let mut viewport = Viewport::new(0, text_height as usize);
+    viewport.clamp_cursor_into_view(state.position.line); // no-op now
     let buf = state.active_buffer();
-    for (i, line_idx) in (0..buf.line_count()).enumerate() {
-        if (i as u16) >= h {
+    let start = viewport.first_line;
+    let end = (start + viewport.height).min(buf.line_count());
+    for (screen_y, line_idx) in (start..end).enumerate() {
+        if (screen_y as u16) >= text_height {
             break;
         }
         if let Some(line) = buf.line(line_idx) {
             for (x, ch) in line.chars().enumerate() {
                 if (x as u16) < w {
-                    frame.set(x as u16, i as u16, ch);
+                    frame.set(x as u16, screen_y as u16, ch);
                 }
             }
         }
