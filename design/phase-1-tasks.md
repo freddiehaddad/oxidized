@@ -63,7 +63,7 @@ Notes: Word motions implemented with a simplified single-step algorithm (naive A
 
 ## 4. Undo/Redo (Snapshot)
 
-**Status:** [x] 4a complete / [~] 4b in progress
+**Status:** [x] 4a complete / [x] 4b complete / [x] 4c complete
 
 Goal: Land snapshot infrastructure (4a) before wiring undo keys (4b) to stabilize API, then complete coalescing semantics after minimal Insert exists.
 
@@ -78,8 +78,9 @@ Checklist (Hybrid Sequencing):
 - [x] 4.7 (4b) Integration tests: perform inserts -> undo -> redo path; ensure cursor restored.
 - [ ] 4.8 (4b) Coalescing logic (boundary-based): character inserts while in Insert mode coalesce until Esc or newline (newline added in 5b). Implementation: track `coalescing_active` flag; Esc/newline toggles off.
 - [ ] 4.9 (4b) Snapshot push for Normal mode edits (`x`) always discrete (implemented later in Task 6).
-- [ ] 4.10 (4b) Logging: trace each snapshot push/pop with stack sizes.
-- [ ] 4.11 (Deferred) Time-based coalescing placeholder comment (no timers yet) referencing future diff rendering.
+- [x] 4.10 (4b) Logging: trace each snapshot push/pop with stack sizes.
+- [x] 4.11 (Deferred) Time-based coalescing placeholder comment (no timers yet) referencing future diff rendering.
+- [x] 4c Snapshot mode semantics refinement: introduce `SnapshotKind`; edit undos do not restore Insert mode. Tests: `iabc<Esc>u` leaves Normal; redo restores text but remains Normal. Update design docs.
 
 Acceptance:
 

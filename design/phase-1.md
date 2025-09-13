@@ -93,21 +93,22 @@ Action Abstraction (Added mid‑Phase 1):
 
 1. Add `Mode::Insert` variant and (INITIAL) grapheme-aware `Cursor` struct to `core-state` with constructor & clamp helpers. (Refactored: relocated to `core-text` as plain `Position` before adding motions to keep text-centric concerns co-located. Future richer cursor/multi-selection logic will likely live in a dedicated `core-cursor` crate.)
 2. Implement grapheme mutation APIs in `core-text` (leveraging ropey insert & remove). Provide safe wrappers that adjust positions.
-3. (Hybrid 4a COMPLETE) Snapshot infrastructure: `EditSnapshot`, capped undo/redo stacks, push/restore API, guard logic for Insert coalescing (begin/end run) plus unit tests validating single-run snapshot capture, redo clearing, and stack cap. No key wiring yet (Undo/Redo still pending in 4b).
-4. (Hybrid 5a IN PROGRESS) Minimal Insert subset: enter Insert (`i`), insert printable graphemes (no newline/backspace yet), Esc back to Normal. Uses snapshot API from 4a: first insertion triggers pre-edit snapshot; Esc sets coalescing boundary. (Current status: printable insertion + Esc working, dynamic mode indicator rendering added; newline & backspace remain for 5b.) Enables immediate manual verification of snapshot restore via (still unwired) internal tests.
-5. (Hybrid 4b) Wire Undo/Redo actions (`u`, `Ctrl-R`) to stacks now that minimal Insert exists. Add tests proving a sequence of inserts is reverted in one step. Coalescing still boundary-based (Esc/newline) but newline not yet implemented.
-6. (Hybrid 5b) Complete Insert mechanics: newline insertion, backspace (grapheme delete / line join), finalize simple coalescing boundaries (Esc or newline). Update tests.
-7. Extend rendering: draw buffer; move terminal cursor to current logical position (translate to (x,y)) before flush; compose status/command line: `[NORMAL|INSERT]  Ln {line+1}, Col {col+1}  :{pending_command}`.
-8. Enhance input handling in main loop:
+3. (Hybrid 4a COMPLETE) Snapshot infrastructure: `EditSnapshot`, capped undo/redo stacks, push/restore API, guard logic for Insert coalescing (begin/end run) plus unit tests validating single-run snapshot capture, redo clearing, and stack cap.
+4. (Hybrid 5a COMPLETE) Minimal Insert subset: enter Insert (`i`), insert printable graphemes (no newline/backspace yet), Esc back to Normal. Uses snapshot API from 4a: first insertion triggers pre-edit snapshot; Esc sets coalescing boundary. Dynamic mode indicator added.
+5. (Hybrid 4b COMPLETE) Wire Undo/Redo actions (`u`, `Ctrl-R`) to stacks now that minimal Insert exists. Test multi-character coalesced undo/redo.
+6. (NEW 4c PLANNED) Snapshot mode semantics refinement: introduce `SnapshotKind` so edit undos/redos do not restore Insert mode (e.g. `iabc<Esc>u` leaves Normal). Tag snapshots; ignore mode for `SnapshotKind::Edit` on restore; add tests.
+7. (Hybrid 5b) Complete Insert mechanics: newline insertion, backspace (grapheme delete / line join), finalize simple coalescing boundaries (Esc or newline). Update tests.
+8. Extend rendering: draw buffer; move terminal cursor to current logical position (translate to (x,y)) before flush; compose status/command line: `[NORMAL|INSERT]  Ln {line+1}, Col {col+1}  :{pending_command}`.
+9. Enhance input handling in main loop:
    * Normal mode key mapping: motions (h/j/k/l/0/$/w/b), `i` -> enter Insert, `x` -> delete char under cursor, `u` -> undo, `Ctrl-R` -> redo, `:` -> command-line start.
    * Insert mode: printable -> insert char; Enter -> newline; Backspace -> delete previous char (col>0 or join lines); Esc -> leave Insert, finalize snapshot.
-9. Implement word motion helpers (naive: alphanumeric+underscore cluster sequences vs others) using grapheme iteration. (Completed alongside basic motions earlier to keep motion module cohesive.)
-10. Integrate undo stack coalescing refinement: sequence of plain character inserts inside Insert mode forms a single snapshot (boundary = Esc or newline). Time-based merging deferred.
-11. Add command-line echo: maintain `pending_command` state; render at status line; execute on Enter (still only `:q` recognized this phase).
-12. Update tests: buffer mutation (insert/delete/newline), cursor motion clamping, undo/redo restoring previous text, status line string composition.
-13. Add tracing spans for `edit_op`, `motion`, and `undo_cycle`.
-14. Update design docs & README to reflect new capabilities and hybrid ordering (4a -> 5a -> 4b -> 5b).
-15. Run build, clippy, fmt, tests; ensure clean exit still works.
+10. Implement word motion helpers (naive: alphanumeric+underscore cluster sequences vs others) using grapheme iteration. (Completed alongside basic motions earlier to keep motion module cohesive.)
+11. Integrate undo stack coalescing refinement: sequence of plain character inserts inside Insert mode forms a single snapshot (boundary = Esc or newline). Time-based merging deferred.
+12. Add command-line echo: maintain `pending_command` state; render at status line; execute on Enter (still only `:q` recognized this phase).
+13. Update tests: buffer mutation (insert/delete/newline), cursor motion clamping, undo/redo restoring previous text, status line string composition.
+14. Add tracing spans for `edit_op`, `motion`, and `undo_cycle`.
+15. Update design docs & README to reflect new capabilities and hybrid ordering (4a -> 5a -> 4b -> 5b).
+16. Run build, clippy, fmt, tests; ensure clean exit still works.
 
 ## 7. Exit Criteria
 

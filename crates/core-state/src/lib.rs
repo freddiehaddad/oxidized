@@ -6,9 +6,18 @@ use tracing::trace;
 /// Maximum number of snapshots retained in undo history.
 const UNDO_HISTORY_MAX: usize = 200;
 
+/// Snapshot classification controlling restore semantics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapshotKind {
+    /// Text edit snapshot (coalesced insert run or discrete edit). Mode is not restored.
+    Edit,
+    // Future: ModeTransition, Structural, etc.
+}
+
 /// A full-state snapshot for undo/redo (Phase 1: coarse clone for simplicity).
 #[derive(Clone)]
 pub struct EditSnapshot {
+    pub kind: SnapshotKind,
     pub buffer: Buffer,
     pub position: Position,
     pub mode: Mode,
@@ -68,8 +77,9 @@ impl EditorState {
     }
 
     /// Capture a snapshot of the current editable state (active single buffer only in Phase 1).
-    pub fn push_snapshot(&mut self) {
+    pub fn push_snapshot(&mut self, kind: SnapshotKind) {
         let snap = EditSnapshot {
+            kind,
             buffer: self.active_buffer().clone(),
             position: self.position,
             mode: self.mode,
@@ -99,7 +109,7 @@ impl EditorState {
     /// `end_insert_coalescing` is invoked.
     pub fn begin_insert_coalescing(&mut self) {
         if !self.insert_run_active {
-            self.push_snapshot();
+            self.push_snapshot(SnapshotKind::Edit);
             self.insert_run_active = true;
         }
     }
@@ -114,7 +124,7 @@ impl EditorState {
     /// Push a discrete edit snapshot (used for Normal mode edits like `x` or
     /// other non-coalesced operations). Always pushes regardless of coalescing flag.
     pub fn push_discrete_edit_snapshot(&mut self) {
-        self.push_snapshot();
+        self.push_snapshot(SnapshotKind::Edit);
     }
 
     /// Restore previously captured snapshot (caller ensures existence). Returns true if restored.
@@ -127,6 +137,7 @@ impl EditorState {
             );
             // Push current state to redo before replacing.
             let current = EditSnapshot {
+                kind: last.kind,
                 buffer: self.active_buffer().clone(),
                 position: self.position,
                 mode: self.mode,
@@ -135,7 +146,9 @@ impl EditorState {
             trace!(redo_depth = self.redo_stack.len(), "redo_push_from_undo");
             self.buffers[self.active] = last.buffer;
             self.position = last.position;
-            self.mode = last.mode; // mode restore is simplistic; acceptable Phase 1.
+            if !matches!(last.kind, SnapshotKind::Edit) {
+                self.mode = last.mode;
+            }
             true
         } else {
             false
@@ -152,6 +165,7 @@ impl EditorState {
             );
             // Save current to undo stack.
             let current = EditSnapshot {
+                kind: next.kind,
                 buffer: self.active_buffer().clone(),
                 position: self.position,
                 mode: self.mode,
@@ -160,7 +174,9 @@ impl EditorState {
             trace!(undo_depth = self.undo_stack.len(), "undo_push_from_redo");
             self.buffers[self.active] = next.buffer;
             self.position = next.position;
-            self.mode = next.mode;
+            if !matches!(next.kind, SnapshotKind::Edit) {
+                self.mode = next.mode;
+            }
             true
         } else {
             false
@@ -205,7 +221,7 @@ mod tests {
         let buf = Buffer::from_str("t", "one").unwrap();
         let mut st = EditorState::new(buf);
         // initial snapshot
-        st.push_snapshot();
+        st.push_snapshot(SnapshotKind::Edit);
         // mutate buffer by inserting (simulate via direct buffer clone replace for now)
         {
             let mut modified = st.active_buffer().clone();
@@ -214,7 +230,7 @@ mod tests {
             st.buffers[st.active] = modified;
             st.position = pos;
         }
-        st.push_snapshot();
+        st.push_snapshot(SnapshotKind::Edit);
         assert!(st.undo());
         // After undo we can redo
         assert!(st.redo());
@@ -258,7 +274,7 @@ mod tests {
     fn redo_cleared_after_new_coalesced_edit() {
         let buf = Buffer::from_str("t", "Hello").unwrap();
         let mut st = EditorState::new(buf);
-        st.push_snapshot(); // baseline snapshot
+        st.push_snapshot(SnapshotKind::Edit); // baseline snapshot
         // Apply an edit by direct mutation and push snapshot to simulate earlier approach
         {
             let mut modified = st.active_buffer().clone();
@@ -267,7 +283,7 @@ mod tests {
             st.buffers[st.active] = modified;
             st.position = pos;
         }
-        st.push_snapshot();
+        st.push_snapshot(SnapshotKind::Edit);
         assert!(st.undo()); // creates one entry in redo
         assert_eq!(st.redo_stack.len(), 1);
 
@@ -289,7 +305,7 @@ mod tests {
             modified.insert_grapheme(&mut pos, "x");
             st.buffers[st.active] = modified;
             st.position = pos;
-            st.push_snapshot();
+            st.push_snapshot(SnapshotKind::Edit);
             // ensure length never exceeds cap + 1 transiently (since we remove after push)
             assert!(st.undo_stack.len() <= UNDO_HISTORY_MAX);
             // Reset to allow next iteration to mutate from previous base (simplistic)
@@ -324,10 +340,16 @@ mod tests {
         }
         // End run via Esc boundary semantics
         st.end_insert_coalescing();
+        // Simulate Esc leave insert for refined undo semantics
+        st.mode = Mode::Normal;
         assert_eq!(st.undo_stack.len(), 1, "expected single snapshot for run");
         // Perform undo: buffer should become empty again
         assert!(st.undo());
         assert_eq!(st.active_buffer().line(0).unwrap_or_default(), "");
+        assert!(
+            matches!(st.mode, Mode::Normal),
+            "mode restored unexpectedly to Insert"
+        );
         // Redo should restore 'abc'
         assert!(st.redo());
         assert!(
@@ -336,5 +358,31 @@ mod tests {
                 .unwrap_or_default()
                 .starts_with("abc")
         );
+        assert!(
+            matches!(st.mode, Mode::Normal),
+            "redo changed mode unexpectedly"
+        );
+    }
+
+    #[test]
+    fn undo_does_not_restore_insert_mode() {
+        let buf = Buffer::from_str("t", "").unwrap();
+        let mut st = EditorState::new(buf);
+        st.mode = Mode::Insert;
+        st.begin_insert_coalescing();
+        for ch in ["a", "b"] {
+            let mut modified = st.active_buffer().clone();
+            let mut pos = st.position;
+            modified.insert_grapheme(&mut pos, ch);
+            st.buffers[st.active] = modified;
+            st.position = pos;
+            st.begin_insert_coalescing();
+        }
+        st.end_insert_coalescing();
+        st.mode = Mode::Normal; // simulate Esc
+        assert!(st.undo());
+        assert!(matches!(st.mode, Mode::Normal));
+        assert!(st.redo());
+        assert!(matches!(st.mode, Mode::Normal));
     }
 }
