@@ -1,0 +1,13 @@
+[package]
+name = "core-actions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+core-events = { path = "../core-events" }
+core-state = { path = "../core-state" }
+
+[dev-dependencies]
+anyhow = "1.0.99"

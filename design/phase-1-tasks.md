@@ -113,6 +113,12 @@ Manual test with wide/CJK and emoji.
 9.1 Key→action mapping per mode (press-only).
 9.2 Ensure render after every motion/edit.
 9.3 Separate small helpers for motion vs edit vs command input.
+9.4 Introduce `Action` enum (Motion, Edit, ModeChange, Undo, Redo, CommandInput, CommandExecute, Quit).
+9.5 Key translation function (pure) `translate(InputEvent + state + pending_command) -> Option<Action>`.
+9.6 Migrate channel to `tokio::mpsc` and async loop (await actions) – still single producer.
+9.7 Dispatcher function `apply_action(Action, &mut EditorState, &mut pending_command) -> bool /*dirty*/`.
+9.8 Render scheduler stub (tracks dirty flag; still immediate full redraw).
+9.9 TODO (deferred): additional action producers (config watcher, timers) & diff render integration hook.
 
 Status: 9.1 & 9.2 COMPLETE (2025-09-13) for Normal mode motion keys with status line line/column display.
 
@@ -121,8 +127,20 @@ Checklist:
 - [x] 9.1 Normal mode motion key mapping (h j k l 0 $ w b, arrows) wired.
 - [x] 9.2 Render occurs after each handled input (motions currently).
 - [ ] 9.3 Extract broader helpers (motion/edit/command). (Partial: inline `apply_motion` / `apply_vertical_motion` added; full separation pending edits & command handling.)
+- [x] 9.4 Action enum introduced (`core-actions` crate) & compiled.
+- [x] 9.5 Translation function skeleton (`translate_key`) added (no wiring yet).
+- [ ] 9.6 Async tokio channel + loop.
+- [ ] 9.7 Dispatcher & dirty flag.
+- [ ] 9.8 Render scheduler stub.
+- [ ] 9.9 Deferred multi-producer & diff hook documented.
+- [ ] 9.4 Action enum introduced & compiled.
+- [ ] 9.5 Translation function returning `Action`.
+- [ ] 9.6 Async tokio channel + loop.
+- [ ] 9.7 Dispatcher & dirty flag.
+- [ ] 9.8 Render scheduler stub.
+- [ ] 9.9 Deferred multi-producer & diff hook documented.
 
-Notes: Replaced temporary unsafe raw pointer borrowing with safe helper functions (`apply_motion`, `apply_vertical_motion`) before proceeding to Undo/Redo to avoid accruing technical debt.
+Notes: Replaced temporary unsafe raw pointer borrowing with safe helper functions (`apply_motion`, `apply_vertical_motion`) before proceeding to Undo/Redo to avoid accruing technical debt. Introduced new `core-actions` crate for semantic intent separation (motions/edits/mode changes) per modularity goal.
 
 ---
 

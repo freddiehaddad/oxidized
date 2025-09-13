@@ -39,7 +39,8 @@ Existing crates extended rather than adding new ones:
 * `core-state`: Add `Cursor` struct, integrate into `EditorState`; track mode; maintain undo stack.
 * `core-text`: Add mutable editing operations (insert_char, insert_newline, delete_at). Possibly small wrapper around ropey mutation APIs.
 * `core-render`: Render cursor position (highlight cell or rely on terminal cursor MoveTo). Add status/command line composition.
-* `core-input`: Map new keys to either motion intents or insertion (depending on mode). Introduce a minimal state machine for command-line entry vs normal vs insert.
+* `core-input`: Map raw key events.
+* `core-actions`: Translate raw key events + lightweight contextual state (mode, pending command) into semantic `Action` values (motions, edits, mode changes, undo/redo, command input).
 * `core-terminal`: Provide API for setting terminal cursor position (if not already) for direct cursor placement.
 * `ox-bin`: Expand event loop to handle new event variants, route motions/edit operations, update status line, manage undo stack triggers.
 
@@ -47,7 +48,7 @@ No new crate is strictly required; future phases (syntax, LSP, plugins) will int
 
 ## 4. Event Additions
 
-Extend `Event` / `InputEvent` mapping indirectly via translation layer in `core-input` producing domain events (either keep `Event::Input` + interpret in loop, or introduce a `Motion`/`Edit` internal event). For simplicity in Phase 1, maintain current structure and interpret `InputEvent::Key` in main loop to derive actions.
+Extend `Event` / `InputEvent` mapping indirectly via a translation layer. Initially we interpreted `InputEvent::Key` directly inside the main loop; we will now (still within Phase 1) introduce an explicit `Action` abstraction and translation function to future‑proof undo coalescing, macro recording, and background producers.
 
 Add (logical) action set (not necessarily new enum variants yet, but documented for clarity):
 
@@ -57,7 +58,13 @@ Add (logical) action set (not necessarily new enum variants yet, but documented 
 * Undo, Redo (map to `u` and `Ctrl-R`).
 * CursorMoved (implicit after motion/edit) used internally to trigger render.
 
-If desired for cleanliness: introduce `ActionEvent` enum later—explicitly deferred; Phase 1 may keep imperative interpretation for speed of delivery.
+Action Abstraction (Added mid‑Phase 1):
+
+* `Action` enum (Motion, Edit, ModeChange, Undo, Redo, CommandInput, CommandExecute, Quit) sits between raw input and state mutation.
+* Pure translator: key + state + pending_command -> `Option<Action>`.
+* Dispatcher applies action -> state delta, returns dirty flag.
+* Render scheduler stub decides when to flush (currently immediate full redraw; future diff integration hooks here).
+* Breadth‑first principle preserved: behavior identical after each incremental commit.
 
 ## 5. Data Model Changes
 
@@ -151,7 +158,7 @@ If desired for cleanliness: introduce `ActionEvent` enum later—explicitly defe
 
 ## 12. Notes
 
-* Keep architecture event-driven: main loop interprets key -> action -> state mutation -> render.
-* No polling introduced; input thread unchanged except mapping more keys.
+* Keep architecture event-driven: key/input -> translate -> Action -> dispatch -> (mark dirty) -> render.
+* No polling introduced; input thread remains blocking; channel migration to `tokio::mpsc` enables async producers later without redesign.
 * Maintain press-only key filtering for determinism; revisit auto-repeat after diffed rendering arrives.
 * Simplicity over optimality: full snapshots and full redraws.

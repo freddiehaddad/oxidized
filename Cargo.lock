@@ -81,6 +81,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "core-actions"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "core-events",
+ "core-state",
+]
+
+[[package]]
 name = "core-config"
 version = "0.1.0"
 dependencies = [
