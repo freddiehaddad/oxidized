@@ -83,6 +83,106 @@ impl Buffer {
             s.len()
         }
     }
+
+    fn line_content_string(&self, idx: usize) -> String {
+        let mut s = self.rope.line(idx).to_string();
+        if s.ends_with('\n') {
+            s.pop();
+        }
+        s
+    }
+
+    fn absolute_byte_index(&self, pos: &Position) -> usize {
+        // Sum bytes of prior lines + byte within line. For early phase simplicity we derive via ropey APIs.
+        // ropey lacks direct line_to_byte historically; compute using char indices.
+        let line_start_char = self.rope.line_to_char(pos.line);
+        let line_start_byte = self.rope.char_to_byte(line_start_char);
+        line_start_byte + pos.byte
+    }
+
+    fn byte_to_char_index(&self, line: usize, byte_in_line: usize) -> usize {
+        let line_start_char = self.rope.line_to_char(line);
+        let line_str = self.rope.line(line).to_string();
+        let mut trimmed = line_str.as_str();
+        if trimmed.ends_with('\n') {
+            trimmed = &trimmed[..trimmed.len() - 1];
+        }
+        // Slice up to byte_in_line (assumed valid grapheme boundary / char boundary) and count chars.
+        let within = &trimmed[..byte_in_line];
+        line_start_char + within.chars().count()
+    }
+
+    /// Insert a grapheme cluster string (may be multi-byte) at the given position; advances position by its byte length.
+    pub fn insert_grapheme(&mut self, pos: &mut Position, g: &str) {
+        let char_index = self.byte_to_char_index(pos.line, pos.byte);
+        self.rope.insert(char_index, g);
+        pos.byte += g.len();
+    }
+
+    /// Insert a newline at the given position, splitting the current line. Cursor moves to start of new line.
+    pub fn insert_newline(&mut self, pos: &mut Position) {
+        let char_index = self.byte_to_char_index(pos.line, pos.byte);
+        self.rope.insert(char_index, "\n");
+        pos.line += 1;
+        pos.byte = 0;
+    }
+
+    /// Delete the grapheme cluster before the position (like backspace). If at start of line and not first line, joins with previous.
+    pub fn delete_grapheme_before(&mut self, pos: &mut Position) {
+        if pos.line == 0 && pos.byte == 0 {
+            return;
+        }
+        if pos.byte == 0 {
+            // join with previous line: remove the newline at end of previous line
+            let prev_line = pos.line - 1;
+            let prev_len = self.line_byte_len(prev_line);
+            // absolute byte of newline char (after prev_len)
+            let line_start_char_prev = self.rope.line_to_char(prev_line);
+            let prev_line_start_byte = self.rope.char_to_byte(line_start_char_prev);
+            let newline_byte = prev_line_start_byte + prev_len; // the '\n'
+            let newline_char_index = self.rope.byte_to_char(newline_byte);
+            self.rope.remove(newline_char_index..newline_char_index + 1);
+            pos.line = prev_line;
+            pos.byte = prev_len;
+            return;
+        }
+        let line_str = self.line_content_string(pos.line);
+        let prev = grapheme::prev_boundary(&line_str, pos.byte);
+        if prev == pos.byte {
+            return;
+        }
+        let abs_start = self.absolute_byte_index(&Position {
+            line: pos.line,
+            byte: prev,
+        });
+        let abs_end = self.absolute_byte_index(pos);
+        let start_char = self.rope.byte_to_char(abs_start);
+        let end_char = self.rope.byte_to_char(abs_end);
+        self.rope.remove(start_char..end_char);
+        pos.byte = prev;
+    }
+
+    /// Delete the grapheme cluster at the position (like Normal mode 'x'). No-op if at line end.
+    pub fn delete_grapheme_at(&mut self, pos: &mut Position) {
+        let line_len = self.line_byte_len(pos.line);
+        if pos.byte >= line_len {
+            return;
+        }
+        let line_str = self.line_content_string(pos.line);
+        let next = grapheme::next_boundary(&line_str, pos.byte);
+        if next == pos.byte {
+            return;
+        }
+        let abs_start = self.absolute_byte_index(pos);
+        let abs_end = self.absolute_byte_index(&Position {
+            line: pos.line,
+            byte: next,
+        });
+        let start_char = self.rope.byte_to_char(abs_start);
+        let end_char = self.rope.byte_to_char(abs_end);
+        self.rope.remove(start_char..end_char);
+        // Position stays at same byte (now pointing at next cluster or EOL)
+    }
 }
 
 /// Grapheme and width utilities (Phase 1). These are pure helpers operating on a single line.
@@ -200,5 +300,60 @@ mod tests {
         let second = grapheme::next_boundary(s, first);
         assert!(second <= s.len());
         assert_eq!(grapheme::prev_boundary(s, second), first);
+    }
+
+    #[test]
+    fn insert_grapheme_middle() {
+        let mut b = Buffer::from_str("t", "abc").unwrap();
+        let mut pos = Position::new(0, 1); // after 'a'
+        b.insert_grapheme(&mut pos, "😀");
+        let line = b.line(0).unwrap();
+        assert!(line.starts_with("a"));
+        assert!(line.contains("😀"));
+        assert_eq!(pos.byte, 1 + "😀".len());
+    }
+
+    #[test]
+    fn insert_newline_split() {
+        let mut b = Buffer::from_str("t", "abcd").unwrap();
+        let mut pos = Position::new(0, 2);
+        b.insert_newline(&mut pos);
+        assert_eq!(b.line_count(), 2);
+        assert_eq!(b.line(0).unwrap(), "ab\n");
+        assert_eq!(b.line(1).unwrap(), "cd");
+        assert_eq!(pos.line, 1);
+        assert_eq!(pos.byte, 0);
+    }
+
+    #[test]
+    fn delete_grapheme_before_simple() {
+        let mut b = Buffer::from_str("t", "ab😀c").unwrap();
+        let mut pos = Position::new(0, b.line_byte_len(0));
+        b.delete_grapheme_before(&mut pos); // remove 'c'
+        b.delete_grapheme_before(&mut pos); // remove emoji cluster
+        let line = b.line(0).unwrap();
+        assert_eq!(line, "ab");
+        assert_eq!(pos.byte, 2);
+    }
+
+    #[test]
+    fn delete_grapheme_before_join_lines() {
+        let mut b = Buffer::from_str("t", "ab\ncd").unwrap();
+        let mut pos = Position::new(1, 0); // start of second line
+        b.delete_grapheme_before(&mut pos); // should join lines
+        assert_eq!(b.line_count(), 1);
+        let line = b.line(0).unwrap();
+        assert_eq!(line, "abcd");
+        assert_eq!(pos.line, 0);
+        assert_eq!(pos.byte, 2); // end of original first line
+    }
+
+    #[test]
+    fn delete_grapheme_at_end_noop() {
+        let mut b = Buffer::from_str("t", "hi").unwrap();
+        let mut pos = Position::new(0, 2); // at end
+        b.delete_grapheme_at(&mut pos); // no-op
+        assert_eq!(b.line(0).unwrap(), "hi");
+        assert_eq!(pos.byte, 2);
     }
 }
