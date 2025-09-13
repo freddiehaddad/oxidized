@@ -87,6 +87,32 @@ impl EditorState {
         self.redo_stack.clear();
     }
 
+    /// Begin an Insert-mode coalescing run: push a pre-edit snapshot only once.
+    ///
+    /// Call this right before applying the *first* grapheme insertion after entering
+    /// Insert mode (or after a newline / Esc boundary ends a prior run).
+    /// Subsequent inserts in the same run MUST NOT call this again until
+    /// `end_insert_coalescing` is invoked.
+    pub fn begin_insert_coalescing(&mut self) {
+        if !self.insert_run_active {
+            self.push_snapshot();
+            self.insert_run_active = true;
+        }
+    }
+
+    /// Ends the current Insert-mode coalescing run. Boundary triggers:
+    /// * Leaving Insert mode (Esc)
+    /// * Inserting a newline (treated as a boundary in 5b)
+    pub fn end_insert_coalescing(&mut self) {
+        self.insert_run_active = false;
+    }
+
+    /// Push a discrete edit snapshot (used for Normal mode edits like `x` or
+    /// other non-coalesced operations). Always pushes regardless of coalescing flag.
+    pub fn push_discrete_edit_snapshot(&mut self) {
+        self.push_snapshot();
+    }
+
     /// Restore previously captured snapshot (caller ensures existence). Returns true if restored.
     pub fn undo(&mut self) -> bool {
         if let Some(last) = self.undo_stack.pop() {
@@ -172,5 +198,83 @@ mod tests {
         assert!(st.undo());
         // After undo we can redo
         assert!(st.redo());
+    }
+
+    #[test]
+    fn coalescing_run_only_pushes_once() {
+        let buf = Buffer::from_str("t", "").unwrap();
+        let mut st = EditorState::new(buf);
+        st.mode = Mode::Insert;
+        st.begin_insert_coalescing(); // should push snapshot
+        let len_after_first = st.undo_stack.len();
+        assert_eq!(len_after_first, 1);
+
+        // Simulate multiple inserts inside same run (no further snapshots expected)
+        for ch in ["a", "b", "c"] {
+            let mut modified = st.active_buffer().clone();
+            let mut pos = st.position;
+            modified.insert_grapheme(&mut pos, ch);
+            st.buffers[st.active] = modified;
+            st.position = pos;
+            st.begin_insert_coalescing(); // no-op after first
+        }
+        assert_eq!(
+            st.undo_stack.len(),
+            1,
+            "coalescing inserted multiple snapshots"
+        );
+
+        // End run and start new one -> pushes again
+        st.end_insert_coalescing();
+        st.begin_insert_coalescing();
+        assert_eq!(
+            st.undo_stack.len(),
+            2,
+            "second run did not create new snapshot"
+        );
+    }
+
+    #[test]
+    fn redo_cleared_after_new_coalesced_edit() {
+        let buf = Buffer::from_str("t", "Hello").unwrap();
+        let mut st = EditorState::new(buf);
+        st.push_snapshot(); // baseline snapshot
+        // Apply an edit by direct mutation and push snapshot to simulate earlier approach
+        {
+            let mut modified = st.active_buffer().clone();
+            let mut pos = st.position;
+            modified.insert_grapheme(&mut pos, "!");
+            st.buffers[st.active] = modified;
+            st.position = pos;
+        }
+        st.push_snapshot();
+        assert!(st.undo()); // creates one entry in redo
+        assert_eq!(st.redo_stack.len(), 1);
+
+        // New coalesced run should clear redo stack
+        st.mode = Mode::Insert;
+        st.begin_insert_coalescing();
+        assert_eq!(st.redo_stack.len(), 0, "redo stack not cleared on new edit");
+    }
+
+    #[test]
+    fn undo_stack_capped() {
+        let buf = Buffer::from_str("t", "").unwrap();
+        let mut st = EditorState::new(buf);
+        // Push more than max
+        for i in 0..(UNDO_HISTORY_MAX + 10) {
+            // Apply a trivial mutation to differentiate snapshots
+            let mut modified = st.active_buffer().clone();
+            let mut pos = st.position;
+            modified.insert_grapheme(&mut pos, "x");
+            st.buffers[st.active] = modified;
+            st.position = pos;
+            st.push_snapshot();
+            // ensure length never exceeds cap + 1 transiently (since we remove after push)
+            assert!(st.undo_stack.len() <= UNDO_HISTORY_MAX);
+            // Reset to allow next iteration to mutate from previous base (simplistic)
+            let _ = i; // silence unused warning if any
+        }
+        assert_eq!(st.undo_stack.len(), UNDO_HISTORY_MAX);
     }
 }

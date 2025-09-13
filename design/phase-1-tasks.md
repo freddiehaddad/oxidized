@@ -72,8 +72,8 @@ Checklist (Hybrid Sequencing):
 - [x] 4.1 (4a) Define `EditSnapshot` struct capturing: full rope clone, cursor position, mode (optional, for future mode-aware undo). Simplicity first: `Arc<Rope>` or plain clone (plain clone acceptable Phase 1).
 - [x] 4.2 (4a) Add `undo_stack`, `redo_stack` to `EditorState` (or dedicated `UndoHistory` helper) with MAX_DEPTH constant (e.g. 200) and drop-oldest logic + debug log.
 - [x] 4.3 (4a) Implement core APIs: `push_snapshot(state)`, `restore_snapshot(state, snapshot)`, `undo(state) -> bool`, `redo(state) -> bool` (return dirty flag).
-- [~] 4.4 (4a) Guard logic: push pre-edit snapshot only if not already in an active insert run (Insert run tracking boolean or counter in state).
-- [ ] 4.5 (4a) Unit tests: single insert sequence captured once; multiple snapshots capped; redo cleared after new edit.
+- [x] 4.4 (4a) Guard logic: push pre-edit snapshot only if not already in an active insert run (Insert run tracking boolean or counter in state).
+- [x] 4.5 (4a) Unit tests: single insert sequence captured once; multiple snapshots capped; redo cleared after new edit.
 - [ ] 4.6 (4b) Wire `Action::Undo` (`u`) and `Action::Redo` (`Ctrl-R`) in dispatcher after minimal Insert (5a) merged.
 - [ ] 4.7 (4b) Integration tests: perform inserts -> undo -> redo path; ensure cursor restored.
 - [ ] 4.8 (4b) Coalescing logic (boundary-based): character inserts while in Insert mode coalesce until Esc or newline (newline added in 5b). Implementation: track `coalescing_active` flag; Esc/newline toggles off.
