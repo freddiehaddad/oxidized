@@ -132,11 +132,14 @@ Checklist:
 - [x] 9.6 Async tokio channel + loop.
 - [x] 9.7 Dispatcher & dirty flag (implemented ahead of 9.6 for lower-churn refactor).
 - [x] 9.8 Render scheduler stub.
-- [ ] 9.9 Deferred multi-producer & diff hook documented.
+- [x] 9.9 Deferred multi-producer & diff hook documented.
 
 Notes: Dispatcher landed before async channel migration (9.6) to reduce simultaneous complexity. Initial render bug fixed by performing a first-frame render at startup before event loop (ensures visible buffer without input). Render scheduler stub (9.8) still pending—current dirty flag logic exists inline; it will move into a dedicated struct during 9.8.
 
 Notes: Replaced temporary unsafe raw pointer borrowing with safe helper functions (`apply_motion`, `apply_vertical_motion`) before proceeding to Undo/Redo to avoid accruing technical debt. Introduced new `core-actions` crate for semantic intent separation (motions/edits/mode changes) per modularity goal.
+
+9.9 Documentation (Deferred Implementation):
+Multi-producer architecture will permit additional asynchronous sources of `Action` beyond the input thread: configuration watcher, timers (cursor blink / debounce), future LSP client, plugin host, diagnostics generators. These producers will communicate via additional async tasks feeding a unifying layer. Two candidate wiring options retained: (A) extend `Event` with an `Action(Action)` variant; (B) introduce a parallel `action_rx` and merge using `tokio::select!`. Current choice is to defer adding a new enum variant until the first non-input producer lands to avoid unused code. Render diff hook: the current `RenderScheduler` exposes a single `mark_dirty` path; future phases introduce structured deltas (`RenderDelta` -> merged `Damage`) enabling partial line or cursor-only updates. Interim strategy remains full-frame redraw for simplicity; delta collection API will be introduced before optimization to avoid refactoring call sites.
 
 ---
 
