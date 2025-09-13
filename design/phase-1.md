@@ -82,7 +82,7 @@ If desired for cleanliness: introduce `ActionEvent` enum later—explicitly defe
 
 0. (DONE) Unicode Foundations: Added `unicode-segmentation` & `unicode-width`, grapheme helper module (`core-text::grapheme`) providing boundaries, visual column, width, and basic word classification. All cursor logic and future mutations will rely on byte offsets restricted to grapheme boundaries.
 
-1. Add `Mode::Insert` variant and grapheme-aware `Cursor` struct to `core-state` with constructor & clamp helpers.
+1. Add `Mode::Insert` variant and (INITIAL) grapheme-aware `Cursor` struct to `core-state` with constructor & clamp helpers. (Refactored: relocated to `core-text` as plain `Position` before adding motions to keep text-centric concerns co-located. Future richer cursor/multi-selection logic will likely live in a dedicated `core-cursor` crate.)
 2. Implement grapheme mutation APIs in `core-text` (leveraging ropey insert & remove). Provide safe wrappers that adjust positions.
 3. Add undo snapshot abstraction (simple full-rope clone) + push/restore methods.
 4. Extend rendering: draw buffer; move terminal cursor to current logical position (translate to (x,y)) before flush; compose status/command line: `[NORMAL|INSERT]  Ln {line+1}, Col {col+1}  :{pending_command}`.

@@ -9,6 +9,43 @@ pub struct Buffer {
     pub name: String,
 }
 
+/// A position inside a buffer expressed as (line index, byte offset within that line).
+/// Lines and byte offsets are guaranteed (when clamped) to be on UTF-8 code unit boundaries; grapheme
+/// safety is enforced by higher-level navigation (Phase 1 motions).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Position {
+    pub line: usize,
+    pub byte: usize,
+}
+
+impl Position {
+    pub fn new(line: usize, byte: usize) -> Self {
+        Self { line, byte }
+    }
+    pub fn origin() -> Self {
+        Self { line: 0, byte: 0 }
+    }
+
+    /// Clamp this position to the provided line count and byte length accessor for the current line.
+    pub fn clamp_to<F>(&mut self, line_count: usize, mut line_len_fn: F)
+    where
+        F: FnMut(usize) -> usize,
+    {
+        if line_count == 0 {
+            self.line = 0;
+            self.byte = 0;
+            return;
+        }
+        if self.line >= line_count {
+            self.line = line_count - 1;
+        }
+        let max_len = line_len_fn(self.line);
+        if self.byte > max_len {
+            self.byte = max_len;
+        }
+    }
+}
+
 impl Buffer {
     /// Construct a buffer from an in-memory string slice.
     pub fn from_str(name: impl Into<String>, content: &str) -> Result<Self> {
@@ -29,6 +66,21 @@ impl Buffer {
             Some(self.rope.line(idx).to_string())
         } else {
             None
+        }
+    }
+
+    /// Byte length of a line (excluding any newline) for clamping purposes.
+    pub fn line_byte_len(&self, idx: usize) -> usize {
+        if idx >= self.rope.len_lines() {
+            return 0;
+        }
+        let line = self.rope.line(idx);
+        // ropey lines include the trailing newline except possibly the last line.
+        let s = line.to_string();
+        if s.ends_with('\n') {
+            s.len() - 1
+        } else {
+            s.len()
         }
     }
 }
