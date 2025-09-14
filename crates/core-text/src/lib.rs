@@ -254,6 +254,7 @@ pub mod grapheme {
 mod tests {
     use super::grapheme;
     use super::*;
+    use unicode_segmentation::UnicodeSegmentation;
     #[test]
     fn create_buffer_and_read_line() {
         let b = Buffer::from_str("test", "hello\nworld").unwrap();
@@ -301,6 +302,27 @@ mod tests {
         let second = grapheme::next_boundary(s, first);
         assert!(second <= s.len());
         assert_eq!(grapheme::prev_boundary(s, second), first);
+    }
+
+    #[test]
+    fn visual_col_mixed_sequences() {
+        // Sequence: ASCII, emoji, combining mark, CJK, family emoji, ASCII
+        let s = "a😀é漢字👨‍👩‍👧‍👦Z"; // note combining sequence e + ◌́
+        // Walk boundaries and ensure visual_col is non-decreasing and >= byte index of prior ASCII assumption
+        let mut b = 0;
+        let mut last_col = 0;
+        while b < s.len() {
+            let next = grapheme::next_boundary(s, b);
+            let col = grapheme::visual_col(s, next);
+            assert!(col >= last_col, "visual column must be non-decreasing");
+            last_col = col;
+            b = next;
+        }
+        // Final column should be at least number of distinct clusters
+        // (Width may exceed cluster count due to wide glyphs; just assert lower bound)
+        // Count clusters
+        let clusters = s.graphemes(true).count();
+        assert!(last_col >= clusters - 1);
     }
 
     #[test]
