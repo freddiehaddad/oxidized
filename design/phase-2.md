@@ -79,7 +79,7 @@ IDs final after confirmation; commit messages embed Phase/Step.
 2. (Done) Implement CLI open: if `oxidized <path>` provided, load file contents into buffer (blocking read, UTF-8 only). On error fallback to welcome buffer and log error (ephemeral status messaging deferred until step 6).
 3. (Done) Command parse: extend `CommandExecute` handling for `:e <path>` (replace current buffer) + tests (loads file, resets cursor, updates file_name, dirty=false; errors logged only until ephemeral status in step 6).
 4. (Done) Add `:w` handling: write current buffer to existing filename; if none, log error (ephemeral status deferred) and leave dirty=true. Successful write clears dirty.
-5. Dirty tracking: mark buffer dirty on first mutation since last write/open; tests for undo revert not auto-clearing dirty (explicit strategy: remains dirty until write).
+5. (Done) Dirty tracking: buffer `dirty` set on first mutation after open/write across all edit kinds (insert grapheme, newline, backspace, delete-under). Undo/redo do NOT auto-clear; only successful `:w` resets. Tests cover: first insert sets dirty, undo leaves dirty, write clears then subsequent edit re-sets dirty.
 6. Introduce ephemeral status message store & rendering (overwrites right side or replaces command section when idle). Add timeout (e.g., 3s) using Instant checked each event loop iteration (no timers yet — breadth-first synchronous check).
 7. Elevate viewport to state: include `first_line`; modify render path to draw starting at `first_line`.
 8. Auto-scroll logic: when cursor line < first_line or >= first_line + height → adjust; tests.

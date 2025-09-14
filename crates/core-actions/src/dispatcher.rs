@@ -204,6 +204,9 @@ pub fn dispatch(
                     let mut pos = state.position;
                     state.active_buffer_mut().insert_grapheme(&mut pos, &g);
                     state.position = pos;
+                    if !state.dirty {
+                        state.dirty = true;
+                    }
                     DispatchResult::dirty()
                 } else {
                     DispatchResult::clean()
@@ -219,6 +222,9 @@ pub fn dispatch(
                     state.active_buffer_mut().insert_newline(&mut pos);
                     state.position = pos;
                     state.end_insert_coalescing();
+                    if !state.dirty {
+                        state.dirty = true;
+                    }
                     DispatchResult::dirty()
                 } else {
                     DispatchResult::clean()
@@ -233,6 +239,9 @@ pub fn dispatch(
                     let mut pos = state.position;
                     state.active_buffer_mut().delete_grapheme_before(&mut pos);
                     state.position = pos;
+                    if !state.dirty {
+                        state.dirty = true;
+                    }
                     DispatchResult::dirty()
                 } else {
                     DispatchResult::clean()
@@ -246,6 +255,9 @@ pub fn dispatch(
                     let mut pos = state.position;
                     state.active_buffer_mut().delete_grapheme_at(&mut pos);
                     state.position = pos;
+                    if !state.dirty {
+                        state.dirty = true;
+                    }
                     DispatchResult::dirty()
                 } else {
                     DispatchResult::clean()
@@ -428,6 +440,111 @@ mod tests {
         );
         assert!(res.dirty);
         assert!(state.dirty, "dirty flag should remain when no filename");
+    }
+
+    #[test]
+    fn dirty_flag_sets_on_first_insert() {
+        let buffer = Buffer::from_str("t", "").unwrap();
+        let mut state = EditorState::new(buffer);
+        let mut sticky = None;
+        assert!(!state.dirty, "initial dirty should be false");
+        // Enter insert and type a grapheme
+        dispatch(
+            Action::ModeChange(ModeChange::EnterInsert),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        dispatch(
+            Action::Edit(EditKind::InsertGrapheme("a".into())),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert!(state.dirty, "dirty should be true after first mutation");
+    }
+
+    #[test]
+    fn undo_does_not_clear_dirty() {
+        let buffer = Buffer::from_str("t", "").unwrap();
+        let mut state = EditorState::new(buffer);
+        let mut sticky = None;
+        dispatch(
+            Action::ModeChange(ModeChange::EnterInsert),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        dispatch(
+            Action::Edit(EditKind::InsertGrapheme("a".into())),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        dispatch(
+            Action::ModeChange(ModeChange::LeaveInsert),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert!(state.dirty);
+        dispatch(Action::Undo, &mut state, &mut sticky, &[]);
+        assert!(state.dirty, "dirty should remain true after undo");
+    }
+
+    #[test]
+    fn write_clears_then_new_edit_sets_dirty_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("dirty_cycle.txt");
+        // Start with named buffer
+        let buffer = Buffer::from_str("t", "start").unwrap();
+        let mut state = EditorState::new(buffer);
+        state.file_name = Some(file_path.clone());
+        let mut sticky = None;
+        // Mutate
+        dispatch(
+            Action::ModeChange(ModeChange::EnterInsert),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        dispatch(
+            Action::Edit(EditKind::InsertGrapheme("x".into())),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        dispatch(
+            Action::ModeChange(ModeChange::LeaveInsert),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert!(state.dirty);
+        // Write
+        dispatch(Action::CommandStart, &mut state, &mut sticky, &[]);
+        dispatch(Action::CommandChar('w'), &mut state, &mut sticky, &[]);
+        dispatch(
+            Action::CommandExecute(":w".into()),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert!(!state.dirty, "dirty should clear after write");
+        // New edit sets it again
+        dispatch(
+            Action::ModeChange(ModeChange::EnterInsert),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        dispatch(
+            Action::Edit(EditKind::InsertGrapheme("y".into())),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert!(state.dirty, "dirty should set again after new edit");
     }
 
     #[test]
