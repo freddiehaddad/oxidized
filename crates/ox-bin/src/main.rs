@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
 
     let buffer = Buffer::from_str(
         "welcome",
-        "Welcome to Oxidized (Phase 0)\nPress :q to quit.",
+        "Welcome to ⚙️ Oxidized (Phase 1)\nPress :q to quit.",
     )?;
     let mut state = EditorState::new(buffer);
     // Async unbounded channel (single consumer main loop). Input thread forwards blocking
@@ -173,6 +173,32 @@ fn render(state: &EditorState) -> Result<()> {
     let span = tracing::info_span!("render_cycle");
     let _e = span.enter();
     Renderer::render(&frame)?;
+    // --- Hardware cursor placement (Phase 1 Task 8.2) ---
+    // Use grapheme-aware visual column and current viewport offset (viewport currently static at 0).
+    // Cursor row is the on-screen y of the active line (clamped within text area). We place the
+    // terminal cursor *after* drawing to avoid flicker (terminal shows final frame + cursor).
+    if h > 0 {
+        use crossterm::{
+            cursor::{MoveTo, Show},
+            execute,
+        };
+        use std::io::stdout;
+        let text_height = if h > 0 { h - 1 } else { 0 }; // bottom line reserved for status
+        let buf = state.active_buffer();
+        if let Some(line_content) = buf.line(state.position.line) {
+            let content_trim = if line_content.ends_with('\n') {
+                &line_content[..line_content.len() - 1]
+            } else {
+                &line_content
+            };
+            let vis_col = grapheme::visual_col(content_trim, state.position.byte) as u16;
+            let screen_line = (state.position.line as u16).min(text_height.saturating_sub(1));
+            if vis_col < w && screen_line < text_height {
+                // Move hardware cursor then ensure it is shown (backend hid it on enter).
+                let _ = execute!(stdout(), MoveTo(vis_col, screen_line), Show);
+            }
+        }
+    }
     Ok(())
 }
 

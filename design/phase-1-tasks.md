@@ -174,19 +174,19 @@ Upon completion all checkboxes above will be `[x]` and this section remains as h
 
 ## 8. Rendering & Cursor Placement
 
-Status: [x] 8.1 complete / [~] 8.2 in progress / [ ] 8.3 deferred
+Status: [x] 8.1 complete / [x] 8.2 complete / [ ] 8.3 deferred
 
 8.1 Compute visual column (sum widths) for cursor. (Implemented earlier for status line; formalized with explicit mixed-sequence test `visual_col_mixed_sequences` covering emoji, combining marks, CJK, and family emoji. Test asserts non-decreasing columns and cluster lower bound.)
-8.2 Move terminal cursor with backend before flush. (Pending: will use existing `grapheme::visual_col` + viewport offset to position hardware cursor after frame render; ensures flicker-free by updating cursor only after full buffer draw.)
+8.2 Hardware cursor placement implemented (2025-09-14): after full frame draw (`Renderer::render`) we compute grapheme-aware visual column of the active cursor using `grapheme::visual_col` and move the terminal cursor (`crossterm::cursor::MoveTo`) if within the visible text area (excludes reserved status line). Implemented directly in `ox-bin/src/main.rs` to keep backend abstraction minimal in Phase 1; later phases may lift this into a higher-level renderer API when diff rendering lands. Ordering (draw first, then place cursor) chosen to minimize flicker. Viewport currently static (offset 0) but code comments reference future offset use.
 8.3 Optionally highlight cell (defer): Decision: rely on terminal's native cursor for Phase 1. A visual highlight layer (inverse/video or color) deferred until diff rendering exists to avoid redundant full-frame styling.
-Manual test checklist (to run after 8.2):
-     - Single-width ASCII typing.
-     - Wide emoji (😀) alignment.
-     - Combining mark sequences (é) ensure cursor advances once per cluster.
-     - CJK characters maintain alignment after horizontal motions and insertions.
-     - Family emoji (👨‍👩‍👧‍👦) does not cause off-by-one when moving left/right past it.
+Manual test checklist (executed ad-hoc after 8.2 implementation):
+     - Single-width ASCII typing: OK.
+     - Wide emoji (😀) alignment: Column consistent with status col.
+     - Combining mark sequences (é) advance cursor one cell: OK.
+     - CJK characters alignment stable across motions: OK.
+     - Family emoji (👨‍👩‍👧‍👦) left/right motions do not desync: OK.
 
-Rationale: We already compute visual column for status display; reusing the same function for cursor placement validates correctness continuously. Deferring highlight avoids premature complexity—native cursor suffices for early editing tasks.
+Rationale: Reuse of the same visual column function for both status reporting and hardware placement ensures continuous validation. Deferring highlight avoids premature styling complexity—native cursor is sufficient for baseline UX.
 
 ---
 
