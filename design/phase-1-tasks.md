@@ -281,9 +281,16 @@ Acceptance (11.1): All listed scenarios covered by deterministic unit tests; ful
 
 ## 12. Docs & Sync
 
-12.1 Update README (features list now: basic editing, grapheme-aware cursor).
-12.2 Update `phase-1.md` Notes if deviations occur.
-12.3 Rustdoc for new APIs (Cursor, snapshots, grapheme helpers).
+**Status:** [x] 12.1 README feature & limitations update / [~] 12.2 sync notes / [~] 12.3 rustdoc sweep
+
+12.1 Update README (feature snapshot, limitations, telemetry note, Unicode promise, light humor about cursor) — DONE.
+12.2 Update `phase-1.md` Notes if deviations occur (pending minor sync pass).
+12.3 Rustdoc for new APIs (Cursor, snapshots, grapheme helpers) – partial; most comments present, final consistency pass pending.
+
+Planned (remaining for Task 12 completion):
+     - Confirm `phase-1.md` reflects removal of deferred grapheme_nav alias.
+     - Add brief limitations list (naive word motions, full redraw rendering, single buffer) if missing.
+     - Ensure rustdoc modules cross-reference design rationale (state, coalescing, motions).
 
 ---
 

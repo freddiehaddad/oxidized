@@ -6,7 +6,26 @@
 
 ## Status
 
-Still very early. Expect sharp edges, missing pieces, and occasional intentional breakage while the core shape settles. Not a daily driver yet—perfect if you enjoy watching (and nudging) a clean architecture grow.
+Still very early. Expect sharp edges, missing pieces, and occasional intentional breakage while the core shape settles. Not a daily driver yet -- perfect if you enjoy watching (and nudging) a clean architecture grow.
+
+What works today:
+
+* Move around with classic hjkl, 0/$, naive w/b word hops.
+* Insert text (full Unicode grapheme clusters — emoji families, combining marks, CJK) without tearing them apart.
+* Backspace respects whole clusters (no half‑emoji horror).
+* Undo / Redo with sensible insert run coalescing (Esc or newline = boundary).
+* Command line stub: `:q` exits; everything else politely shrugs.
+* Grapheme‑aware hardware cursor placement (occasionally cheeky with the widest emoji, but trying its best).
+* Tracing spans for motions & edits so we can later profile without ripping things back open.
+
+Not (yet) there:
+
+* Diff/partial rendering (full frame redraw for now, but flicker‑free).
+* Fancy word boundary logic (currently a friendly, naive take).
+* Multiple buffers, search, syntax, plugins, or highlighting.
+* Time‑based undo coalescing.
+
+If that sounds fun rather than disappointing -- you get the vibe.
 
 ## Why remake a legend?
 
@@ -27,8 +46,6 @@ That’s it. No special flags, no build script surprises.
 
 Right now the best help is feedback on architecture, clarity of crate boundaries, and uncovering Unicode or rendering edge cases. Open issues early; we gladly refactor while things are still soft clay.
 
-*Rule of thumb:* if a change crosses more than one concern, split it. If an invariant isn’t obvious, document it right in the code.
-
 ## FAQ (tiny & growing)
 
 1. **Is this a Neovim fork?** No — completely fresh Rust code.
@@ -36,6 +53,8 @@ Right now the best help is feedback on architecture, clarity of crate boundaries
 3. **Will it embed Vimscript / Lua?** Likely not directly. A lean, capability‑scoped extension layer will arrive later.
 4. **Why rewrite instead of contribute to Neovim?** Different experiment: explore how far a fresh, aggressively modular Rust design can go without legacy ballast.
 5. **Should I daily‑drive it?** Not yet. Follow along, kick the tires, file issues.
+6. **Why is the cursor sometimes bashful with super wide emoji?** Terminal quirks + early rendering path. We’ll tighten it up when diff rendering lands.
+7. **Will performance tank with full redraws?** Not for the tiny files we test with. We’ll switch to dirty / diff updates before scale matters.
 
 ## Dual License
 
