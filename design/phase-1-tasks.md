@@ -281,24 +281,31 @@ Acceptance (11.1): All listed scenarios covered by deterministic unit tests; ful
 
 ## 12. Docs & Sync
 
-**Status:** [x] 12.1 README feature & limitations update / [~] 12.2 sync notes / [~] 12.3 rustdoc sweep
+**Status:** [x] complete (2025-09-14)
 
-12.1 Update README (feature snapshot, limitations, telemetry note, Unicode promise, light humor about cursor) — DONE.
-12.2 Update `phase-1.md` Notes if deviations occur (pending minor sync pass).
-12.3 Rustdoc for new APIs (Cursor, snapshots, grapheme helpers) – partial; most comments present, final consistency pass pending.
+12.1 README updated (feature snapshot, limitations, telemetry note, Unicode promise, light humor about cursor) — DONE.
+12.2 `phase-1.md` synchronized (removed `grapheme_nav`, added telemetry rationale, limitations pointer) — DONE.
+12.3 Rustdoc sweep: dispatcher + state modules annotated with final span names & snapshot semantics — DONE.
 
-Planned (remaining for Task 12 completion):
-     - Confirm `phase-1.md` reflects removal of deferred grapheme_nav alias.
-     - Add brief limitations list (naive word motions, full redraw rendering, single buffer) if missing.
-     - Ensure rustdoc modules cross-reference design rationale (state, coalescing, motions).
+Acceptance:
+
+- Design narrative matches implemented telemetry & mechanics.
+- README exposes only high-level friendly summary (technical depth lives in design docs).
+- No stale references to removed spans or obsolete ordering.
 
 ---
 
 ## 13. Final Gate
 
-13.1 `cargo build` / `cargo clippy -D warnings` / `cargo fmt --all -- --check`.
-13.2 Manual smoke script (document in README dev section).
-13.3 Tag `phase-1-start` (optional) then after completion `phase-1-complete`.
+13.1 Quality gates: `cargo build` / tests / `cargo clippy -D warnings` / `cargo fmt --all -- --check` — COMPLETE (2025-09-14).
+13.2 Manual smoke checklist + friendly Phase 1 completion note added to README (run instructions, what to try) — PENDING.
+13.3 Tag repository (`phase-1-complete`) after README update — PENDING.
+
+Acceptance:
+
+- 13.1 All gates green on main branch commit (no warnings, all tests pass).
+- 13.2 README contains a concise “Try this” list (enter insert, type emoji, newline, undo/redo, word motions) and clarifies Phase 1 scope without deep internals.
+- 13.3 Annotated git tag created pointing at last Phase 1 commit.
 
 ---
 
