@@ -179,6 +179,8 @@ pub fn dispatch(
             }
             EditKind::DeleteUnder => {
                 if matches!(state.mode, Mode::Normal) {
+                    let span = tracing::trace_span!("edit_delete_under");
+                    let _e = span.enter();
                     state.push_discrete_edit_snapshot();
                     let mut pos = state.position;
                     state.active_buffer_mut().delete_grapheme_at(&mut pos);
@@ -190,6 +192,8 @@ pub fn dispatch(
             }
         },
         Action::Undo => {
+            let span = tracing::trace_span!("undo");
+            let _e = span.enter();
             if state.undo() {
                 DispatchResult::dirty()
             } else {
@@ -197,6 +201,8 @@ pub fn dispatch(
             }
         }
         Action::Redo => {
+            let span = tracing::trace_span!("redo");
+            let _e = span.enter();
             if state.redo() {
                 DispatchResult::dirty()
             } else {

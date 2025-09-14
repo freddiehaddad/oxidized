@@ -227,8 +227,37 @@ Multi-producer architecture will permit additional asynchronous sources of `Acti
 
 ## 10. Telemetry
 
-10.1 Spans: motion, insert, delete, newline, undo, redo, grapheme_nav.
-10.2 Debug logs: snapshot push/pop (rope char count, stack sizes).
+Status: [x] 10.1 complete / [x] 10.2 complete (2025-09-14)
+
+### Checklist
+
+- [x] 10.1 Instrument tracing spans for core editing & navigation paths:
+  - [x] motion (covers horizontal + vertical + word motions; also serves as grapheme navigation span)
+  - [x] edit_insert (single grapheme insertion within Insert mode)
+  - [x] edit_newline (newline insertion boundary; ends coalescing run)
+  - [x] edit_backspace (cluster delete or line join within Insert mode)
+  - [x] edit_delete_under (Normal mode `x` deletion)
+  - [x] undo
+  - [x] redo
+- [x] 10.2 Snapshot debug logs (already present): trace push/pop with stack depths + rope line count proxy.
+
+### Rationale & Notes
+
+Unified motion span: A separate `grapheme_nav` span would duplicate every horizontal navigation emission. Keeping a single `motion` span simplifies downstream aggregation and avoids noisy log inflation. If future analysis needs to distinguish vertical/word vs grapheme‑wise motions we can add a `span!(..., kind = "horizontal"|"vertical"|"word")` attribute or introduce the deferred alias at that time.
+
+Span naming consistency: All edit-related spans share the `edit_` prefix for easy filtering (`RUST_LOG=trace` with a future subscriber layer). Undo/redo intentionally top-level (no `edit_` prefix) to make history traversals visually distinct while scanning traces.
+
+Snapshot metrics: Current lightweight approach logs stack depths and rope line counts without performing diff computations. This is sufficient for Phase 1 to validate coalescing boundaries and stack discipline. Richer metrics (character delta counts, time-based coalescing windows) are deferred to Phase 2 when diff rendering lands.
+
+Performance considerations: Spans are extremely low-cost in the no-subscriber path. We purposefully avoided per-grapheme width or diff calculations inside the span constructor to keep hot paths lean.
+
+Deferred alias decision: Dropped; unified `motion` span is sufficient. Future differentiation (if required) will use a span field (e.g. kind="horizontal"|"vertical"|"word") rather than a new span name.
+
+Acceptance:
+
+- All core user actions (motions, inserts, newline, backspace, delete-under, undo, redo) emit a trace span.
+- Snapshot push/pop events emit depth + rope line count.
+- No span introduces additional allocation beyond what the underlying action already performs.
 
 ---
 
