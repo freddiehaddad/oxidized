@@ -42,13 +42,24 @@ cargo run
 
 That’s it. No special flags, no build script surprises.
 
+### Quick things to try
+
+* `i` then type some text (throw in an emoji or two 👨‍👩‍👧‍👦) then `Esc`.
+* Backspace over a combining mark or emoji cluster -- it disappears cleanly.
+* Move with `h j k l 0 $ w b` and watch the status line update.
+* At end of a line press `w` a few times -- naive word hops but it behaves.
+* Insert a newline (Enter) then undo (`u`) and redo (`Ctrl-R`).
+* Type `:q` to exit. (Other commands just smile and vanish.)
+
+If the cursor looks a little shy around very wide glyphs, it’s just early -- we haven’t taught it every trick yet.
+
 ## Contributing
 
 Right now the best help is feedback on architecture, clarity of crate boundaries, and uncovering Unicode or rendering edge cases. Open issues early; we gladly refactor while things are still soft clay.
 
-## FAQ (tiny & growing)
+## FAQ
 
-1. **Is this a Neovim fork?** No — completely fresh Rust code.
+1. **Is this a Neovim fork?** No -- completely fresh Rust code.
 2. **Does it do much yet?** Enough to move around, insert text, undo/redo, and quit. That’s the point: breadth first.
 3. **Will it embed Vimscript / Lua?** Likely not directly. A lean, capability‑scoped extension layer will arrive later.
 4. **Why rewrite instead of contribute to Neovim?** Different experiment: explore how far a fresh, aggressively modular Rust design can go without legacy ballast.

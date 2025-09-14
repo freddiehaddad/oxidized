@@ -295,7 +295,9 @@ Acceptance:
 ## 13. Final Gate
 
 13.1 Quality gates: `cargo build` / tests / `cargo clippy -D warnings` / `cargo fmt --all -- --check` — COMPLETE (2025-09-14).
-13.2 Manual smoke checklist + friendly Phase 1 completion note added to README (run instructions, what to try) — PENDING.
+13.2 Manual smoke checklist + friendly Phase 1 completion note added to README (run instructions, what to try) — COMPLETE (2025-09-14).
+
+13.3 Annotated tag `phase-1-complete` created (2025-09-14) pointing at final Phase 1 documentation commit.
 
 Acceptance:
 
