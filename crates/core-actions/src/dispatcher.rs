@@ -166,6 +166,31 @@ pub fn dispatch(
                 state.command_line.clear();
                 return DispatchResult::dirty();
             }
+            // Write file: :w (Phase 2 Step 4 - only writes if file_name is Some; else logs)
+            if cmd == ":w" {
+                if let Some(path) = state.file_name.clone() {
+                    // clone small PathBuf
+                    // Collect full buffer content
+                    let mut content = String::new();
+                    for i in 0..state.active_buffer().line_count() {
+                        if let Some(l) = state.active_buffer().line(i) {
+                            content.push_str(&l);
+                        }
+                    }
+                    match std::fs::write(&path, content.as_bytes()) {
+                        Ok(_) => {
+                            state.dirty = false;
+                        }
+                        Err(e) => {
+                            tracing::error!(?e, "file_write_error");
+                        }
+                    }
+                } else {
+                    tracing::error!("write_no_filename");
+                }
+                state.command_line.clear();
+                return DispatchResult::dirty();
+            }
             state.command_line.clear();
             DispatchResult::dirty()
         }
@@ -355,6 +380,54 @@ mod tests {
                 .starts_with("Hello Edit Command")
         );
         assert!(!state.dirty, "buffer must be clean after load");
+    }
+
+    #[test]
+    fn write_command_writes_file() {
+        use std::io::Read;
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("write_test.txt");
+        // Start with named buffer by loading file via :e logic path to set file_name
+        let initial = Buffer::from_str("t", "hello").unwrap();
+        let mut state = EditorState::new(initial);
+        let mut sticky = None;
+        // Assign file_name manually to simulate earlier open (simpler than invoking :e again here)
+        state.file_name = Some(file_path.clone());
+        state.dirty = true; // pretend modified
+        // Execute :w
+        dispatch(Action::CommandStart, &mut state, &mut sticky, &[]);
+        dispatch(Action::CommandChar('w'), &mut state, &mut sticky, &[]);
+        let res = dispatch(
+            Action::CommandExecute(":w".into()),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert!(res.dirty);
+        assert!(!state.dirty, "dirty flag should clear after write");
+        // Confirm file content
+        let mut f = std::fs::File::open(&file_path).unwrap();
+        let mut s = String::new();
+        f.read_to_string(&mut s).unwrap();
+        assert!(s.starts_with("hello"));
+    }
+
+    #[test]
+    fn write_command_without_filename_logs_and_keeps_dirty() {
+        let buffer = Buffer::from_str("t", "scratch buffer").unwrap();
+        let mut state = EditorState::new(buffer);
+        state.dirty = true;
+        let mut sticky = None;
+        dispatch(Action::CommandStart, &mut state, &mut sticky, &[]);
+        dispatch(Action::CommandChar('w'), &mut state, &mut sticky, &[]);
+        let res = dispatch(
+            Action::CommandExecute(":w".into()),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert!(res.dirty);
+        assert!(state.dirty, "dirty flag should remain when no filename");
     }
 
     #[test]
