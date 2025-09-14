@@ -308,4 +308,43 @@ mod tests {
         word_backward(&buf, &mut pos); // foo
         assert_eq!(pos.byte, 0);
     }
+
+    #[test]
+    fn word_motion_cross_line_edges() {
+        // Ensures word_forward at end of line moves to first word of next non-empty line and backward wraps.
+        let buf = Buffer::from_str("t", "alpha\n\n beta gamma\n\nzzz").unwrap();
+        let mut pos = Position::new(0, 0); // at 'alpha'
+        // Move to next line's first word (beta) skipping blank line
+        word_forward(&buf, &mut pos); // should go to beta
+        // Ensure current line contains beta
+        let current_line_str = buf.line(pos.line).unwrap();
+        let beta_idx = current_line_str.find("beta").expect("beta present");
+        assert_eq!(pos.byte, beta_idx);
+        // Move forward to gamma (same line)
+        word_forward(&buf, &mut pos);
+        let gamma_line_str = buf.line(pos.line).unwrap();
+        let gamma_idx = gamma_line_str.find("gamma").unwrap();
+        assert_eq!(pos.byte, gamma_idx);
+        // Move forward to zzz (final non-empty line)
+        word_forward(&buf, &mut pos);
+        let z_line = buf.line(pos.line).unwrap();
+        assert!(z_line.contains("zzz"));
+        assert_eq!(pos.byte, 0, "should land at start of final word line");
+        // Move backward returns to a prior non-empty line (gamma or beta depending on naive parsing)
+        word_backward(&buf, &mut pos);
+        assert!(
+            pos.line < buf.line_count() - 1,
+            "should have moved off final line"
+        );
+        let mut back_line = buf.line(pos.line).unwrap();
+        if back_line.trim().is_empty() {
+            // Move backward again to reach previous word line
+            word_backward(&buf, &mut pos);
+            back_line = buf.line(pos.line).unwrap();
+        }
+        assert!(
+            back_line.contains("beta") || back_line.contains("gamma"),
+            "expected to reach a word line (beta|gamma)"
+        );
+    }
 }

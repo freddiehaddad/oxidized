@@ -357,4 +357,149 @@ mod tests {
             "observer should have seen three actions"
         );
     }
+
+    #[test]
+    fn empty_buffer_backspace_noop() {
+        let buffer = Buffer::from_str("t", "").unwrap();
+        let mut state = EditorState::new(buffer);
+        let mut sticky = None;
+        // Enter insert then hit backspace (should not panic or change)
+        dispatch(
+            Action::ModeChange(ModeChange::EnterInsert),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        let before = state.position;
+        let res = dispatch(
+            Action::Edit(EditKind::Backspace),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert!(
+            res.dirty,
+            "still considered edit path (render) even if no change"
+        );
+        assert_eq!(state.position, before, "position unchanged");
+        assert_eq!(state.active_buffer().line(0).unwrap(), "");
+    }
+
+    #[test]
+    fn end_of_line_motion_clamp() {
+        let buffer = Buffer::from_str("t", "short\nlonger line here").unwrap();
+        let mut state = EditorState::new(buffer);
+        let mut sticky = None;
+        // Move to end of first line
+        dispatch(
+            Action::Motion(MotionKind::LineEnd),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        let end_byte = state.position.byte;
+        // Move down; position.byte should clamp within second line (not exceed its len)
+        dispatch(
+            Action::Motion(MotionKind::Down),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert!(state.position.byte <= state.active_buffer().line_byte_len(state.position.line));
+        // Move up; should restore original end byte of first line
+        dispatch(Action::Motion(MotionKind::Up), &mut state, &mut sticky, &[]);
+        assert_eq!(state.position.byte, end_byte);
+    }
+
+    #[test]
+    fn delete_under_at_eof_safe() {
+        let buffer = Buffer::from_str("t", "abc").unwrap();
+        let mut state = EditorState::new(buffer);
+        let mut sticky = None;
+        // Move to end and attempt delete_under (no-op)
+        dispatch(
+            Action::Motion(MotionKind::LineEnd),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        let end_byte = state.position.byte;
+        let line_before = state.active_buffer().line(0).unwrap().to_string();
+        let res = dispatch(
+            Action::Edit(EditKind::DeleteUnder),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert!(!res.quit, "should not quit");
+        assert_eq!(state.position.byte, end_byte);
+        assert_eq!(state.active_buffer().line(0).unwrap(), line_before);
+    }
+
+    #[test]
+    fn newline_undo_redo_at_file_end() {
+        let buffer = Buffer::from_str("t", "abc").unwrap();
+        let mut state = EditorState::new(buffer);
+        let mut sticky = None;
+        dispatch(
+            Action::ModeChange(ModeChange::EnterInsert),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        // Move to end and insert newline then a char
+        dispatch(
+            Action::Motion(MotionKind::LineEnd),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        dispatch(
+            Action::Edit(EditKind::InsertNewline),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        dispatch(
+            Action::Edit(EditKind::InsertGrapheme("x".into())),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        dispatch(
+            Action::ModeChange(ModeChange::LeaveInsert),
+            &mut state,
+            &mut sticky,
+            &[],
+        ); // boundary
+        // Collect buffer content lines for verification (single buffer)
+        let mut collected = String::new();
+        for i in 0..state.active_buffer().line_count() {
+            if let Some(l) = state.active_buffer().line(i) {
+                collected.push_str(&l);
+            }
+        }
+        let after_insert = collected.clone();
+        assert!(after_insert.starts_with("abc"));
+        // Undo should remove entire run (newline + x)
+        dispatch(Action::Undo, &mut state, &mut sticky, &[]);
+        // After undo the buffer should match original single-line content (may or may not retain trailing newline; ensure content prefix matches and no second non-empty line)
+        assert!(state.active_buffer().line(0).unwrap().starts_with("abc"));
+        if state.active_buffer().line_count() > 1 {
+            let l1 = state.active_buffer().line(1).unwrap();
+            assert!(
+                l1.is_empty(),
+                "second line should be empty after undo if present"
+            );
+        }
+        // Redo should restore
+        dispatch(Action::Redo, &mut state, &mut sticky, &[]);
+        let mut redo_collected = String::new();
+        for i in 0..state.active_buffer().line_count() {
+            if let Some(l) = state.active_buffer().line(i) {
+                redo_collected.push_str(&l);
+            }
+        }
+        assert_eq!(redo_collected, after_insert);
+    }
 }

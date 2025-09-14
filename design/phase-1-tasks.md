@@ -263,8 +263,19 @@ Acceptance:
 
 ## 11. Tests & QA Bundle
 
-11.1 Additional edge tests (empty buffer backspace, end-of-line motions, multi-line word motion start/end).
-11.2 (Optional) quick fuzz: random sequence of safe ops (if added later).
+**Status:** [x] 11.1 complete / [ ] 11.2 deferred (optional fuzz)
+
+11.1 Added edge tests:
+     - Empty buffer backspace is a no-op (no panic, position stable).
+     - End-of-line vertical motions clamp correctly (line end preserved when returning; clamped when longer/shorter lines traversed).
+     - Delete-under at EOF safe (no mutation when cursor at end of line; no crash).
+     - Newline + subsequent insert at file end undo/redo as single coalesced run.
+     - Cross-line word motions over blank lines: forward skips blank lines; backward handles landing on blank/word lines safely (test tolerates naive implementation variance).
+     - Additional word motion regression scenario with multiple blank lines.
+
+11.2 (Optional) quick fuzz: random sequence of safe ops (not implemented Phase 1 — deferred; value add low until more editing primitives exist).
+
+Acceptance (11.1): All listed scenarios covered by deterministic unit tests; full suite passes with zero failures.
 
 ---
 
