@@ -9,6 +9,7 @@ use core_events::{CommandEvent, Event, InputEvent, KeyEvent};
 // When introducing additional async producers, migrate to `mpsc::channel(EVENT_CHANNEL_CAP)` and
 // implement documented backpressure policy (Refactor R1 Step 10).
 // use core_events::EVENT_CHANNEL_CAP; // (future bounded channel capacity activation point)
+use clap::Parser;
 use core_render::scheduler::RenderScheduler;
 use core_render::status::{StatusContext, build_status};
 use core_render::viewport::Viewport;
@@ -22,6 +23,14 @@ use tokio::sync::mpsc;
 use tracing::{error, info};
 
 // RenderScheduler moved to core-render::scheduler (Refactor R1 Step 4)
+
+/// CLI arguments (Phase 2 Step 2: optional file path for initial open)
+#[derive(Parser, Debug)]
+#[command(name = "oxidized", version, about = "Oxidized editor")] // minimal metadata
+struct Args {
+    /// Optional path to open at startup (UTF-8 text). If omitted a welcome buffer is used.
+    pub path: Option<std::path::PathBuf>,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -54,11 +63,36 @@ async fn main() -> Result<()> {
     // Use RAII guard so any early return/panic restores the terminal.
     let _term_guard = term.enter_guard()?;
 
-    let buffer = Buffer::from_str(
-        "welcome",
-        "Welcome to ⚙️ Oxidized (Phase 1)\nPress :q to quit.",
-    )?;
+    let args = Args::parse();
+
+    // Base buffer: either from file or welcome text.
+    let (buffer, file_name) = if let Some(path) = args.path {
+        match std::fs::read_to_string(&path) {
+            Ok(content) => {
+                let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("file");
+                (Buffer::from_str(name, &content)?, Some(path))
+            }
+            Err(e) => {
+                error!(?e, "file_open_error");
+                let buf = Buffer::from_str(
+                    "welcome",
+                    "Welcome to ⚙️ Oxidized (Phase 2)\n(File open failed; starting empty)\nPress :q to quit.",
+                )?;
+                (buf, None)
+            }
+        }
+    } else {
+        (
+            Buffer::from_str(
+                "welcome",
+                "Welcome to ⚙️ Oxidized (Phase 2)\nPress :q to quit.",
+            )?,
+            None,
+        )
+    };
     let mut state = EditorState::new(buffer);
+    state.file_name = file_name;
+    state.dirty = false; // explicit for clarity (new buffer always clean at load)
     // Async unbounded channel (single consumer main loop). Input thread forwards blocking
     // crossterm events. Future bounded migration: swap to `mpsc::channel(EVENT_CHANNEL_CAP)` when
     // the first additional async producer (config watcher, timers, LSP, plugin host) lands.
