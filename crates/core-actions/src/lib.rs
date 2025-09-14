@@ -94,6 +94,8 @@ pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Optio
             }
             match mode {
                 Mode::Normal => match c {
+                    // Ctrl-R redo mapping: treat only control-modified 'r' as redo (reserve plain 'r' for future replace semantics)
+                    'r' if key.mods.contains(KeyModifiers::CTRL) => Some(Action::Redo),
                     'h' => Some(Action::Motion(MotionKind::Left)),
                     'l' => Some(Action::Motion(MotionKind::Right)),
                     'j' => Some(Action::Motion(MotionKind::Down)),
@@ -218,6 +220,26 @@ mod tests {
             },
         );
         assert!(matches!(bs, Some(Action::CommandBackspace)));
+    }
+
+    #[test]
+    fn ctrl_r_maps_to_redo() {
+        use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let evt = KeyEvent {
+            code: KeyCode::Char('r'),
+            mods: KeyModifiers::CTRL,
+        };
+        let act = translate_key(Mode::Normal, "", &evt);
+        assert!(
+            matches!(act, Some(Action::Redo)),
+            "Ctrl-R should map to Redo action"
+        );
+        // Ensure plain 'r' (no ctrl) is currently unbound (reserved for future replace semantics)
+        let plain = KeyEvent {
+            code: KeyCode::Char('r'),
+            mods: KeyModifiers::empty(),
+        };
+        assert!(translate_key(Mode::Normal, "", &plain).is_none());
     }
 
     #[test]

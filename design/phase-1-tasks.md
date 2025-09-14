@@ -74,7 +74,7 @@ Checklist (Hybrid Sequencing):
 - [x] 4.3 (4a) Implement core APIs: `push_snapshot(state)`, `restore_snapshot(state, snapshot)`, `undo(state) -> bool`, `redo(state) -> bool` (return dirty flag).
 - [x] 4.4 (4a) Guard logic: push pre-edit snapshot only if not already in an active insert run (Insert run tracking boolean or counter in state).
 - [x] 4.5 (4a) Unit tests: single insert sequence captured once; multiple snapshots capped; redo cleared after new edit.
-- [x] 4.6 (4b) Wire `Action::Undo` (`u`) and `Action::Redo` (`Ctrl-R`) in dispatcher after minimal Insert (5a) merged.
+- [x] 4.6 (4b) Wire `Action::Undo` (`u`) and `Action::Redo` (`Ctrl-R`) in dispatcher after minimal Insert (5a) merged. (Physical key translation for `Ctrl-R` was accidentally omitted initially and added during Final Gate; see Correction 13.C1. Design intent unchanged.)
 - [x] 4.7 (4b) Integration tests: perform inserts -> undo -> redo path; ensure cursor restored.
 - [x] 4.8 (4b) Coalescing logic (boundary-based): character inserts while in Insert mode coalesce until Esc or newline (newline added in 5b). Implementation: track `coalescing_active` flag; Esc/newline toggles off.
 - [x] 4.9 (4b) Snapshot push for Normal mode edits (`x`) always discrete (implemented in Task 6).
@@ -244,11 +244,8 @@ Status: [x] 10.1 complete / [x] 10.2 complete (2025-09-14)
 ### Rationale & Notes
 
 Unified motion span: A separate `grapheme_nav` span would duplicate every horizontal navigation emission. Keeping a single `motion` span simplifies downstream aggregation and avoids noisy log inflation. If future analysis needs to distinguish vertical/word vs grapheme‑wise motions we can add a `span!(..., kind = "horizontal"|"vertical"|"word")` attribute or introduce the deferred alias at that time.
-
 Span naming consistency: All edit-related spans share the `edit_` prefix for easy filtering (`RUST_LOG=trace` with a future subscriber layer). Undo/redo intentionally top-level (no `edit_` prefix) to make history traversals visually distinct while scanning traces.
-
 Snapshot metrics: Current lightweight approach logs stack depths and rope line counts without performing diff computations. This is sufficient for Phase 1 to validate coalescing boundaries and stack discipline. Richer metrics (character delta counts, time-based coalescing windows) are deferred to Phase 2 when diff rendering lands.
-
 Performance considerations: Spans are extremely low-cost in the no-subscriber path. We purposefully avoided per-grapheme width or diff calculations inside the span constructor to keep hot paths lean.
 
 Deferred alias decision: Dropped; unified `motion` span is sufficient. Future differentiation (if required) will use a span field (e.g. kind="horizontal"|"vertical"|"word") rather than a new span name.
@@ -299,13 +296,14 @@ Acceptance:
 
 13.1 Quality gates: `cargo build` / tests / `cargo clippy -D warnings` / `cargo fmt --all -- --check` — COMPLETE (2025-09-14).
 13.2 Manual smoke checklist + friendly Phase 1 completion note added to README (run instructions, what to try) — PENDING.
-13.3 Tag repository (`phase-1-complete`) after README update — PENDING.
 
 Acceptance:
 
 - 13.1 All gates green on main branch commit (no warnings, all tests pass).
 - 13.2 README contains a concise “Try this” list (enter insert, type emoji, newline, undo/redo, word motions) and clarifies Phase 1 scope without deep internals.
 - 13.3 Annotated git tag created pointing at last Phase 1 commit.
+
+Correction 13.C1 (Final Gate): During Task 13 verification we found the physical key translation for `Ctrl-R` (Redo) missing even though `Action::Redo` logic and tests existed from Task 4.6. Added translator mapping + dedicated test; design intent and acceptance for 4.6 unchanged. (Cross-reference: see 4.6 note.)
 
 ---
 
@@ -323,5 +321,8 @@ Acceptance:
 ## Notes
 
 Refactor Checkpoint R1 introduced (see `design/refactor-r1.md`) to keep Phase 1 incremental while preventing `main.rs` bloat and preparing for Task 7. Items moved: helper extraction (9.3), dispatcher relocation, status formatter, command line state struct, Insert run enum, viewport stub, observer hook, and scheduling module extraction.
-
 Keep changes linear: each numbered section should leave code runnable. Avoid starting undo stack before mutation APIs exist, etc.
+
+---
+
+End of Phase 1 task log.
