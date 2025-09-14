@@ -5,6 +5,13 @@
 //! * Split motion/edit/command application into dedicated sub-modules.
 //! * Emit structured render deltas instead of a boolean dirty flag.
 //! * Integrate observer hooks (macro recorder, analytics) before mutation.
+//!
+//! Telemetry (Phase 1 final set):
+//! * `motion` span around all motion kinds (`kind` field distinguishes variants).
+//! * `edit_insert`, `edit_newline`, `edit_backspace`, `edit_delete_under` for edit paths.
+//! * `undo`, `redo` spans around snapshot restoration.
+//!   Snapshot lifecycle trace events (`push_snapshot`, `undo_pop`, `redo_pop`, stack trims)
+//!   originate in `core-state`.
 
 use crate::{Action, ActionObserver, EditKind, ModeChange, MotionKind};
 use core_state::{EditorState, Mode};

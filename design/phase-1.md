@@ -106,7 +106,7 @@ Action Abstraction (Added mid‑Phase 1):
 11. Integrate undo stack coalescing refinement: sequence of plain character inserts inside Insert mode forms a single snapshot (boundary = Esc or newline). Time-based merging deferred.
 12. Add command-line echo: maintain `pending_command` state; render at status line; execute on Enter (still only `:q` recognized this phase).
 13. Update tests: buffer mutation (insert/delete/newline), cursor motion clamping, undo/redo restoring previous text, status line string composition.
-14. Add tracing spans for `edit_op`, `motion`, and `undo_cycle`.
+14. Add tracing spans: `motion`, `edit_insert`, `edit_newline`, `edit_backspace`, `edit_delete_under`, `undo`, `redo` plus trace logs for snapshot push/pop (granular undo/redo visibility). (Final naming: no separate `grapheme_nav` span; all motions unified under `motion`.)
 15. Update design docs & README to reflect new capabilities and hybrid ordering (4a -> 5a -> 4b -> 5b).
 16. Run build, clippy, fmt, tests; ensure clean exit still works.
 
@@ -131,9 +131,17 @@ Refer to the separate plan for the ordered commit breakdown. Task 7 will resume 
 
 ## 8. Telemetry / Logging
 
-* Add spans: `motion`, `insert`, `delete`, `newline`, `undo`, `redo`, `grapheme_nav`.
-* Debug logs for snapshot push/pop (size of rope, stacks lengths).
-* Trace-level logging for each key translated into an action.
+* Spans (final Phase 1 set):
+  * `motion` – any horizontal, vertical, or word motion (unified; dropped earlier idea of a separate `grapheme_nav` alias to avoid redundancy).
+  * `edit_insert` – inserting a single grapheme in Insert mode (part of a coalesced run).
+  * `edit_newline` – newline insertion (also ends an Insert run / coalescing boundary).
+  * `edit_backspace` – backspace deletion of previous grapheme within an Insert run.
+  * `edit_delete_under` – Normal mode delete-under (`x`). Each action is a discrete snapshot.
+  * `undo` / `redo` – snapshot restoration operations.
+* Snapshot lifecycle trace logs: `push_snapshot`, `undo_pop`, `redo_pop`, plus stack depth + simple metrics.
+* Additional trace logs: redo stack clearing (`redo_stack_cleared_on_new_edit`), stack trimming, etc.
+* Key translation path emits trace for each translated `Action` (via explicit instrumentation in translator / dispatch spans above).
+* Rationale: Distinguish user-intent categories without exploding span taxonomy; keep motion unified; keep edit kinds distinct for future histogram aggregation.
 
 ## 9. Risks & Mitigations
 
@@ -178,3 +186,6 @@ Refer to the separate plan for the ordered commit breakdown. Task 7 will resume 
 * 9.9 (Documented, deferred): Multi-producer readiness & render diff hook. Additional async producers (config watcher, timers, future LSP, plugin host) will feed actions through either an added `Event::Action(Action)` variant or a parallel action channel merged with `tokio::select!`. Decision intentionally deferred until first new producer to avoid dormant enum variants. `RenderScheduler` will evolve from a boolean dirty flag to collecting `RenderDelta` values (Full, Lines(range), Status, CursorOnly) merged into a `Damage` set consumed by a future diff-capable renderer. Current full-frame redraw semantics preserved until structured deltas exist.
 * 9.3 Rescope: Only motion helpers (`apply_motion`, `apply_vertical_motion`) extracted now; dedicated `apply_edit` / `apply_command_input` helpers will be introduced when Insert mode editing & undo stack (Tasks 4–6) are implemented to prevent premature abstraction and churn.
 * Hybrid Ordering Rationale: Landing snapshot infrastructure (4a) before user-visible edits (5a) isolates API design risk. Minimal Insert (5a) then allows early verification of snapshot correctness. Wiring undo (4b) afterward prevents prematurely baking in coalescing semantics. Completing Insert (5b) finally exercises newline/backspace edge cases against a stabilized snapshot API.
+* Telemetry Naming Decision: Removed provisional `grapheme_nav` span; a single `motion` span (with `kind` field) sufficiently captures navigation semantics while reducing churn for future advanced motions (word variants, paragraph, etc.). Distinct `edit_*` spans retained for potential per-kind latency metrics and frequency analysis.
+* Limitations Pointer: See README "Limitations (Phase 1)" for explicit constraints (naive word motions, full-frame redraw, single buffer, no diff rendering, no timing-based coalescing, emoji width caveats). This design doc keeps scope authoritative; README surfaces user-facing summary.
+* Future Instrumentation: Diff rendering (Phase 2+) will introduce delta classification spans (e.g. `render_diff`) and possibly granular damage metrics; existing `render_cycle` info span already wraps full-frame draws.

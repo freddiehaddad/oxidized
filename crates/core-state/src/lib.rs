@@ -17,6 +17,11 @@
 //! - `SnapshotKind::Edit` ignores restoring the editor mode on undo/redo so that leaving Insert
 //!   mode with `Esc` then undoing the last run does not unexpectedly re-enter Insert mode.
 //! - Future kinds (mode transitions, structural operations) can opt-in to mode restoration.
+//!
+//! Telemetry Integration:
+//! - Snapshot lifecycle emits trace events (`push_snapshot`, `undo_pop`, `redo_pop`, stack trims, redo clear).
+//! - Edit application spans (`edit_insert`, `edit_newline`, `edit_backspace`, `edit_delete_under`) and
+//!   navigation (`motion`) live in the dispatcher; undo/redo spans wrap calls into this module.
 
 use core_text::{Buffer, Position};
 use tracing::trace;
