@@ -65,6 +65,12 @@ pub struct EditorState {
     pub mode: Mode,
     /// Primary caret position (grapheme boundary) within active buffer.
     pub position: Position,
+    /// Optional file name associated with the active buffer (Phase 2 Step 1).
+    /// None for unnamed / scratch buffer until a path is assigned via open or write-as.
+    pub file_name: Option<std::path::PathBuf>,
+    /// Dirty flag indicating buffer has unsaved modifications relative to last open/save.
+    /// Phase 2 Step 1: plumbed but mutations do not yet toggle this (handled in later steps).
+    pub dirty: bool,
     /// Undo history (older at lower indices). Most recent snapshot is at the end.
     pub undo_stack: Vec<EditSnapshot>,
     /// Redo history (most recently undone states). Cleared on new edit.
@@ -139,6 +145,8 @@ impl EditorState {
             active: 0,
             mode: Mode::Normal,
             position: Position::origin(),
+            file_name: None,
+            dirty: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             insert_run: InsertRun::Inactive,

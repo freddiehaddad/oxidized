@@ -163,6 +163,8 @@ fn render(state: &EditorState) -> Result<()> {
             col,
             command_active: state.command_line.is_active(),
             command_buffer: state.command_line.buffer(),
+            file_name: state.file_name.as_deref(),
+            dirty: state.dirty,
         });
         for (i, ch) in status.chars().enumerate() {
             if (i as u16) < w {
