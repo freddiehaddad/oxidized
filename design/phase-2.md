@@ -77,7 +77,7 @@ IDs final after confirmation; commit messages embed Phase/Step.
 
 1. (Done) Add buffer metadata fields (`file_name`, `dirty`) + show filename & dirty marker in status line (no IO yet). Initial dirty flag always false until mutation tracking added in later step.
 2. (Done) Implement CLI open: if `oxidized <path>` provided, load file contents into buffer (blocking read, UTF-8 only). On error fallback to welcome buffer and log error (ephemeral status messaging deferred until step 6).
-3. Command parse: extend `CommandExecute` handling for `:e <path>` (replace current buffer) + tests.
+3. (Done) Command parse: extend `CommandExecute` handling for `:e <path>` (replace current buffer) + tests (loads file, resets cursor, updates file_name, dirty=false; errors logged only until ephemeral status in step 6).
 4. Add `:w` handling: write current buffer to existing filename; if none, ephemeral error (later `:w <path>` maybe). Set dirty=false.
 5. Dirty tracking: mark buffer dirty on first mutation since last write/open; tests for undo revert not auto-clearing dirty (explicit strategy: remains dirty until write).
 6. Introduce ephemeral status message store & rendering (overwrites right side or replaces command section when idle). Add timeout (e.g., 3s) using Instant checked each event loop iteration (no timers yet — breadth-first synchronous check).

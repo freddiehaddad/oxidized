@@ -66,6 +66,7 @@ Right now the best help is feedback on architecture, clarity of crate boundaries
 5. **Should I daily‑drive it?** Not yet. Follow along, kick the tires, file issues.
 6. **Why is the cursor sometimes bashful with super wide emoji?** Terminal quirks + early rendering path. We’ll tighten it up when diff rendering lands.
 7. **Will performance tank with full redraws?** Not for the tiny files we test with. We’ll switch to dirty / diff updates before scale matters.
+8. **Why does a lonely `#` sometimes flash on a blank line when I move with `j`/`k`?** That’s an early rendering quirk: the naive full‑frame path still writes raw newline control characters into the buffer, so the terminal cursor hops unexpectedly and a nearby heading `#` can momentarily appear on the blank line. It’s harmless, will disappear once we strip control chars (or land the RenderDelta + smarter painter), and is intentionally left unfixed until we reach the planned render cleanup step.
 
 ## Dual License
 

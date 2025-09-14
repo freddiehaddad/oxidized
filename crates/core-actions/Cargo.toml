@@ -13,3 +13,4 @@ tracing = "0.1"
 
 [dev-dependencies]
 anyhow = "1.0.99"
+tempfile = "3.22.0"

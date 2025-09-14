@@ -137,6 +137,35 @@ pub fn dispatch(
             if cmd == ":q" {
                 return DispatchResult::quit();
             }
+            // File edit command: :e <path>
+            if let Some(rest) = cmd.strip_prefix(":e ") {
+                let path_str = rest.trim();
+                if !path_str.is_empty() {
+                    let path = std::path::PathBuf::from(path_str);
+                    match std::fs::read_to_string(&path) {
+                        Ok(content) => {
+                            let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("file");
+                            // Replace active buffer (Phase 2 single-buffer assumption)
+                            match Buffer::from_str(name, &content) {
+                                Ok(new_buf) => {
+                                    state.buffers[state.active] = new_buf;
+                                    state.position = Position::origin();
+                                    state.file_name = Some(path);
+                                    state.dirty = false; // clean after load
+                                }
+                                Err(e) => {
+                                    tracing::error!(?e, "buffer_create_failed");
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(?e, "file_open_error");
+                        }
+                    }
+                }
+                state.command_line.clear();
+                return DispatchResult::dirty();
+            }
             state.command_line.clear();
             DispatchResult::dirty()
         }
@@ -291,6 +320,41 @@ mod tests {
             &[],
         );
         assert!(res.quit && res.dirty);
+    }
+
+    #[test]
+    fn edit_command_opens_file() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("sample.txt");
+        {
+            let mut f = std::fs::File::create(&file_path).unwrap();
+            writeln!(f, "Hello Edit Command").unwrap();
+        }
+        let buffer = Buffer::from_str("t", "initial").unwrap();
+        let mut state = EditorState::new(buffer);
+        let mut sticky = None;
+        // Simulate entering :e <path>
+        dispatch(Action::CommandStart, &mut state, &mut sticky, &[]);
+        for ch in format!("e {}", file_path.display()).chars() {
+            dispatch(Action::CommandChar(ch), &mut state, &mut sticky, &[]);
+        }
+        let res = dispatch(
+            Action::CommandExecute(format!(":e {}", file_path.display())),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert!(res.dirty);
+        assert!(state.file_name.as_ref().is_some());
+        assert!(
+            state
+                .active_buffer()
+                .line(0)
+                .unwrap()
+                .starts_with("Hello Edit Command")
+        );
+        assert!(!state.dirty, "buffer must be clean after load");
     }
 
     #[test]
