@@ -15,20 +15,26 @@ pub struct StatusContext<'a> {
 }
 
 /// Build status line string. Format (Phase 1):
-/// [MODE] Ln <1-based>, Col <1-based> :<cmd-buffer>
-/// The trailing colon section appears only if command buffer active.
+/// [MODE] Ln <1-based>, Col <1-based> :<cmd-buffer-without-leading-colon>
+/// When command is active we store the internal buffer with a leading ':' sentinel
+/// but display only a single colon in the status line for visual cleanliness.
 pub fn build_status(ctx: &StatusContext) -> String {
     let mode_str = match ctx.mode {
         Mode::Normal => "NORMAL",
         Mode::Insert => "INSERT",
     };
     if ctx.command_active {
+        // Strip leading ':' if present so we only render one.
+        let display = ctx
+            .command_buffer
+            .strip_prefix(':')
+            .unwrap_or(ctx.command_buffer);
         format!(
             "[{}] Ln {}, Col {} :{}",
             mode_str,
             ctx.line + 1,
             ctx.col + 1,
-            ctx.command_buffer
+            display
         )
     } else {
         format!("[{}] Ln {}, Col {} :", mode_str, ctx.line + 1, ctx.col + 1)
@@ -51,7 +57,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_status_insert_with_cmd() {
+    fn builds_status_insert_with_cmd_single_colon() {
         let s = build_status(&StatusContext {
             mode: Mode::Insert,
             line: 2,
@@ -59,6 +65,6 @@ mod tests {
             command_active: true,
             command_buffer: ":wq",
         });
-        assert_eq!(s, "[INSERT] Ln 3, Col 11 ::wq");
+        assert_eq!(s, "[INSERT] Ln 3, Col 11 :wq");
     }
 }

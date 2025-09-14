@@ -137,6 +137,39 @@ Tests: multiple x + undos.
 7.3 Echo `:q` and preserve existing quit behavior.
 Tests: building formatted status string.
 
+### Task 7 Enhancement Breakdown (2025-09-14)
+
+Refactor R1 introduced a minimal `CommandLineState` plus `Action::{CommandInput,CommandExecute}`. Task 7 now formalizes and hardens the command / status line path so later phases (history, completion, multi-command parsing) evolve without touching the main loop.
+
+Substeps (each intended to land in an independent commit – breadth first, always runnable):
+
+- [x] 7.1 Action Enum Refinement: Replace sentinel uses with explicit variants: `CommandStart`, `CommandChar(char)`, `CommandBackspace`, `CommandCancel`, `CommandExecute(String)`. (Done 2025-09-14)
+- [x] 7.2 Translator Unification: All colon handling moved into `translate_key`; main loop no longer special‑cases `:`. (Done 2025-09-14)
+- [x] 7.3 Status Formatting Clarification: Single visible colon; internal buffer keeps leading ':' sentinel; tests updated. (Done 2025-09-14)
+- [x] 7.4 Dispatcher Parsing Stub: Minimal parse for `:q` triggers quit; other commands clear line. (Done 2025-09-14)
+- [x] 7.5 Command Line Editing Tests: Added translation and execution tests (start, char, backspace, cancel, execute). (Done 2025-09-14)
+- [x] 7.6 Rustdoc & Design Sync: Updated docs (this section) & status module; colon variant regression documented below. (Done 2025-09-14)
+
+Colon Key Regression (Postmortem / Decision):
+The input layer emitted `KeyCode::Colon` while the translator only matched `KeyCode::Char(':')`, preventing command mode activation. Short-term fix: translator now matches both (`KeyCode::Char(':') | KeyCode::Colon`). This is an intentional breadth‑first patch; a later consolidation will likely remove the dedicated `Colon` variant or introduce a normalization shim. Tracking note added; no architectural impact.
+
+#### Rationale
+
+- Explicit variants improve clarity and eliminate sentinel coupling between translator and dispatcher.
+- Stripping the internal sentinel before rendering aligns with typical editors (one visible colon).
+- Early parse stub provides a stable seam for future multi-word commands (e.g. `:w filename`).
+
+#### Edge Cases Considered
+
+- Repeated `:` while command inactive should not stack colons – only first starts command mode.
+- Backspace when only `":"` present should cancel command mode (buffer cleared).
+- Escape while command active should cancel (no quit) and redraw status line without command section.
+- Enter on empty `":"` should just clear (no quit).
+
+Commit Template: `feat(phase1-task7-stepX): <summary>` where X = substep number above.
+
+Upon completion all checkboxes above will be `[x]` and this section remains as historical record for Task 7 implementation decisions.
+
 ---
 
 ## 8. Rendering & Cursor Placement

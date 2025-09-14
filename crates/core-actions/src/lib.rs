@@ -27,8 +27,12 @@ pub enum Action {
     ModeChange(ModeChange),
     Undo,
     Redo,
-    CommandInput(char),
-    CommandExecute(String),
+    // Command line actions (Task 7.1 Action Enum Refinement)
+    CommandStart,           // begin command line (inserts leading ':')
+    CommandChar(char),      // insert character into command buffer
+    CommandBackspace,       // remove last character or cancel if only ':'
+    CommandCancel,          // abort command (Esc)
+    CommandExecute(String), // execute full buffer (still includes leading ':')
     Quit,
 }
 
@@ -70,16 +74,23 @@ pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Optio
     );
     let _e = span.enter();
     match key.code {
-        KeyCode::Char(':') => {
+        // Command start only if not already active. Runtime input thread currently emits
+        // `KeyCode::Colon` (distinct variant) while some tests previously constructed
+        // `KeyCode::Char(':')`. Support BOTH to avoid a silent divergence like the regression
+        // where ':' stopped opening the command line. Treat them identically.
+        KeyCode::Char(':') | KeyCode::Colon => {
             if pending_command.is_empty() {
-                return Some(Action::CommandInput(':'));
+                Some(Action::CommandStart)
+            } else if pending_command.starts_with(':') {
+                // Treat additional ':' as just another char in command line
+                Some(Action::CommandChar(':'))
+            } else {
+                None
             }
-            None
         }
         KeyCode::Char(c) => {
-            // Command-line accumulation
             if pending_command.starts_with(':') {
-                return Some(Action::CommandInput(c));
+                return Some(Action::CommandChar(c));
             }
             match mode {
                 Mode::Normal => match c {
@@ -97,17 +108,16 @@ pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Optio
                     _ => None,
                 },
                 Mode::Insert => {
-                    // Printable insertion (grapheme boundaries handled upstream by terminal input)
                     if !c.is_control() {
-                        return Some(Action::Edit(EditKind::InsertGrapheme(c.to_string())));
+                        Some(Action::Edit(EditKind::InsertGrapheme(c.to_string())))
+                    } else {
+                        None
                     }
-                    None
                 }
             }
         }
         KeyCode::Enter => {
             if pending_command.starts_with(':') {
-                // Execution handled later; translator just signals command execute intent when Enter.
                 Some(Action::CommandExecute(pending_command.to_string()))
             } else if matches!(mode, Mode::Insert) {
                 Some(Action::Edit(EditKind::InsertNewline))
@@ -116,18 +126,17 @@ pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Optio
             }
         }
         KeyCode::Backspace => {
-            if matches!(mode, Mode::Insert) {
+            if pending_command.starts_with(':') {
+                Some(Action::CommandBackspace)
+            } else if matches!(mode, Mode::Insert) {
                 Some(Action::Edit(EditKind::Backspace))
-            } else if pending_command.starts_with(':') && !pending_command.is_empty() {
-                // Backspace inside command-line: treat as removing last char (will be handled by caller) -> signal input with sentinel? For now reuse CommandInput with '\u{08}'
-                Some(Action::CommandInput('\u{08}'))
             } else {
                 None
             }
         }
         KeyCode::Esc => {
             if pending_command.starts_with(':') {
-                Some(Action::CommandExecute(String::new())) // special meaning: cancel
+                Some(Action::CommandCancel)
             } else if matches!(mode, Mode::Insert) {
                 Some(Action::ModeChange(ModeChange::LeaveInsert))
             } else {
@@ -168,6 +177,60 @@ mod tests {
     fn insert_mode_inserts() {
         assert!(
             matches!(translate_key(Mode::Insert, "", &kc('a')), Some(Action::Edit(EditKind::InsertGrapheme(ref s))) if s=="a")
+        );
+    }
+
+    #[test]
+    fn command_sequence_translation() {
+        // start
+        let start = translate_key(Mode::Normal, "", &kc(':'));
+        assert!(matches!(start, Some(Action::CommandStart)));
+        // after ':' pending buffer would be ':'; simulate adding 'q'
+        let q = translate_key(Mode::Normal, ":", &kc('q'));
+        assert!(matches!(q, Some(Action::CommandChar('q'))));
+        // Enter executes
+        let enter = translate_key(
+            Mode::Normal,
+            ":q",
+            &KeyEvent {
+                code: KeyCode::Enter,
+                mods: KeyModifiers::empty(),
+            },
+        );
+        assert!(matches!(enter, Some(Action::CommandExecute(ref s)) if s==":q"));
+        // Esc cancels when active
+        let esc = translate_key(
+            Mode::Normal,
+            ":q",
+            &KeyEvent {
+                code: KeyCode::Esc,
+                mods: KeyModifiers::empty(),
+            },
+        );
+        assert!(matches!(esc, Some(Action::CommandCancel)));
+        // Backspace
+        let bs = translate_key(
+            Mode::Normal,
+            ":q",
+            &KeyEvent {
+                code: KeyCode::Backspace,
+                mods: KeyModifiers::empty(),
+            },
+        );
+        assert!(matches!(bs, Some(Action::CommandBackspace)));
+    }
+
+    #[test]
+    fn colon_variant_translation() {
+        // Explicitly construct a KeyEvent using the Colon variant (emitted by input thread)
+        let colon_event = KeyEvent {
+            code: KeyCode::Colon,
+            mods: KeyModifiers::empty(),
+        };
+        let start = translate_key(Mode::Normal, "", &colon_event);
+        assert!(
+            matches!(start, Some(Action::CommandStart)),
+            "Colon variant should start command mode"
         );
     }
 }

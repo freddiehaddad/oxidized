@@ -110,12 +110,20 @@ pub fn dispatch(
             }
             DispatchResult::dirty()
         }
-        Action::CommandInput(ch) => {
-            if ch == '\u{08}' {
-                state.command_line.backspace();
-            } else {
-                state.command_line.push_char(ch);
-            }
+        Action::CommandStart => {
+            state.command_line.begin();
+            DispatchResult::dirty()
+        }
+        Action::CommandChar(ch) => {
+            state.command_line.push_char(ch);
+            DispatchResult::dirty()
+        }
+        Action::CommandBackspace => {
+            state.command_line.backspace();
+            DispatchResult::dirty()
+        }
+        Action::CommandCancel => {
+            state.command_line.clear();
             DispatchResult::dirty()
         }
         Action::CommandExecute(cmd) => {
@@ -261,8 +269,8 @@ mod tests {
         let mut state = EditorState::new(buffer);
         let mut sticky = None;
         // Simulate entering :q
-        dispatch(Action::CommandInput(':'), &mut state, &mut sticky, &[]);
-        dispatch(Action::CommandInput('q'), &mut state, &mut sticky, &[]);
+        dispatch(Action::CommandStart, &mut state, &mut sticky, &[]);
+        dispatch(Action::CommandChar('q'), &mut state, &mut sticky, &[]);
         let res = dispatch(
             Action::CommandExecute(":q".into()),
             &mut state,

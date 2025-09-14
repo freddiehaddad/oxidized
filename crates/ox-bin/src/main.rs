@@ -4,7 +4,7 @@ use anyhow::Result;
 use core_actions::Action;
 use core_actions::ActionObserver; // trait (currently unused in main but stored for future use)
 use core_actions::dispatcher::dispatch;
-use core_events::{CommandEvent, Event, InputEvent, KeyCode, KeyEvent};
+use core_events::{CommandEvent, Event, InputEvent, KeyEvent};
 // NOTE: `EVENT_CHANNEL_CAP` lives in `core-events` (currently unused while channel is unbounded).
 // When introducing additional async producers, migrate to `mpsc::channel(EVENT_CHANNEL_CAP)` and
 // implement documented backpressure policy (Refactor R1 Step 10).
@@ -87,98 +87,20 @@ async fn main() -> Result<()> {
                 info!("shutdown");
                 break;
             }
-            Event::Input(InputEvent::Key(k)) => match k.code {
-                KeyCode::Colon => {
-                    state.command_line.begin();
-                }
-                KeyCode::Char(c) => {
-                    // Use translator for motions/commands (Insert edits not yet wired)
-                    if let Some(act) = translate_key_wrapper(
-                        state.mode,
-                        state.command_line.buffer(),
-                        &KeyEvent {
-                            code: KeyCode::Char(c),
-                            mods: k.mods,
-                        },
-                    ) {
-                        let dr = dispatch(act, &mut state, &mut sticky_visual_col, &observers);
-                        if dr.dirty {
-                            scheduler.mark_dirty();
-                        }
-                        if dr.quit {
-                            break;
-                        }
-                    }
-                }
-                KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
-                    if let Some(act) =
-                        translate_key_wrapper(state.mode, state.command_line.buffer(), &k)
-                    {
-                        let dr = dispatch(act, &mut state, &mut sticky_visual_col, &observers);
-                        if dr.dirty {
-                            scheduler.mark_dirty();
-                        }
-                        if dr.quit {
-                            break;
-                        }
-                    }
-                }
-                KeyCode::Enter => {
-                    if let Some(act) =
-                        translate_key_wrapper(state.mode, state.command_line.buffer(), &k)
-                    {
-                        let dr = dispatch(act, &mut state, &mut sticky_visual_col, &observers);
-                        if dr.dirty {
-                            scheduler.mark_dirty();
-                        }
-                        if dr.quit {
-                            break;
-                        }
-                    } else {
-                        // Fallback: if Enter while in command mode with :q
-                        if state.command_line.buffer() == ":q" {
-                            break;
-                        }
-                        // Otherwise clear any pending command input (e.g., empty or cancelled)
-                        if state.command_line.is_active() {
-                            state.command_line.clear();
-                            scheduler.mark_dirty();
-                        }
-                    }
-                }
-                KeyCode::Backspace => {
-                    if let Some(act) =
-                        translate_key_wrapper(state.mode, state.command_line.buffer(), &k)
-                    {
-                        let dr = dispatch(act, &mut state, &mut sticky_visual_col, &observers);
-                        if dr.dirty {
-                            scheduler.mark_dirty();
-                        }
-                        if dr.quit {
-                            break;
-                        }
-                    }
-                }
-                KeyCode::Esc => {
-                    // Route through translator so Insert mode Escape triggers ModeChange::LeaveInsert
-                    if let Some(act) =
-                        translate_key_wrapper(state.mode, state.command_line.buffer(), &k)
-                    {
-                        let dr = dispatch(act, &mut state, &mut sticky_visual_col, &observers);
-                        if dr.dirty {
-                            scheduler.mark_dirty();
-                        }
-                        if dr.quit {
-                            break;
-                        }
-                    } else {
-                        // Fallback: clear any pending (e.g. stray command buffer) and mark dirty
-                        state.command_line.clear();
+            Event::Input(InputEvent::Key(k)) => {
+                // Single unified path: every key translated (breadth-first simplicity)
+                if let Some(act) =
+                    translate_key_wrapper(state.mode, state.command_line.buffer(), &k)
+                {
+                    let dr = dispatch(act, &mut state, &mut sticky_visual_col, &observers);
+                    if dr.dirty {
                         scheduler.mark_dirty();
                     }
+                    if dr.quit {
+                        break;
+                    }
                 }
-                _ => {}
-            },
+            }
             Event::Input(InputEvent::Resize(_, _)) => { /* trigger redraw below */ }
             Event::RenderRequested => {}
             Event::Command(CommandEvent::Quit) => {

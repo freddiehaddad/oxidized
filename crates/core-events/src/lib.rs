@@ -65,6 +65,13 @@ pub struct KeyEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// KeyCode enumerates normalized logical key representations consumed by higher layers.
+/// NOTE (Phase 1 breadth-first): `Colon` exists as a distinct variant because the initial
+/// input thread mapping introduced it to signal potential command mode activation. A regression
+/// occurred when translator logic only matched `Char(':')`. We now handle both forms.
+/// Future consolidation: likely remove `Colon` and emit `Char(':')` exclusively, or add a
+/// normalization shim mapping special printable variants into `Char` to guarantee a single
+/// printable pipeline. Tracking note lives in `design/phase-1-tasks.md` (Task 7 postmortem).
 pub enum KeyCode {
     Char(char),
     Enter,
