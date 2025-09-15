@@ -186,6 +186,31 @@ impl EditorState {
         }
         false
     }
+
+    /// Auto-scroll to keep cursor within the visible vertical viewport.
+    ///
+    /// `text_height` is the number of text rows (excludes status line). If zero, no-op.
+    /// Adjusts `viewport_first_line` so that:
+    /// - cursor line >= viewport_first_line
+    /// - cursor line < viewport_first_line + text_height
+    ///
+    /// Returns true if the first line changed.
+    pub fn auto_scroll(&mut self, text_height: usize) -> bool {
+        if text_height == 0 {
+            return false;
+        }
+        let cursor_line = self.position.line;
+        let mut changed = false;
+        if cursor_line < self.viewport_first_line {
+            self.viewport_first_line = cursor_line;
+            changed = true;
+        } else if cursor_line >= self.viewport_first_line + text_height {
+            // Place cursor at last visible line
+            self.viewport_first_line = cursor_line + 1 - text_height;
+            changed = true;
+        }
+        changed
+    }
     /// Borrow the currently active buffer.
     pub fn active_buffer(&self) -> &Buffer {
         &self.buffers[self.active]
@@ -675,5 +700,30 @@ mod tests {
         let mut st2 = st; // mutable copy
         st2.viewport_first_line = 5;
         assert_eq!(st2.viewport_first_line, 5, "field should be mutable");
+    }
+
+    #[test]
+    fn auto_scroll_down_and_up() {
+        let buf = Buffer::from_str("t", "0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n").unwrap();
+        let mut st = EditorState::new(buf);
+        // Simulate text height = 5 lines.
+        let height = 5usize;
+        // Move cursor to line 0 (already) -> no scroll.
+        assert!(!st.auto_scroll(height));
+        // Jump cursor to line 4 -> still visible (0..5)
+        st.position.line = 4;
+        assert!(!st.auto_scroll(height));
+        // Jump to line 5 -> should scroll so first line becomes 1
+        st.position.line = 5;
+        assert!(st.auto_scroll(height));
+        assert_eq!(st.viewport_first_line, 1);
+        // Jump far down line 9 -> first line should be 9 + 1 - height = 5
+        st.position.line = 9;
+        assert!(st.auto_scroll(height));
+        assert_eq!(st.viewport_first_line, 5);
+        // Move cursor back to line 3 -> above first line -> should clamp to 3
+        st.position.line = 3;
+        assert!(st.auto_scroll(height));
+        assert_eq!(st.viewport_first_line, 3);
     }
 }

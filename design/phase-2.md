@@ -82,17 +82,18 @@ IDs final after confirmation; commit messages embed Phase/Step.
 5. (Done) Dirty tracking: buffer `dirty` set on first mutation after open/write across all edit kinds (insert grapheme, newline, backspace, delete-under). Undo/redo do NOT auto-clear; only successful `:w` resets. Tests cover: first insert sets dirty, undo leaves dirty, write clears then subsequent edit re-sets dirty.
 6. (Done) Ephemeral status: `EditorState::ephemeral_status` + `set_ephemeral` / `tick_ephemeral`. Messages (Open failed / Opened / Wrote / Write failed / No filename) right-align on status line when command inactive; hidden while command buffer active. 3s TTL checked each event loop iteration; expiration triggers redraw. Tests cover lifecycle, :e success/failure, :w no filename.
 7. (Done) Elevate viewport to state: add `viewport_first_line` to `EditorState` (initial 0); render path now uses this persistent field instead of constructing a transient `Viewport`. Scrolling logic still pending (Step 8) so value remains 0 until auto-scroll/page motions mutate it.
-8. Auto-scroll logic: when cursor line < first_line or >= first_line + height → adjust; tests.
-9. Page motions: map `Ctrl-D` / `Ctrl-U` to half-page jump preserving sticky column; clamp; tests.
-10. Software cursor: extend Cell struct, mark grapheme cluster span; hide hardware cursor; renderer applies reverse-video; tests with wide emoji & combining sequence.
-11. Config parsing (TOML): read `oxidized.toml` if present (or `--config <path>` override); parse `[scroll.margin]` table; load `vertical` (default 0). Clamp using `(h - 2)/2` rule. Log clamp (info) if applied.
-12. Integrate `scroll.margin.vertical` into auto-scroll logic (adjust Step 8 implementation accordingly) + tests: vertical=0 (no margin), vertical=2 (mid buffer), oversized (requests > clamp), very small viewport (h <= 3 edge cases).
-13. Bounded channel activation: replace unbounded creation with `mpsc::channel(EVENT_CHANNEL_CAP)`; add counters for send failures or backpressure events (simulate by small cap test). Adjust input thread to `block_on` send with `await` (spawn inside tokio or use blocking_send via dedicated task). Document fallback if saturation (log + drop InputEvent oldest? initial policy: await send). Update design doc accordingly.
-14. RenderDelta enum & scheduler queue: implement collection API; convert existing `mark_dirty()` call sites to `mark(RenderDelta::Lines(..))` or `Full` with simplistic mapping. Collapse always returns Full in Phase 2; tests for merge logic (Lines + Status → Full). Logging.
-15. Integrate delta usage in render loop (still full redraw; ignore partial). Place TODO for Phase 3/4.
-16. Refine status line format final (e.g. `[NORMAL] file.rs* Ln X, Col Y :` where `*` = dirty). Update tests & docs.
-17. Documentation sweep: rustdoc for new structs; update Phase 2 design file with any adjustments discovered.
-18. Quality gate run & finalize Phase 2 checklist marking done.
+8. (Done) Auto-scroll logic: added `EditorState::auto_scroll(text_height)` keeping cursor within `[first_line, first_line+height)`. Adjusts `viewport_first_line` upward or downward (placing cursor at bottom when scrolling down). Integrated into main event loop; redraw triggered only when first line changes. Tests cover downward scroll beyond bottom and upward scroll above top. Also fixes hardware cursor placement to account for `viewport_first_line` and suppresses rendering of raw `\r`/`\n` control terminators (pending full normalization Step 9).
+9. Line ending normalization & preservation: detect line ending style (CRLF / LF / CR) on load, normalize content to internal LF-only representation, store original style + final newline presence in state, and re-expand on write. Warn on mixed style (choose majority). Tests: CRLF round-trip, LF, CR, mixed majority, final newline preservation. Rendering already skips control chars; this step formalizes IO & metadata.
+10. Page motions: map `Ctrl-D` / `Ctrl-U` to half-page jump preserving sticky column; clamp; tests.
+11. Software cursor: extend Cell struct, mark grapheme cluster span; hide hardware cursor; renderer applies reverse-video; tests with wide emoji & combining sequence.
+12. Config parsing (TOML): read `oxidized.toml` if present (or `--config <path>` override); parse `[scroll.margin]` table; load `vertical` (default 0). Clamp using `(h - 2)/2` rule. Log clamp (info) if applied.
+13. Integrate `scroll.margin.vertical` into auto-scroll logic (adjust Step 8 implementation accordingly) + tests: vertical=0 (no margin), vertical=2 (mid buffer), oversized (requests > clamp), very small viewport (h <= 3 edge cases).
+14. Bounded channel activation: replace unbounded creation with `mpsc::channel(EVENT_CHANNEL_CAP)`; add counters for send failures or backpressure events (simulate by small cap test). Adjust input thread to `block_on` send with `await` (spawn inside tokio or use blocking_send via dedicated task). Document fallback if saturation (log + drop InputEvent oldest? initial policy: await send). Update design doc accordingly.
+15. RenderDelta enum & scheduler queue: implement collection API; convert existing `mark_dirty()` call sites to `mark(RenderDelta::Lines(..))` or `Full` with simplistic mapping. Collapse always returns Full in Phase 2; tests for merge logic (Lines + Status → Full). Logging.
+16. Integrate delta usage in render loop (still full redraw; ignore partial). Place TODO for Phase 3/4.
+17. Refine status line format final (e.g. `[NORMAL] file.rs* Ln X, Col Y :` where `*` = dirty). Update tests & docs.
+18. Documentation sweep: rustdoc for new structs; update Phase 2 design file with any adjustments discovered.
+19. Quality gate run & finalize Phase 2 checklist marking done.
 
 ## 7. Exit Criteria
 

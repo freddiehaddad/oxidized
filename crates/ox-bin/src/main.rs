@@ -159,6 +159,13 @@ async fn main() -> Result<()> {
         if state.tick_ephemeral() {
             scheduler.mark_dirty();
         }
+        // Auto-scroll (Phase 2 Step 8): keep cursor visible.
+        if let Ok((_, h)) = crossterm::terminal::size() {
+            let text_height = if h > 0 { (h - 1) as usize } else { 0 };
+            if state.auto_scroll(text_height) {
+                scheduler.mark_dirty();
+            }
+        }
         // Ask scheduler if a redraw is needed this cycle.
         if scheduler.consume_dirty()
             && let Err(e) = render(&state)
@@ -188,6 +195,9 @@ fn render(state: &EditorState) -> Result<()> {
         }
         if let Some(line) = buf.line(line_idx) {
             for (x, ch) in line.chars().enumerate() {
+                if ch == '\n' || ch == '\r' {
+                    break;
+                }
                 if (x as u16) < w {
                     frame.set(x as u16, screen_y as u16, ch);
                 }
@@ -199,7 +209,9 @@ fn render(state: &EditorState) -> Result<()> {
         let y = h - 1;
         let buf = state.active_buffer();
         let line_content = buf.line(state.position.line).unwrap_or_default();
-        let content_trim = if line_content.ends_with('\n') {
+        let content_trim = if line_content.ends_with("\r\n") {
+            &line_content[..line_content.len() - 2]
+        } else if line_content.ends_with('\n') || line_content.ends_with('\r') {
             &line_content[..line_content.len() - 1]
         } else {
             &line_content
@@ -241,7 +253,7 @@ fn render(state: &EditorState) -> Result<()> {
     let _e = span.enter();
     Renderer::render(&frame)?;
     // --- Hardware cursor placement (Phase 1 Task 8.2) ---
-    // Use grapheme-aware visual column and current viewport offset (viewport currently static at 0).
+    // Use grapheme-aware visual column and viewport offset.
     // Cursor row is the on-screen y of the active line (clamped within text area). We place the
     // terminal cursor *after* drawing to avoid flicker (terminal shows final frame + cursor).
     if h > 0 {
@@ -259,7 +271,11 @@ fn render(state: &EditorState) -> Result<()> {
                 &line_content
             };
             let vis_col = grapheme::visual_col(content_trim, state.position.byte) as u16;
-            let screen_line = (state.position.line as u16).min(text_height.saturating_sub(1));
+            let rel = state
+                .position
+                .line
+                .saturating_sub(state.viewport_first_line);
+            let screen_line = (rel as u16).min(text_height.saturating_sub(1));
             if vis_col < w && screen_line < text_height {
                 // Move hardware cursor then ensure it is shown (backend hid it on enter).
                 let _ = execute!(stdout(), MoveTo(vis_col, screen_line), Show);
