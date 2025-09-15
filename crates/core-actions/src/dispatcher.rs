@@ -14,7 +14,7 @@
 //!   originate in `core-state`.
 
 use crate::{Action, ActionObserver, EditKind, ModeChange, MotionKind};
-use core_state::{EditorState, Mode};
+use core_state::{EditorState, Mode, normalize_line_endings};
 use core_text::{Buffer, Position, motion};
 
 /// Result of dispatching a single `Action`.
@@ -145,15 +145,21 @@ pub fn dispatch(
                     match std::fs::read_to_string(&path) {
                         Ok(content) => {
                             let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("file");
-                            // Replace active buffer (Phase 2 single-buffer assumption)
-                            match Buffer::from_str(name, &content) {
+                            // Normalize line endings (Phase 2 Step 9)
+                            let norm = normalize_line_endings(&content);
+                            match Buffer::from_str(name, &norm.normalized) {
                                 Ok(new_buf) => {
                                     state.buffers[state.active] = new_buf;
                                     state.position = Position::origin();
                                     state.file_name = Some(path);
                                     state.dirty = false; // clean after load
+                                    state.original_line_ending = norm.original;
+                                    state.had_trailing_newline = norm.had_trailing_newline;
                                     state
                                         .set_ephemeral("Opened", std::time::Duration::from_secs(3));
+                                    if norm.mixed {
+                                        tracing::warn!("mixed_line_endings_detected");
+                                    }
                                 }
                                 Err(e) => {
                                     tracing::error!(?e, "buffer_create_failed");
@@ -177,11 +183,24 @@ pub fn dispatch(
             if cmd == ":w" {
                 if let Some(path) = state.file_name.clone() {
                     // clone small PathBuf
-                    // Collect full buffer content
+                    // Re-expand line endings based on original metadata (Phase 2 Step 9)
                     let mut content = String::new();
-                    for i in 0..state.active_buffer().line_count() {
-                        if let Some(l) = state.active_buffer().line(i) {
+                    let line_ending = state.original_line_ending.as_str();
+                    let last_index = state.active_buffer().line_count();
+                    for i in 0..last_index {
+                        if let Some(mut l) = state.active_buffer().line(i) {
+                            // Each buffer line currently includes a trailing \n except maybe last (internal LF-only).
+                            let ends_nl = l.ends_with('\n');
+                            if ends_nl {
+                                l.pop();
+                            }
                             content.push_str(&l);
+                            // Add original line ending if (a) not last line, or (b) last line and original had final newline
+                            if (i + 1 < last_index)
+                                || (state.had_trailing_newline && i + 1 == last_index)
+                            {
+                                content.push_str(line_ending);
+                            }
                         }
                     }
                     match std::fs::write(&path, content.as_bytes()) {

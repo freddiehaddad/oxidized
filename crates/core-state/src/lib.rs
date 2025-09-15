@@ -84,6 +84,119 @@ pub struct EditorState {
     pub command_line: CommandLineState,
     /// Ephemeral status message (Phase 2 Step 6). Rendered on status line when command inactive.
     pub ephemeral_status: Option<EphemeralMessage>,
+    /// Original (majority) line ending style of the loaded file (Phase 2 Step 9).
+    pub original_line_ending: LineEnding,
+    /// Whether the original file ended with a final newline (Phase 2 Step 9).
+    pub had_trailing_newline: bool,
+}
+
+/// Line ending style detected from source file (Phase 2 Step 9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineEnding {
+    Lf,
+    Cr,
+    Crlf,
+}
+
+impl LineEnding {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LineEnding::Lf => "\n",
+            LineEnding::Cr => "\r",
+            LineEnding::Crlf => "\r\n",
+        }
+    }
+}
+
+/// Result of normalizing line endings (Phase 2 Step 9).
+pub struct NormalizedText {
+    pub normalized: String,         // LF-only content
+    pub original: LineEnding,       // majority/origin style
+    pub had_trailing_newline: bool, // original trailing newline presence
+    pub mixed: bool,                // true if multiple styles encountered
+}
+
+/// Detect and normalize line endings of `input` to LF-only internal representation.
+/// Counts CRLF, LF, and CR occurrences; picks the majority (ties resolved by precedence CRLF > LF > CR).
+/// Mixed flag is true if more than one style observed and at least one count differs from majority.
+pub fn normalize_line_endings(input: &str) -> NormalizedText {
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    let mut crlf = 0usize;
+    let mut lf = 0usize;
+    let mut cr = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\r' => {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
+                    crlf += 1;
+                    i += 2;
+                } else {
+                    cr += 1;
+                    i += 1;
+                }
+            }
+            b'\n' => {
+                lf += 1;
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    let had_trailing_newline = if input.is_empty() {
+        false
+    } else {
+        input.ends_with("\r\n") || input.ends_with('\n') || input.ends_with('\r')
+    };
+    // Determine majority style (precedence for ties)
+    let mut original = LineEnding::Lf;
+    let mut max = 0usize;
+    for (style, count) in [
+        (LineEnding::Crlf, crlf),
+        (LineEnding::Lf, lf),
+        (LineEnding::Cr, cr),
+    ] {
+        if count > max {
+            max = count;
+            original = style;
+        }
+    }
+    // Mixed if more than one non-zero style and any count != max
+    let non_zero = [crlf, lf, cr].iter().filter(|c| **c > 0).count();
+    let mixed = non_zero > 1 && [crlf, lf, cr].iter().any(|c| *c > 0 && *c != max);
+    // Normalize: replace CRLF -> \n, standalone CR -> \n
+    // Fast path: if no CR present and original is LF, we can reuse input (clone into String)
+    let normalized = if crlf == 0 && cr == 0 {
+        input.to_string()
+    } else {
+        // Two-phase: first replace CRLF with \n, then remaining CR with \n
+        let mut out = String::with_capacity(input.len());
+        let mut i = 0;
+        let b = input.as_bytes();
+        while i < b.len() {
+            if b[i] == b'\r' {
+                if i + 1 < b.len() && b[i + 1] == b'\n' {
+                    out.push('\n');
+                    i += 2;
+                    continue;
+                } else {
+                    out.push('\n');
+                    i += 1;
+                    continue;
+                }
+            } else {
+                out.push(b[i] as char);
+                i += 1;
+            }
+        }
+        out
+    };
+    NormalizedText {
+        normalized,
+        original,
+        had_trailing_newline,
+        mixed,
+    }
 }
 
 /// Insert run state tracking (Refactor R1 Step 6).
@@ -165,6 +278,8 @@ impl EditorState {
             insert_run: InsertRun::Inactive,
             command_line: CommandLineState::default(),
             ephemeral_status: None,
+            original_line_ending: LineEnding::Lf,
+            had_trailing_newline: false,
         }
     }
 
@@ -725,5 +840,42 @@ mod tests {
         st.position.line = 3;
         assert!(st.auto_scroll(height));
         assert_eq!(st.viewport_first_line, 3);
+    }
+
+    #[test]
+    fn normalize_crlf() {
+        let src = "a\r\nb\r\n"; // ends with newline
+        let n = normalize_line_endings(src);
+        assert_eq!(n.normalized, "a\nb\n");
+        assert_eq!(n.original, LineEnding::Crlf);
+        assert!(n.had_trailing_newline);
+        assert!(!n.mixed);
+    }
+
+    #[test]
+    fn normalize_cr() {
+        let src = "a\rb\r";
+        let n = normalize_line_endings(src);
+        assert_eq!(n.normalized, "a\nb\n");
+        assert_eq!(n.original, LineEnding::Cr);
+        assert!(n.had_trailing_newline);
+        assert!(!n.mixed);
+    }
+
+    #[test]
+    fn normalize_mixed_majority() {
+        let src = "a\r\nb\nc\r\n"; // 2x CRLF, 1x LF
+        let n = normalize_line_endings(src);
+        assert_eq!(n.normalized, "a\nb\nc\n");
+        assert_eq!(n.original, LineEnding::Crlf);
+        assert!(n.mixed);
+    }
+
+    #[test]
+    fn normalize_trailing_newline_absent() {
+        let src = "a\r\nb"; // no final newline
+        let n = normalize_line_endings(src);
+        assert_eq!(n.normalized, "a\nb");
+        assert!(!n.had_trailing_newline);
     }
 }

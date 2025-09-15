@@ -13,8 +13,8 @@ use clap::Parser;
 use core_render::scheduler::RenderScheduler;
 use core_render::status::{StatusContext, build_status};
 use core_render::{Frame, Renderer};
-use core_state::EditorState;
 use core_state::Mode;
+use core_state::{EditorState, normalize_line_endings};
 use core_terminal::{CrosstermBackend, TerminalBackend};
 use core_text::Buffer;
 use core_text::grapheme;
@@ -65,11 +65,16 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Base buffer: either from file or welcome text.
-    let (buffer, file_name) = if let Some(path) = args.path {
+    let (buffer, file_name, norm_meta) = if let Some(path) = args.path {
         match std::fs::read_to_string(&path) {
             Ok(content) => {
+                let norm = normalize_line_endings(&content);
                 let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("file");
-                (Buffer::from_str(name, &content)?, Some(path))
+                (
+                    Buffer::from_str(name, &norm.normalized)?,
+                    Some(path),
+                    Some(norm),
+                )
             }
             Err(e) => {
                 error!(?e, "file_open_error");
@@ -77,7 +82,7 @@ async fn main() -> Result<()> {
                     "welcome",
                     "Welcome to ⚙️ Oxidized (Phase 2)\n(File open failed; starting empty)\nPress :q to quit.",
                 )?;
-                (buf, None)
+                (buf, None, None)
             }
         }
     } else {
@@ -87,10 +92,18 @@ async fn main() -> Result<()> {
                 "Welcome to ⚙️ Oxidized (Phase 2)\nPress :q to quit.",
             )?,
             None,
+            None,
         )
     };
     let mut state = EditorState::new(buffer);
     state.file_name = file_name;
+    if let Some(n) = norm_meta {
+        state.original_line_ending = n.original;
+        state.had_trailing_newline = n.had_trailing_newline;
+        if n.mixed {
+            tracing::warn!("mixed_line_endings_detected_startup");
+        }
+    }
     state.dirty = false; // explicit for clarity (new buffer always clean at load)
     if state.file_name.is_none() {
         // Detect prior error case via welcome buffer content heuristic; ephemeral message for visibility.
