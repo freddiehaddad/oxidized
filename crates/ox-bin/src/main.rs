@@ -12,7 +12,6 @@ use core_events::{CommandEvent, Event, InputEvent, KeyEvent};
 use clap::Parser;
 use core_render::scheduler::RenderScheduler;
 use core_render::status::{StatusContext, build_status};
-use core_render::viewport::Viewport;
 use core_render::{Frame, Renderer};
 use core_state::EditorState;
 use core_state::Mode;
@@ -177,13 +176,12 @@ fn render(state: &EditorState) -> Result<()> {
     let (w, h) = size()?;
     let mut frame = Frame::new(w, h);
 
-    // Viewport: reserve one line for status if possible
+    // Viewport (Phase 2 Step 7): use persistent first line from state.
     let text_height = if h > 0 { h - 1 } else { 0 };
-    let mut viewport = Viewport::new(0, text_height as usize);
-    viewport.clamp_cursor_into_view(state.position.line); // no-op now
     let buf = state.active_buffer();
-    let start = viewport.first_line;
-    let end = (start + viewport.height).min(buf.line_count());
+    let start = state.viewport_first_line;
+    let height = text_height as usize; // visible text rows
+    let end = (start + height).min(buf.line_count());
     for (screen_y, line_idx) in (start..end).enumerate() {
         if (screen_y as u16) >= text_height {
             break;

@@ -61,6 +61,9 @@ pub struct EditorState {
     pub buffers: Vec<Buffer>,
     /// Index into `buffers` of the active buffer.
     pub active: usize,
+    /// First buffer line currently at top of viewport (Phase 2 Step 7).
+    /// Initially 0; scrolling logic (future steps) will mutate this.
+    pub viewport_first_line: usize,
     /// Current editor mode.
     pub mode: Mode,
     /// Primary caret position (grapheme boundary) within active buffer.
@@ -152,6 +155,7 @@ impl EditorState {
         Self {
             buffers: vec![buffer],
             active: 0,
+            viewport_first_line: 0,
             mode: Mode::Normal,
             position: Position::origin(),
             file_name: None,
@@ -661,5 +665,15 @@ mod tests {
         }
         assert!(st.tick_ephemeral(), "expected expiration");
         assert!(st.ephemeral_status.is_none());
+    }
+
+    #[test]
+    fn viewport_first_line_defaults_and_mutates() {
+        let buf = Buffer::from_str("t", "Hello\nWorld\n").unwrap();
+        let st = EditorState::new(buf);
+        assert_eq!(st.viewport_first_line, 0, "expected default first line 0");
+        let mut st2 = st; // mutable copy
+        st2.viewport_first_line = 5;
+        assert_eq!(st2.viewport_first_line, 5, "field should be mutable");
     }
 }

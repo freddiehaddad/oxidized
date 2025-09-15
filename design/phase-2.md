@@ -81,7 +81,7 @@ IDs final after confirmation; commit messages embed Phase/Step.
 4. (Done) Add `:w` handling: write current buffer to existing filename; if none, log error (ephemeral status deferred) and leave dirty=true. Successful write clears dirty.
 5. (Done) Dirty tracking: buffer `dirty` set on first mutation after open/write across all edit kinds (insert grapheme, newline, backspace, delete-under). Undo/redo do NOT auto-clear; only successful `:w` resets. Tests cover: first insert sets dirty, undo leaves dirty, write clears then subsequent edit re-sets dirty.
 6. (Done) Ephemeral status: `EditorState::ephemeral_status` + `set_ephemeral` / `tick_ephemeral`. Messages (Open failed / Opened / Wrote / Write failed / No filename) right-align on status line when command inactive; hidden while command buffer active. 3s TTL checked each event loop iteration; expiration triggers redraw. Tests cover lifecycle, :e success/failure, :w no filename.
-7. Elevate viewport to state: include `first_line`; modify render path to draw starting at `first_line`.
+7. (Done) Elevate viewport to state: add `viewport_first_line` to `EditorState` (initial 0); render path now uses this persistent field instead of constructing a transient `Viewport`. Scrolling logic still pending (Step 8) so value remains 0 until auto-scroll/page motions mutate it.
 8. Auto-scroll logic: when cursor line < first_line or >= first_line + height → adjust; tests.
 9. Page motions: map `Ctrl-D` / `Ctrl-U` to half-page jump preserving sticky column; clamp; tests.
 10. Software cursor: extend Cell struct, mark grapheme cluster span; hide hardware cursor; renderer applies reverse-video; tests with wide emoji & combining sequence.
