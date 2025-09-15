@@ -71,6 +71,7 @@ impl Renderer {
     pub fn render(frame: &Frame) -> Result<()> {
         let mut out = stdout();
         queue!(out, Clear(ClearType::All))?;
+        queue!(out, MoveTo(0, 0))?;
         let mut x = 0u16;
         let mut y = 0u16;
         for (i, cell) in frame.cells.iter().enumerate() {
