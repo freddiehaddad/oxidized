@@ -120,8 +120,9 @@ pub struct NormalizedText {
 /// Counts CRLF, LF, and CR occurrences; picks the majority (ties resolved by precedence CRLF > LF > CR).
 /// Mixed flag is true if more than one style observed and at least one count differs from majority.
 pub fn normalize_line_endings(input: &str) -> NormalizedText {
+    // Pass 1: count occurrences of CRLF, LF, and solitary CR
     let bytes = input.as_bytes();
-    let mut i = 0;
+    let mut i = 0usize;
     let mut crlf = 0usize;
     let mut lf = 0usize;
     let mut cr = 0usize;
@@ -148,7 +149,7 @@ pub fn normalize_line_endings(input: &str) -> NormalizedText {
     } else {
         input.ends_with("\r\n") || input.ends_with('\n') || input.ends_with('\r')
     };
-    // Determine majority style (precedence for ties)
+    // Majority with precedence CRLF > LF > CR for ties
     let mut original = LineEnding::Lf;
     let mut max = 0usize;
     for (style, count) in [
@@ -161,38 +162,44 @@ pub fn normalize_line_endings(input: &str) -> NormalizedText {
             original = style;
         }
     }
-    // Mixed if more than one non-zero style and any count != max
     let non_zero = [crlf, lf, cr].iter().filter(|c| **c > 0).count();
     let mixed = non_zero > 1 && [crlf, lf, cr].iter().any(|c| *c > 0 && *c != max);
-    // Normalize: replace CRLF -> \n, standalone CR -> \n
-    // Fast path: if no CR present and original is LF, we can reuse input (clone into String)
-    let normalized = if crlf == 0 && cr == 0 {
-        input.to_string()
-    } else {
-        // Two-phase: first replace CRLF with \n, then remaining CR with \n
-        let mut out = String::with_capacity(input.len());
-        let mut i = 0;
-        let b = input.as_bytes();
-        while i < b.len() {
-            if b[i] == b'\r' {
-                if i + 1 < b.len() && b[i + 1] == b'\n' {
-                    out.push('\n');
-                    i += 2;
-                    continue;
-                } else {
-                    out.push('\n');
-                    i += 1;
-                    continue;
-                }
-            } else {
-                out.push(b[i] as char);
-                i += 1;
+    // Fast path: nothing to rewrite.
+    if crlf == 0 && cr == 0 {
+        return NormalizedText {
+            normalized: input.to_string(),
+            original,
+            had_trailing_newline,
+            mixed,
+        };
+    }
+    // Slow path: span-copy. We only slice at '\r' boundaries so UTF-8 multi-byte sequences remain intact.
+    let mut out = String::with_capacity(input.len());
+    let mut seg_start = 0usize;
+    let mut j = 0usize;
+    while j < bytes.len() {
+        if bytes[j] == b'\r' {
+            if seg_start < j {
+                out.push_str(&input[seg_start..j]);
             }
+            if j + 1 < bytes.len() && bytes[j + 1] == b'\n' {
+                out.push('\n');
+                j += 2;
+            } else {
+                out.push('\n');
+                j += 1;
+            }
+            seg_start = j;
+        } else {
+            j += 1;
         }
-        out
-    };
+    }
+    if seg_start < input.len() {
+        out.push_str(&input[seg_start..]);
+    }
+    debug_assert!(!out.contains('\r'));
     NormalizedText {
-        normalized,
+        normalized: out,
         original,
         had_trailing_newline,
         mixed,
@@ -877,5 +884,58 @@ mod tests {
         let n = normalize_line_endings(src);
         assert_eq!(n.normalized, "a\nb");
         assert!(!n.had_trailing_newline);
+    }
+    #[test]
+    fn normalize_unicode_crlf_preserves_multibyte() {
+        let src = "⚙️ Gear\r\nNext\r\n"; // multi-byte emoji + VS16 + ASCII + CRLF
+        let n = normalize_line_endings(src);
+        assert_eq!(n.normalized, "⚙️ Gear\nNext\n");
+        assert!(n.normalized.starts_with("⚙️"));
+    }
+    #[test]
+    fn normalize_unicode_mixed_endings() {
+        let src = "α\r\nβ\nγ\r\n"; // Greek letters mixed CRLF + LF + CRLF
+        let n = normalize_line_endings(src);
+        assert_eq!(n.normalized, "α\nβ\nγ\n");
+        assert!(n.mixed);
+    }
+    #[test]
+    fn normalize_unicode_cr_only() {
+        let src = "😀\r😀\r"; // CR only separators
+        let n = normalize_line_endings(src);
+        assert_eq!(n.normalized, "😀\n😀\n");
+        assert_eq!(n.original, LineEnding::Cr);
+    }
+    #[test]
+    fn normalize_round_trip_idempotent() {
+        let samples = [
+            "simple\nline",      // LF only
+            "line\r\nline2\r\n", // CRLF only
+            "a\rb\r",            // CR only
+            "α\r\nβ\nγ\r\n",     // mixed majority CRLF
+            "⚙️ Gear\r\nNext",   // unicode + CRLF no final newline
+        ];
+        for s in samples.iter() {
+            let n1 = normalize_line_endings(s);
+            // Rebuild using metadata.
+            let mut rebuilt = String::new();
+            let le = n1.original.as_str();
+            let collected: Vec<&str> = n1.normalized.split('\n').collect();
+            for (idx, line) in collected.iter().enumerate() {
+                if idx + 1 == collected.len() && line.is_empty() {
+                    break;
+                } // final empty from trailing \n
+                rebuilt.push_str(line);
+                if idx + 1 < collected.len() || n1.had_trailing_newline {
+                    rebuilt.push_str(le);
+                }
+            }
+            let n2 = normalize_line_endings(&rebuilt);
+            assert_eq!(
+                n1.normalized, n2.normalized,
+                "idempotence failed for sample: {s}"
+            );
+            assert!(!n2.normalized.contains('\r'));
+        }
     }
 }
