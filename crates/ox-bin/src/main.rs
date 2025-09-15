@@ -93,6 +93,18 @@ async fn main() -> Result<()> {
     let mut state = EditorState::new(buffer);
     state.file_name = file_name;
     state.dirty = false; // explicit for clarity (new buffer always clean at load)
+    if state.file_name.is_none() {
+        // Detect prior error case via welcome buffer content heuristic; ephemeral message for visibility.
+        if state.active_buffer().name == "welcome"
+            && state
+                .active_buffer()
+                .line(0)
+                .unwrap_or_default()
+                .contains("File open failed")
+        {
+            state.set_ephemeral("Open failed", std::time::Duration::from_secs(3));
+        }
+    }
     // Async unbounded channel (single consumer main loop). Input thread forwards blocking
     // crossterm events. Future bounded migration: swap to `mpsc::channel(EVENT_CHANNEL_CAP)` when
     // the first additional async producer (config watcher, timers, LSP, plugin host) lands.
@@ -143,6 +155,10 @@ async fn main() -> Result<()> {
             Event::Shutdown => {
                 break;
             }
+        }
+        // Expire ephemeral status if needed (breadth-first synchronous check)
+        if state.tick_ephemeral() {
+            scheduler.mark_dirty();
         }
         // Ask scheduler if a redraw is needed this cycle.
         if scheduler.consume_dirty()
@@ -200,9 +216,26 @@ fn render(state: &EditorState) -> Result<()> {
             file_name: state.file_name.as_deref(),
             dirty: state.dirty,
         });
+        // First write base status
         for (i, ch) in status.chars().enumerate() {
             if (i as u16) < w {
                 frame.set(i as u16, y, ch);
+            }
+        }
+        // Overlay ephemeral message right-aligned if command not active
+        if !state.command_line.is_active()
+            && let Some(msg) = &state.ephemeral_status
+        {
+            let text = &msg.text;
+            let msg_len = text.chars().count() as u16;
+            if msg_len < w {
+                let start_col = w - msg_len;
+                for (i, ch) in text.chars().enumerate() {
+                    let col = start_col + i as u16;
+                    if col < w {
+                        frame.set(col, y, ch);
+                    }
+                }
             }
         }
     }

@@ -79,6 +79,8 @@ pub struct EditorState {
     pub insert_run: InsertRun,
     /// Command-line (":" style) transient input buffer state (Refactor R1 Step 2).
     pub command_line: CommandLineState,
+    /// Ephemeral status message (Phase 2 Step 6). Rendered on status line when command inactive.
+    pub ephemeral_status: Option<EphemeralMessage>,
 }
 
 /// Insert run state tracking (Refactor R1 Step 6).
@@ -137,6 +139,13 @@ impl CommandLineState {
     }
 }
 
+/// Ephemeral status message container (Phase 2 Step 6).
+#[derive(Debug, Clone)]
+pub struct EphemeralMessage {
+    pub text: String,
+    pub expires_at: std::time::Instant,
+}
+
 impl EditorState {
     /// Create a new state with a single active buffer.
     pub fn new(buffer: Buffer) -> Self {
@@ -151,9 +160,28 @@ impl EditorState {
             redo_stack: Vec::new(),
             insert_run: InsertRun::Inactive,
             command_line: CommandLineState::default(),
+            ephemeral_status: None,
         }
     }
 
+    /// Set an ephemeral status message with a fixed timeout duration.
+    pub fn set_ephemeral<S: Into<String>>(&mut self, msg: S, ttl: std::time::Duration) {
+        self.ephemeral_status = Some(EphemeralMessage {
+            text: msg.into(),
+            expires_at: std::time::Instant::now() + ttl,
+        });
+    }
+
+    /// Tick ephemeral status; returns true if message expired and was cleared.
+    pub fn tick_ephemeral(&mut self) -> bool {
+        if let Some(m) = &self.ephemeral_status
+            && std::time::Instant::now() >= m.expires_at
+        {
+            self.ephemeral_status = None;
+            return true;
+        }
+        false
+    }
     /// Borrow the currently active buffer.
     pub fn active_buffer(&self) -> &Buffer {
         &self.buffers[self.active]
@@ -617,5 +645,21 @@ mod tests {
         if let InsertRun::Active { edits, .. } = st.insert_run {
             assert_eq!(edits, 1);
         }
+    }
+
+    #[test]
+    fn ephemeral_lifecycle() {
+        let buf = Buffer::from_str("t", "Hello").unwrap();
+        let mut st = EditorState::new(buf);
+        st.set_ephemeral("Message", std::time::Duration::from_millis(50));
+        assert!(st.ephemeral_status.is_some());
+        // Should not expire immediately
+        assert!(!st.tick_ephemeral());
+        // Fast-forward by manually adjusting expires_at (avoid sleeping in test)
+        if let Some(m) = &mut st.ephemeral_status {
+            m.expires_at = std::time::Instant::now() - std::time::Duration::from_millis(1);
+        }
+        assert!(st.tick_ephemeral(), "expected expiration");
+        assert!(st.ephemeral_status.is_none());
     }
 }

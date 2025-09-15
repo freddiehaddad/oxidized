@@ -152,14 +152,21 @@ pub fn dispatch(
                                     state.position = Position::origin();
                                     state.file_name = Some(path);
                                     state.dirty = false; // clean after load
+                                    state
+                                        .set_ephemeral("Opened", std::time::Duration::from_secs(3));
                                 }
                                 Err(e) => {
                                     tracing::error!(?e, "buffer_create_failed");
+                                    state.set_ephemeral(
+                                        "Open failed",
+                                        std::time::Duration::from_secs(3),
+                                    );
                                 }
                             }
                         }
                         Err(e) => {
                             tracing::error!(?e, "file_open_error");
+                            state.set_ephemeral("Open failed", std::time::Duration::from_secs(3));
                         }
                     }
                 }
@@ -180,13 +187,16 @@ pub fn dispatch(
                     match std::fs::write(&path, content.as_bytes()) {
                         Ok(_) => {
                             state.dirty = false;
+                            state.set_ephemeral("Wrote", std::time::Duration::from_secs(3));
                         }
                         Err(e) => {
                             tracing::error!(?e, "file_write_error");
+                            state.set_ephemeral("Write failed", std::time::Duration::from_secs(3));
                         }
                     }
                 } else {
                     tracing::error!("write_no_filename");
+                    state.set_ephemeral("No filename", std::time::Duration::from_secs(3));
                 }
                 state.command_line.clear();
                 return DispatchResult::dirty();
@@ -392,6 +402,7 @@ mod tests {
                 .starts_with("Hello Edit Command")
         );
         assert!(!state.dirty, "buffer must be clean after load");
+        assert!(state.ephemeral_status.as_ref().map(|m| m.text.as_str()) == Some("Opened"));
     }
 
     #[test]
@@ -440,6 +451,25 @@ mod tests {
         );
         assert!(res.dirty);
         assert!(state.dirty, "dirty flag should remain when no filename");
+        assert!(state.ephemeral_status.as_ref().map(|m| m.text.as_str()) == Some("No filename"));
+    }
+
+    #[test]
+    fn edit_command_open_failure_sets_ephemeral() {
+        let buffer = Buffer::from_str("t", "initial").unwrap();
+        let mut state = EditorState::new(buffer);
+        let mut sticky = None;
+        dispatch(Action::CommandStart, &mut state, &mut sticky, &[]);
+        for ch in "e non_existent_file_12345".chars() {
+            dispatch(Action::CommandChar(ch), &mut state, &mut sticky, &[]);
+        }
+        dispatch(
+            Action::CommandExecute(":e non_existent_file_12345".into()),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert!(state.ephemeral_status.as_ref().map(|m| m.text.as_str()) == Some("Open failed"));
     }
 
     #[test]
