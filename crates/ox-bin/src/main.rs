@@ -10,6 +10,7 @@ use core_events::{CommandEvent, Event, InputEvent, KeyEvent};
 // implement documented backpressure policy (Refactor R1 Step 10).
 // use core_events::EVENT_CHANNEL_CAP; // (future bounded channel capacity activation point)
 use clap::Parser;
+use core_config::load_from;
 use core_render::scheduler::RenderScheduler;
 use core_render::status::{StatusContext, build_status};
 use core_render::{Frame, Renderer};
@@ -29,6 +30,9 @@ use tracing::{error, info};
 struct Args {
     /// Optional path to open at startup (UTF-8 text). If omitted a welcome buffer is used.
     pub path: Option<std::path::PathBuf>,
+    /// Optional configuration file path (overrides discovery of `oxidized.toml`).
+    #[arg(long = "config")]
+    pub config: Option<std::path::PathBuf>,
 }
 
 #[tokio::main]
@@ -117,6 +121,15 @@ async fn main() -> Result<()> {
             state.set_ephemeral("Open failed", std::time::Duration::from_secs(3));
         }
     }
+    // Load configuration (Phase 2 Step 14). We parse early so margin can influence initial scroll decisions.
+    let mut config = load_from(args.config.clone())?; // args consumed earlier for path
+    if let Ok((_w, h)) = crossterm::terminal::size() {
+        // initial viewport height
+        config.apply_viewport_height(h.saturating_sub(1)); // text rows (exclude status)
+    }
+    // Store effective margin inside state (temporary field addition in Phase 2 Step 14).
+    state.config_vertical_margin = config.effective_vertical_margin as usize;
+
     // Async unbounded channel (single consumer main loop). Input thread forwards blocking
     // crossterm events. Future bounded migration: swap to `mpsc::channel(EVENT_CHANNEL_CAP)` when
     // the first additional async producer (config watcher, timers, LSP, plugin host) lands.

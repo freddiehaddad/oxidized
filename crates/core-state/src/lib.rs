@@ -91,6 +91,8 @@ pub struct EditorState {
     pub original_line_ending: LineEnding,
     /// Whether the original file ended with a final newline (Phase 2 Step 9).
     pub had_trailing_newline: bool,
+    /// Effective (clamped) vertical scroll margin (Phase 2 Step 14). Applied during auto-scroll.
+    pub config_vertical_margin: usize,
 }
 
 /// Line ending style detected from source file (Phase 2 Step 9).
@@ -291,6 +293,7 @@ impl EditorState {
             ephemeral_status: None,
             original_line_ending: LineEnding::Lf,
             had_trailing_newline: false,
+            config_vertical_margin: 0,
         }
     }
 
@@ -327,14 +330,26 @@ impl EditorState {
         }
         self.last_text_height = text_height; // record for page motions
         let cursor_line = self.position.line;
+        // Apply vertical margin if configured (Phase 2 Step 14). Margin ensures the cursor stays
+        // at least `m` lines away from the viewport edges when possible.
+        let m = self.config_vertical_margin.min(text_height / 2); // defensive clamp
         let mut changed = false;
-        if cursor_line < self.viewport_first_line {
-            self.viewport_first_line = cursor_line;
-            changed = true;
-        } else if cursor_line >= self.viewport_first_line + text_height {
-            // Place cursor at last visible line
-            self.viewport_first_line = cursor_line + 1 - text_height;
-            changed = true;
+        let top = self.viewport_first_line;
+        let bottom = self.viewport_first_line + text_height;
+        if cursor_line < top + m {
+            // Scroll up but keep margin (cursor at top+m).
+            let new_first = cursor_line.saturating_sub(m);
+            if new_first != self.viewport_first_line {
+                self.viewport_first_line = new_first;
+                changed = true;
+            }
+        } else if cursor_line + m >= bottom {
+            // Scroll down so cursor is bottom - m - 1 (leaving margin below).
+            let new_first = cursor_line + m + 1 - text_height;
+            if new_first != self.viewport_first_line {
+                self.viewport_first_line = new_first;
+                changed = true;
+            }
         }
         changed
     }

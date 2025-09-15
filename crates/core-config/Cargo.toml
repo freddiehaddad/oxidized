@@ -7,5 +7,10 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-dirs = "6.0"
-toml = "0.9.5"
+serde.workspace = true
+tracing.workspace = true
+dirs = "6.0.0"
+toml = "0.9.6"
+
+[dev-dependencies]
+tempfile = "3.22.0"

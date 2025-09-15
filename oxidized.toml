@@ -1,0 +1,8 @@
+# Oxidized editor configuration (Phase 2)
+# This sample file documents currently supported settings.
+# Additional tables/keys will be introduced in later phases.
+
+[scroll.margin]
+# Keep the cursor at least this many lines away from the top/bottom when possible.
+# Effective value is clamped internally to (viewport_height - 2)/2. Default = 0.
+vertical = 0
