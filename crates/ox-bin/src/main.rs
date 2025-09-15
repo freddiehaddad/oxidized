@@ -194,8 +194,17 @@ async fn main() -> Result<()> {
 fn render(state: &EditorState) -> Result<()> {
     use crossterm::terminal::size;
     let (w, h) = size()?;
-    let mut frame = Frame::new(w, h);
+    let frame = build_frame(state, w, h);
+    let span = tracing::info_span!("render_cycle");
+    let _e = span.enter();
+    Renderer::render(&frame)?;
+    Ok(())
+}
 
+/// Build a `Frame` representing the current editor state (pure, side-effect free).
+/// Extracted to enable deterministic tests of software cursor rendering (Phase 2 Step 12).
+pub(crate) fn build_frame(state: &EditorState, w: u16, h: u16) -> Frame {
+    let mut frame = Frame::new(w, h);
     // Viewport (Phase 2 Step 7): use persistent first line from state.
     let text_height = if h > 0 { h - 1 } else { 0 };
     let buf = state.active_buffer();
@@ -207,17 +216,80 @@ fn render(state: &EditorState) -> Result<()> {
             break;
         }
         if let Some(line) = buf.line(line_idx) {
-            for (x, ch) in line.chars().enumerate() {
-                if ch == '\n' || ch == '\r' {
-                    break;
+            // Trim raw terminator for cluster iteration
+            let content_trim: &str = if line.ends_with('\n') || line.ends_with('\r') {
+                &line[..line.len() - 1]
+            } else {
+                &line
+            };
+            let mut byte = 0;
+            let mut vis_col = 0u16;
+            while byte < content_trim.len() && vis_col < w {
+                let next = core_text::grapheme::next_boundary(content_trim, byte);
+                let cluster = &content_trim[byte..next];
+                let width = grapheme::cluster_width(cluster) as u16; // 1 or 2 typical
+                let mut chars = cluster.chars();
+                if let Some(first) = chars.next() {
+                    frame.set(vis_col, screen_y as u16, first);
                 }
-                if (x as u16) < w {
-                    frame.set(x as u16, screen_y as u16, ch);
+                // For width>1 (wide emoji) fill following cells with spaces (leave flags empty for now)
+                if width > 1 {
+                    for dx in 1..width {
+                        if vis_col + dx < w {
+                            frame.set(vis_col + dx, screen_y as u16, ' ');
+                        }
+                    }
+                }
+                vis_col = vis_col.saturating_add(width.max(1));
+                byte = next;
+            }
+        }
+    }
+    // Software cursor overlay (reverse-video) for cluster under cursor, excluding status line.
+    if h > 0 {
+        let text_rows = text_height as usize;
+        if state.position.line >= start
+            && state.position.line < end
+            && let Some(line_content) = buf.line(state.position.line)
+        {
+            let content_trim = if line_content.ends_with('\n') {
+                &line_content[..line_content.len() - 1]
+            } else {
+                &line_content
+            };
+            let vis_col = grapheme::visual_col(content_trim, state.position.byte);
+            let next_byte = core_text::grapheme::next_boundary(content_trim, state.position.byte);
+            let cluster = &content_trim[state.position.byte..next_byte];
+            let width = grapheme::cluster_width(cluster);
+            let rel_line = state.position.line - start;
+            if rel_line < text_rows {
+                let span_width = width.max(1);
+                let mut chars = cluster.chars();
+                let first_char = chars.next().unwrap_or(' ');
+                if (vis_col as u16) < w {
+                    frame.set_with_flags(
+                        vis_col as u16,
+                        rel_line as u16,
+                        first_char,
+                        core_render::CellFlags::REVERSE | core_render::CellFlags::CURSOR,
+                    );
+                }
+                for fill_dx in 1..span_width {
+                    let col = vis_col + fill_dx;
+                    if col as u16 >= w {
+                        break;
+                    }
+                    frame.set_with_flags(
+                        col as u16,
+                        rel_line as u16,
+                        ' ',
+                        core_render::CellFlags::REVERSE | core_render::CellFlags::CURSOR,
+                    );
                 }
             }
         }
     }
-    // Mode / status line (bottom) via formatter module
+    // Status line (bottom row)
     if h > 0 {
         let y = h - 1;
         let buf = state.active_buffer();
@@ -239,13 +311,11 @@ fn render(state: &EditorState) -> Result<()> {
             file_name: state.file_name.as_deref(),
             dirty: state.dirty,
         });
-        // First write base status
         for (i, ch) in status.chars().enumerate() {
             if (i as u16) < w {
                 frame.set(i as u16, y, ch);
             }
         }
-        // Overlay ephemeral message right-aligned if command not active
         if !state.command_line.is_active()
             && let Some(msg) = &state.ephemeral_status
         {
@@ -262,40 +332,7 @@ fn render(state: &EditorState) -> Result<()> {
             }
         }
     }
-    let span = tracing::info_span!("render_cycle");
-    let _e = span.enter();
-    Renderer::render(&frame)?;
-    // --- Hardware cursor placement (Phase 1 Task 8.2) ---
-    // Use grapheme-aware visual column and viewport offset.
-    // Cursor row is the on-screen y of the active line (clamped within text area). We place the
-    // terminal cursor *after* drawing to avoid flicker (terminal shows final frame + cursor).
-    if h > 0 {
-        use crossterm::{
-            cursor::{MoveTo, Show},
-            execute,
-        };
-        use std::io::stdout;
-        let text_height = if h > 0 { h - 1 } else { 0 }; // bottom line reserved for status
-        let buf = state.active_buffer();
-        if let Some(line_content) = buf.line(state.position.line) {
-            let content_trim = if line_content.ends_with('\n') {
-                &line_content[..line_content.len() - 1]
-            } else {
-                &line_content
-            };
-            let vis_col = grapheme::visual_col(content_trim, state.position.byte) as u16;
-            let rel = state
-                .position
-                .line
-                .saturating_sub(state.viewport_first_line);
-            let screen_line = (rel as u16).min(text_height.saturating_sub(1));
-            if vis_col < w && screen_line < text_height {
-                // Move hardware cursor then ensure it is shown (backend hid it on enter).
-                let _ = execute!(stdout(), MoveTo(vis_col, screen_line), Show);
-            }
-        }
-    }
-    Ok(())
+    frame
 }
 
 fn translate_key_wrapper(mode: Mode, pending_command: &str, key: &KeyEvent) -> Option<Action> {
@@ -456,5 +493,78 @@ mod tests {
         // Undo again -> original
         assert!(dispatch(Action::Undo, &mut state, &mut sticky, &observers).dirty);
         assert_eq!(state.active_buffer().line(0).unwrap(), "abcd");
+    }
+
+    // --- Software cursor tests (Phase 2 Step 12) ---
+    #[test]
+    fn cursor_ascii_single_width() {
+        let mut state = mk_state("abc");
+        state.position.line = 0;
+        state.position.byte = 1; // 'b'
+        let frame = build_frame(&state, 20, 4);
+        let idx = 1; // (y * width) + x
+        let cell = frame.cells[idx];
+        assert_eq!(cell.ch, 'b');
+        assert!(cell.flags.contains(core_render::CellFlags::CURSOR));
+        assert!(cell.flags.contains(core_render::CellFlags::REVERSE));
+    }
+
+    #[test]
+    fn cursor_wide_emoji() {
+        let mut state = mk_state("a😀\n"); // trailing newline for consistency
+        // Position cursor at start of emoji cluster
+        let line = state.active_buffer().line(0).unwrap();
+        let emoji_byte = line.char_indices().find(|(_, c)| *c == '😀').unwrap().0;
+        state.position.line = 0;
+        state.position.byte = emoji_byte;
+        let frame = build_frame(&state, 20, 4);
+        // Visual column after 'a' is 1
+        let base_col = 1usize; // leading cell of wide emoji
+        let idx_first = base_col; // row 0 so direct index
+        let first = frame.cells[idx_first];
+        assert_eq!(first.ch, '😀');
+        assert!(first.flags.contains(core_render::CellFlags::CURSOR));
+        // Second cell of span should be a space but still flagged
+        let idx_second = base_col + 1;
+        let second = frame.cells[idx_second];
+        assert_eq!(second.ch, ' ');
+        assert!(second.flags.contains(core_render::CellFlags::CURSOR));
+    }
+
+    #[test]
+    fn cursor_combining_sequence() {
+        // e + combining acute accent (width 1 cluster)
+        let mut state = mk_state("\u{0065}\u{0301}x\n");
+        state.position.line = 0;
+        state.position.byte = 0; // start of cluster
+        let frame = build_frame(&state, 20, 4);
+        let idx = 0;
+        let cell = frame.cells[idx];
+        assert_eq!(cell.ch, 'e'); // first scalar of cluster
+        assert!(cell.flags.contains(core_render::CellFlags::CURSOR));
+        // Next cell should be the 'x' not flagged (cursor span width=1)
+        let idx_next = 1;
+        let next = frame.cells[idx_next];
+        assert_eq!(next.ch, 'x');
+        assert!(!next.flags.contains(core_render::CellFlags::CURSOR));
+    }
+
+    #[test]
+    fn cursor_end_of_line_blank_cell() {
+        let mut state = mk_state("abc\n");
+        state.position.line = 0;
+        // Move to end (after 'c')
+        state.position.byte = state
+            .active_buffer()
+            .line(0)
+            .unwrap()
+            .trim_end_matches(['\n', '\r'])
+            .len();
+        let frame = build_frame(&state, 20, 4);
+        // Visual column == 3
+        let idx = 3;
+        let cell = frame.cells[idx];
+        assert_eq!(cell.ch, ' '); // synthesized space
+        assert!(cell.flags.contains(core_render::CellFlags::CURSOR));
     }
 }

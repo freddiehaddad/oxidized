@@ -221,6 +221,7 @@ name = "core-render"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bitflags",
  "core-state",
  "core-terminal",
  "crossterm",

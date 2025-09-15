@@ -1,6 +1,7 @@
 //! Rendering primitives: Cell, Frame, and a naive full-screen renderer.
 
 use anyhow::Result;
+use bitflags::bitflags;
 use crossterm::{
     cursor::MoveTo,
     queue,
@@ -9,14 +10,26 @@ use crossterm::{
 };
 use std::io::{Write, stdout};
 
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct CellFlags: u8 {
+        const REVERSE = 0b0000_0001; // reverse-video (software cursor)
+        const CURSOR  = 0b0000_0010; // marks cell part of cursor span
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cell {
     pub ch: char,
+    pub flags: CellFlags,
 }
 
 impl Default for Cell {
     fn default() -> Self {
-        Self { ch: ' ' }
+        Self {
+            ch: ' ',
+            flags: CellFlags::empty(),
+        }
     }
 }
 
@@ -42,6 +55,14 @@ impl Frame {
             self.cells[idx].ch = ch;
         }
     }
+
+    pub fn set_with_flags(&mut self, x: u16, y: u16, ch: char, flags: CellFlags) {
+        if x < self.width && y < self.height {
+            let idx = y as usize * self.width as usize + x as usize;
+            self.cells[idx].ch = ch;
+            self.cells[idx].flags = flags;
+        }
+    }
 }
 
 pub struct Renderer;
@@ -60,7 +81,12 @@ impl Renderer {
                 x = expected_x;
                 y = expected_y;
             }
-            queue!(out, Print(cell.ch))?;
+            // For now, we only visually differentiate REVERSE (cursor span) by wrapping with simple ANSI invert if flag set.
+            if cell.flags.contains(CellFlags::REVERSE) {
+                queue!(out, Print(format!("\x1b[7m{}\x1b[0m", cell.ch)))?;
+            } else {
+                queue!(out, Print(cell.ch))?;
+            }
         }
         out.flush()?;
         Ok(())
