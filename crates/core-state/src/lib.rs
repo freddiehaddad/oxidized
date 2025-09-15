@@ -64,6 +64,9 @@ pub struct EditorState {
     /// First buffer line currently at top of viewport (Phase 2 Step 7).
     /// Initially 0; scrolling logic (future steps) will mutate this.
     pub viewport_first_line: usize,
+    /// Last known text viewport height (excludes status line). Updated by `auto_scroll` and used
+    /// by page motions (Phase 2 Step 11) to compute half-page offsets.
+    pub last_text_height: usize,
     /// Current editor mode.
     pub mode: Mode,
     /// Primary caret position (grapheme boundary) within active buffer.
@@ -276,6 +279,7 @@ impl EditorState {
             buffers: vec![buffer],
             active: 0,
             viewport_first_line: 0,
+            last_text_height: 0,
             mode: Mode::Normal,
             position: Position::origin(),
             file_name: None,
@@ -321,6 +325,7 @@ impl EditorState {
         if text_height == 0 {
             return false;
         }
+        self.last_text_height = text_height; // record for page motions
         let cursor_line = self.position.line;
         let mut changed = false;
         if cursor_line < self.viewport_first_line {
@@ -332,6 +337,11 @@ impl EditorState {
             changed = true;
         }
         changed
+    }
+
+    /// Test-only helper (and future external hook) to set cached viewport height explicitly.
+    pub fn set_last_text_height(&mut self, h: usize) {
+        self.last_text_height = h;
     }
     /// Borrow the currently active buffer.
     pub fn active_buffer(&self) -> &Buffer {

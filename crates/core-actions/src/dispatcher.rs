@@ -97,6 +97,39 @@ pub fn dispatch(
                     apply_horizontal_motion(state, motion::word_backward);
                     *sticky_visual_col = None;
                 }
+                MotionKind::PageHalfDown => {
+                    // Half page = max(1, last_text_height / 2). Fallback to 1 if unknown.
+                    let h = state.last_text_height.max(1);
+                    let jump = (h / 2).max(1);
+                    let target = (state.position.line + jump)
+                        .min(state.active_buffer().line_count().saturating_sub(1));
+                    let mut moved = false;
+                    while state.position.line < target {
+                        *sticky_visual_col =
+                            apply_vertical_motion(state, *sticky_visual_col, motion::down);
+                        moved = true;
+                    }
+                    if !moved {
+                        // Attempt single down if at end to allow clamp behavior test expectations
+                        *sticky_visual_col =
+                            apply_vertical_motion(state, *sticky_visual_col, motion::down);
+                    }
+                }
+                MotionKind::PageHalfUp => {
+                    let h = state.last_text_height.max(1);
+                    let jump = (h / 2).max(1);
+                    let target = state.position.line.saturating_sub(jump);
+                    let mut moved = false;
+                    while state.position.line > target {
+                        *sticky_visual_col =
+                            apply_vertical_motion(state, *sticky_visual_col, motion::up);
+                        moved = true;
+                    }
+                    if !moved {
+                        *sticky_visual_col =
+                            apply_vertical_motion(state, *sticky_visual_col, motion::up);
+                    }
+                }
             }
             if before != state.position {
                 DispatchResult::dirty()
@@ -719,6 +752,112 @@ mod tests {
         // Move up; should restore original end byte of first line
         dispatch(Action::Motion(MotionKind::Up), &mut state, &mut sticky, &[]);
         assert_eq!(state.position.byte, end_byte);
+    }
+
+    #[test]
+    fn page_half_down_and_up_basic() {
+        // Build buffer with multiple lines to allow paging
+        let mut content = String::new();
+        for i in 0..40 {
+            content.push_str(&format!("line{idx}\n", idx = i));
+        }
+        let buffer = Buffer::from_str("t", &content).unwrap();
+        let mut state = EditorState::new(buffer);
+        state.set_last_text_height(20); // pretend viewport shows 20 lines
+        let mut sticky = None;
+        let start_line = state.position.line;
+        // Dispatch PageHalfDown (~10 lines)
+        let res = dispatch(
+            Action::Motion(MotionKind::PageHalfDown),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert!(res.dirty);
+        assert!(
+            state.position.line >= start_line + 9 && state.position.line <= start_line + 11,
+            "expected roughly half page down"
+        );
+        let after_down = state.position.line;
+        // Page up returns near original (clamped)
+        let _ = dispatch(
+            Action::Motion(MotionKind::PageHalfUp),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert!(
+            state.position.line <= after_down && state.position.line <= start_line + 2,
+            "expected upward half page"
+        );
+    }
+
+    #[test]
+    fn page_half_respects_buffer_end() {
+        // Small buffer: ensure we clamp and do not move beyond last line
+        let buffer = Buffer::from_str("t", "a\nb\nc\n").unwrap(); // 4 lines (last empty due to trailing newline)
+        let mut state = EditorState::new(buffer);
+        state.set_last_text_height(10); // large viewport
+        let mut sticky = None;
+        // Two half-page downs should land on last non-empty or final empty line (clamped)
+        for _ in 0..2 {
+            let _ = dispatch(
+                Action::Motion(MotionKind::PageHalfDown),
+                &mut state,
+                &mut sticky,
+                &[],
+            );
+        }
+        let last_index = state.active_buffer().line_count() - 1;
+        assert_eq!(
+            state.position.line, last_index,
+            "expected clamp to last line"
+        );
+        // Further down should not move
+        let before = state.position.line;
+        let _ = dispatch(
+            Action::Motion(MotionKind::PageHalfDown),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert_eq!(state.position.line, before);
+        // Page up returns toward top (line 0 or 1 depending on jump)
+        let _ = dispatch(
+            Action::Motion(MotionKind::PageHalfUp),
+            &mut state,
+            &mut sticky,
+            &[],
+        );
+        assert!(
+            state.position.line < last_index,
+            "should have moved up from last line"
+        );
+    }
+
+    #[test]
+    fn ctrl_d_ctrl_u_translate() {
+        use core_events::{KeyEvent, KeyModifiers};
+        let buffer = Buffer::from_str("t", "x\n".repeat(50).as_str()).unwrap();
+        let mut state = EditorState::new(buffer);
+        state.set_last_text_height(24);
+        let mut sticky = None;
+        let ctrl_d = KeyEvent {
+            code: KeyCode::Char('d'),
+            mods: KeyModifiers::CTRL,
+        };
+        let act = crate::translate_key(state.mode, state.command_line.buffer(), &ctrl_d);
+        assert!(matches!(
+            act,
+            Some(Action::Motion(MotionKind::PageHalfDown))
+        ));
+        let _ = dispatch(act.unwrap(), &mut state, &mut sticky, &[]);
+        let ctrl_u = KeyEvent {
+            code: KeyCode::Char('u'),
+            mods: KeyModifiers::CTRL,
+        };
+        let act2 = crate::translate_key(state.mode, state.command_line.buffer(), &ctrl_u);
+        assert!(matches!(act2, Some(Action::Motion(MotionKind::PageHalfUp))));
     }
 
     #[test]

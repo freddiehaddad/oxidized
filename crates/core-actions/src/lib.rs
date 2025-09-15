@@ -46,6 +46,10 @@ pub enum MotionKind {
     LineEnd,
     WordForward,
     WordBackward,
+    /// Half page down (Phase 2 Step 11)
+    PageHalfDown,
+    /// Half page up (Phase 2 Step 11)
+    PageHalfUp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,6 +78,17 @@ pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Optio
     );
     let _e = span.enter();
     match key.code {
+        // Ctrl-D / Ctrl-U page motions (Phase 2 Step 11) handled before generic Char arm to avoid unreachable guards
+        KeyCode::Char('d')
+            if key.mods.contains(KeyModifiers::CTRL) && matches!(mode, Mode::Normal) =>
+        {
+            Some(Action::Motion(MotionKind::PageHalfDown))
+        }
+        KeyCode::Char('u')
+            if key.mods.contains(KeyModifiers::CTRL) && matches!(mode, Mode::Normal) =>
+        {
+            Some(Action::Motion(MotionKind::PageHalfUp))
+        }
         // Command start only if not already active. Runtime input thread currently emits
         // `KeyCode::Colon` (distinct variant) while some tests previously constructed
         // `KeyCode::Char(':')`. Support BOTH to avoid a silent divergence like the regression
@@ -107,6 +122,7 @@ pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Optio
                     'i' => Some(Action::ModeChange(ModeChange::EnterInsert)),
                     'u' if !key.mods.contains(KeyModifiers::CTRL) => Some(Action::Undo),
                     'x' => Some(Action::Edit(EditKind::DeleteUnder)),
+                    // Consider later remapping if collisions desired with traditional vim semantics.
                     _ => None,
                 },
                 Mode::Insert => {
