@@ -37,12 +37,12 @@ pub fn build_status(ctx: &StatusContext) -> String {
         } else if ctx.dirty {
             " *".to_string()
         } else {
-            String::new()
+            "".to_string()
         }
     } else if ctx.dirty {
-        " [unnamed]*".to_string()
+        " [No Name]*".to_string()
     } else {
-        " [unnamed]".to_string()
+        " [No Name]".to_string()
     };
     if ctx.command_active {
         // Strip leading ':' if present so we only render one.
@@ -83,7 +83,7 @@ mod tests {
             file_name: None,
             dirty: false,
         });
-        assert_eq!(s, "[NORMAL] [unnamed] Ln 1, Col 5 :");
+        assert_eq!(s, "[NORMAL] [No Name] Ln 1, Col 5 :");
     }
 
     #[test]
@@ -98,5 +98,47 @@ mod tests {
             dirty: true,
         });
         assert_eq!(s, "[INSERT] file.rs* Ln 3, Col 11 :wq");
+    }
+
+    #[test]
+    fn builds_status_named_clean() {
+        let s = build_status(&StatusContext {
+            mode: Mode::Normal,
+            line: 4,
+            col: 0,
+            command_active: false,
+            command_buffer: "",
+            file_name: Some(std::path::Path::new("main.rs")),
+            dirty: false,
+        });
+        assert_eq!(s, "[NORMAL] main.rs Ln 5, Col 1 :");
+    }
+
+    #[test]
+    fn builds_status_no_name_dirty() {
+        let s = build_status(&StatusContext {
+            mode: Mode::Insert,
+            line: 0,
+            col: 0,
+            command_active: false,
+            command_buffer: "",
+            file_name: None,
+            dirty: true,
+        });
+        assert_eq!(s, "[INSERT] [No Name]* Ln 1, Col 1 :");
+    }
+
+    #[test]
+    fn builds_status_no_name_clean_insert_mode_with_cmd() {
+        let s = build_status(&StatusContext {
+            mode: Mode::Insert,
+            line: 1,
+            col: 2,
+            command_active: true,
+            command_buffer: ":e test.txt",
+            file_name: None,
+            dirty: false,
+        });
+        assert_eq!(s, "[INSERT] [No Name] Ln 2, Col 3 :e test.txt");
     }
 }
