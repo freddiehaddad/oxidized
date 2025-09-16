@@ -8,13 +8,12 @@ use core_actions::dispatcher::dispatch;
 use core_config::load_from;
 use core_events::{CommandEvent, EVENT_CHANNEL_CAP, Event, InputEvent, KeyEvent};
 use core_render::scheduler::{RenderDelta, RenderScheduler};
-use core_render::status::{StatusContext, build_status};
-use core_render::{Frame, Renderer};
+// Frame kept for tests still referencing type
+use core_render::render_engine::RenderEngine;
 use core_state::Mode;
 use core_state::{EditorState, normalize_line_endings};
 use core_terminal::{CrosstermBackend, TerminalBackend};
 use core_text::Buffer;
-use core_text::grapheme;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
@@ -219,145 +218,10 @@ async fn main() -> Result<()> {
 fn render(state: &EditorState) -> Result<()> {
     use crossterm::terminal::size;
     let (w, h) = size()?;
-    let frame = build_frame(state, w, h);
     let span = tracing::info_span!("render_cycle");
     let _e = span.enter();
-    Renderer::render(&frame)?;
-    Ok(())
-}
-
-/// Build a `Frame` representing the current editor state (pure, side-effect free).
-/// Extracted to enable deterministic tests of software cursor rendering (Phase 2 Step 12).
-pub(crate) fn build_frame(state: &EditorState, w: u16, h: u16) -> Frame {
-    let mut frame = Frame::new(w, h);
-    // Viewport (Phase 2 Step 7): use persistent first line from state.
-    let text_height = if h > 0 { h - 1 } else { 0 };
-    let buf = state.active_buffer();
-    let start = state.viewport_first_line;
-    let height = text_height as usize; // visible text rows
-    let end = (start + height).min(buf.line_count());
-    for (screen_y, line_idx) in (start..end).enumerate() {
-        if (screen_y as u16) >= text_height {
-            break;
-        }
-        if let Some(line) = buf.line(line_idx) {
-            // Trim raw terminator for cluster iteration
-            let content_trim: &str = if line.ends_with('\n') || line.ends_with('\r') {
-                &line[..line.len() - 1]
-            } else {
-                &line
-            };
-            let mut byte = 0;
-            let mut vis_col = 0u16;
-            while byte < content_trim.len() && vis_col < w {
-                let next = core_text::grapheme::next_boundary(content_trim, byte);
-                let cluster = &content_trim[byte..next];
-                let width = grapheme::cluster_width(cluster) as u16; // 1 or 2 typical
-                let mut chars = cluster.chars();
-                if let Some(first) = chars.next() {
-                    frame.set(vis_col, screen_y as u16, first);
-                }
-                // For width>1 (wide emoji) fill following cells with spaces (leave flags empty for now)
-                if width > 1 {
-                    for dx in 1..width {
-                        if vis_col + dx < w {
-                            frame.set(vis_col + dx, screen_y as u16, ' ');
-                        }
-                    }
-                }
-                vis_col = vis_col.saturating_add(width.max(1));
-                byte = next;
-            }
-        }
-    }
-    // Software cursor overlay (reverse-video) for cluster under cursor, excluding status line.
-    if h > 0 {
-        let text_rows = text_height as usize;
-        if state.position.line >= start
-            && state.position.line < end
-            && let Some(line_content) = buf.line(state.position.line)
-        {
-            let content_trim = if line_content.ends_with('\n') {
-                &line_content[..line_content.len() - 1]
-            } else {
-                &line_content
-            };
-            let vis_col = grapheme::visual_col(content_trim, state.position.byte);
-            let next_byte = core_text::grapheme::next_boundary(content_trim, state.position.byte);
-            let cluster = &content_trim[state.position.byte..next_byte];
-            let width = grapheme::cluster_width(cluster);
-            let rel_line = state.position.line - start;
-            if rel_line < text_rows {
-                let span_width = width.max(1);
-                let mut chars = cluster.chars();
-                let first_char = chars.next().unwrap_or(' ');
-                if (vis_col as u16) < w {
-                    frame.set_with_flags(
-                        vis_col as u16,
-                        rel_line as u16,
-                        first_char,
-                        core_render::CellFlags::REVERSE | core_render::CellFlags::CURSOR,
-                    );
-                }
-                for fill_dx in 1..span_width {
-                    let col = vis_col + fill_dx;
-                    if col as u16 >= w {
-                        break;
-                    }
-                    frame.set_with_flags(
-                        col as u16,
-                        rel_line as u16,
-                        ' ',
-                        core_render::CellFlags::REVERSE | core_render::CellFlags::CURSOR,
-                    );
-                }
-            }
-        }
-    }
-    // Status line (bottom row)
-    if h > 0 {
-        let y = h - 1;
-        let buf = state.active_buffer();
-        let line_content = buf.line(state.position.line).unwrap_or_default();
-        let content_trim = if line_content.ends_with("\r\n") {
-            &line_content[..line_content.len() - 2]
-        } else if line_content.ends_with('\n') || line_content.ends_with('\r') {
-            &line_content[..line_content.len() - 1]
-        } else {
-            &line_content
-        };
-        let col = grapheme::visual_col(content_trim, state.position.byte);
-        let status = build_status(&StatusContext {
-            mode: state.mode,
-            line: state.position.line,
-            col,
-            command_active: state.command_line.is_active(),
-            command_buffer: state.command_line.buffer(),
-            file_name: state.file_name.as_deref(),
-            dirty: state.dirty,
-        });
-        for (i, ch) in status.chars().enumerate() {
-            if (i as u16) < w {
-                frame.set(i as u16, y, ch);
-            }
-        }
-        if !state.command_line.is_active()
-            && let Some(msg) = &state.ephemeral_status
-        {
-            let text = &msg.text;
-            let msg_len = text.chars().count() as u16;
-            if msg_len < w {
-                let start_col = w - msg_len;
-                for (i, ch) in text.chars().enumerate() {
-                    let col = start_col + i as u16;
-                    if col < w {
-                        frame.set(col, y, ch);
-                    }
-                }
-            }
-        }
-    }
-    frame
+    // Refactor R2 Step 1: delegate to RenderEngine abstraction (still full render).
+    RenderEngine::render_full(state, w, h)
 }
 
 fn translate_key_wrapper(mode: Mode, pending_command: &str, key: &KeyEvent) -> Option<Action> {
@@ -368,8 +232,9 @@ fn translate_key_wrapper(mode: Mode, pending_command: &str, key: &KeyEvent) -> O
 mod tests {
     use super::*;
     use core_actions::{EditKind, ModeChange};
+    use core_render::render_engine::build_frame;
     use core_text::Buffer;
-    use tokio::sync::mpsc;
+    use tokio::sync::mpsc; // imported after refactor R2 Step 1
 
     #[tokio::test]
     async fn bounded_channel_capacity_blocking() {

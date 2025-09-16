@@ -227,6 +227,7 @@ dependencies = [
  "bitflags",
  "core-state",
  "core-terminal",
+ "core-text",
  "crossterm",
  "tracing",
 ]

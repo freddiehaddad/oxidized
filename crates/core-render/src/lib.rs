@@ -94,6 +94,7 @@ impl Renderer {
     }
 }
 
+pub mod render_engine;
 pub mod scheduler;
 pub mod status;
 pub mod viewport;
