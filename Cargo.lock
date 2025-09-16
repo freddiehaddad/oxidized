@@ -228,6 +228,7 @@ dependencies = [
  "core-state",
  "core-terminal",
  "crossterm",
+ "tracing",
 ]
 
 [[package]]

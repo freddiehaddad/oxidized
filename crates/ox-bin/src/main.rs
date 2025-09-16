@@ -7,7 +7,7 @@ use core_actions::ActionObserver; // trait (currently unused in main but stored 
 use core_actions::dispatcher::dispatch;
 use core_config::load_from;
 use core_events::{CommandEvent, EVENT_CHANNEL_CAP, Event, InputEvent, KeyEvent};
-use core_render::scheduler::RenderScheduler;
+use core_render::scheduler::{RenderDelta, RenderScheduler};
 use core_render::status::{StatusContext, build_status};
 use core_render::{Frame, Renderer};
 use core_state::Mode;
@@ -157,9 +157,22 @@ async fn main() -> Result<()> {
                 if let Some(act) =
                     translate_key_wrapper(state.mode, state.command_line.buffer(), &k)
                 {
+                    let before_line = state.position.line; // capture before dispatch for heuristic
                     let dr = dispatch(act, &mut state, &mut sticky_visual_col, &observers);
                     if dr.dirty {
-                        scheduler.mark_dirty();
+                        // Heuristic mapping (Phase 2 Step 17): if line changed -> Lines(range of that line),
+                        // if only cursor moved within same line -> CursorOnly, else fallback Full.
+                        let after_line = state.position.line;
+                        if before_line != after_line {
+                            scheduler.mark(RenderDelta::Lines(after_line..after_line + 1));
+                        } else {
+                            // Cursor move or intra-line edit; we cannot cheaply know if text mutated -> use Lines for safety if in Insert, else CursorOnly.
+                            if matches!(state.mode, Mode::Insert) {
+                                scheduler.mark(RenderDelta::Lines(after_line..after_line + 1));
+                            } else {
+                                scheduler.mark(RenderDelta::CursorOnly);
+                            }
+                        }
                     }
                     if dr.quit {
                         break;
@@ -177,17 +190,18 @@ async fn main() -> Result<()> {
         }
         // Expire ephemeral status if needed (breadth-first synchronous check)
         if state.tick_ephemeral() {
-            scheduler.mark_dirty();
+            scheduler.mark(RenderDelta::StatusLine);
         }
         // Auto-scroll (Phase 2 Step 8): keep cursor visible.
         if let Ok((_, h)) = crossterm::terminal::size() {
             let text_height = if h > 0 { (h - 1) as usize } else { 0 };
             if state.auto_scroll(text_height) {
-                scheduler.mark_dirty();
+                // scrolling changes visible lines -> conservatively mark full for now
+                scheduler.mark(RenderDelta::Full);
             }
         }
         // Ask scheduler if a redraw is needed this cycle.
-        if scheduler.consume_dirty()
+        if scheduler.consume().is_some()
             && let Err(e) = render(&state)
         {
             error!(?e, "render error");
