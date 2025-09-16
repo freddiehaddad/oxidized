@@ -111,7 +111,7 @@ Out of Scope (Deferred to Phase 3 or later):
 
 - [x] Step 0 – Plan scaffold (this document)
 - [x] Step 1 – RenderEngine extraction
-- [ ] Step 2 – Cursor overlay separation
+- [x] Step 2 – Cursor overlay separation
 - [ ] Step 3 – Scroll delta variant
 - [ ] Step 4 – Status segment model
 - [ ] Step 5 – IO helper extraction

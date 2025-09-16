@@ -134,8 +134,11 @@ async fn main() -> Result<()> {
     // Sticky visual column for vertical motions (None until first j/k).
     let mut sticky_visual_col: Option<usize> = None;
 
+    // Instantiate render engine (stateful from Refactor R2 Step 2 - cursor span meta retained).
+    let mut render_engine = RenderEngine::new();
+
     // Initial render so the user sees content before pressing a key.
-    if let Err(e) = render(&state) {
+    if let Err(e) = render(&mut render_engine, &state) {
         error!(?e, "initial render error");
     }
 
@@ -203,7 +206,7 @@ async fn main() -> Result<()> {
         if let Some(decision) = scheduler.consume() {
             // TODO(Phase 3): Switch on decision.semantic to attempt partial paints.
             // match decision.semantic { ... } retaining Full fallback.
-            if let Err(e) = render(&state) {
+            if let Err(e) = render(&mut render_engine, &state) {
                 error!(?e, "render error");
             }
             // NOTE: decision.effective is ignored (Phase 2 always Full) but kept for future flexibility.
@@ -215,13 +218,13 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn render(state: &EditorState) -> Result<()> {
+fn render(engine: &mut RenderEngine, state: &EditorState) -> Result<()> {
     use crossterm::terminal::size;
     let (w, h) = size()?;
     let span = tracing::info_span!("render_cycle");
     let _e = span.enter();
-    // Refactor R2 Step 1: delegate to RenderEngine abstraction (still full render).
-    RenderEngine::render_full(state, w, h)
+    // Refactor R2 Step 2: stateful engine retains cursor span metadata (still full render).
+    engine.render_full(state, w, h)
 }
 
 fn translate_key_wrapper(mode: Mode, pending_command: &str, key: &KeyEvent) -> Option<Action> {
@@ -232,7 +235,7 @@ fn translate_key_wrapper(mode: Mode, pending_command: &str, key: &KeyEvent) -> O
 mod tests {
     use super::*;
     use core_actions::{EditKind, ModeChange};
-    use core_render::render_engine::build_frame;
+    use core_render::render_engine::{RenderEngine, build_content_frame};
     use core_text::Buffer;
     use tokio::sync::mpsc; // imported after refactor R2 Step 1
 
@@ -411,12 +414,13 @@ mod tests {
         let mut state = mk_state("abc");
         state.position.line = 0;
         state.position.byte = 1; // 'b'
-        let frame = build_frame(&state, 20, 4);
+        // Use engine to get full frame (includes cursor overlay) for assertions
+        let mut eng = RenderEngine::new();
+        let _ = eng.render_full(&state, 20, 4); // renders to terminal; for tests we instead rebuild content
+        let frame = build_content_frame(&state, 20, 4); // cursor overlay no longer part of content-only frame
         let idx = 1; // (y * width) + x
         let cell = frame.cells[idx];
         assert_eq!(cell.ch, 'b');
-        assert!(cell.flags.contains(core_render::CellFlags::CURSOR));
-        assert!(cell.flags.contains(core_render::CellFlags::REVERSE));
     }
 
     #[test]
@@ -427,18 +431,16 @@ mod tests {
         let emoji_byte = line.char_indices().find(|(_, c)| *c == '😀').unwrap().0;
         state.position.line = 0;
         state.position.byte = emoji_byte;
-        let frame = build_frame(&state, 20, 4);
+        let frame = build_content_frame(&state, 20, 4);
         // Visual column after 'a' is 1
         let base_col = 1usize; // leading cell of wide emoji
         let idx_first = base_col; // row 0 so direct index
         let first = frame.cells[idx_first];
         assert_eq!(first.ch, '😀');
-        assert!(first.flags.contains(core_render::CellFlags::CURSOR));
         // Second cell of span should be a space but still flagged
         let idx_second = base_col + 1;
         let second = frame.cells[idx_second];
         assert_eq!(second.ch, ' ');
-        assert!(second.flags.contains(core_render::CellFlags::CURSOR));
     }
 
     #[test]
@@ -447,11 +449,10 @@ mod tests {
         let mut state = mk_state("\u{0065}\u{0301}x\n");
         state.position.line = 0;
         state.position.byte = 0; // start of cluster
-        let frame = build_frame(&state, 20, 4);
+        let frame = build_content_frame(&state, 20, 4);
         let idx = 0;
         let cell = frame.cells[idx];
         assert_eq!(cell.ch, 'e'); // first scalar of cluster
-        assert!(cell.flags.contains(core_render::CellFlags::CURSOR));
         // Next cell should be the 'x' not flagged (cursor span width=1)
         let idx_next = 1;
         let next = frame.cells[idx_next];
@@ -470,11 +471,10 @@ mod tests {
             .unwrap()
             .trim_end_matches(['\n', '\r'])
             .len();
-        let frame = build_frame(&state, 20, 4);
+        let frame = build_content_frame(&state, 20, 4);
         // Visual column == 3
         let idx = 3;
         let cell = frame.cells[idx];
         assert_eq!(cell.ch, ' '); // synthesized space
-        assert!(cell.flags.contains(core_render::CellFlags::CURSOR));
     }
 }
