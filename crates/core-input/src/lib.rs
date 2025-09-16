@@ -1,7 +1,11 @@
 //! Blocking input collection on a dedicated thread (no polling timeout).
-//! Phase 1 Task 9.6: adapted to send over an asynchronous `tokio::mpsc::UnboundedSender`.
+//! Phase 2 Step 16: now targets a bounded `tokio::mpsc::Sender` (natural backpressure via
+//! `blocking_send`).
 
-use core_events::{Event, InputEvent, KeyCode, KeyEvent, KeyModifiers};
+use core_events::{
+    CHANNEL_BLOCKING_SENDS, CHANNEL_SEND_FAILURES, Event, InputEvent, KeyCode, KeyEvent,
+    KeyModifiers,
+};
 use crossterm::event::{
     self, Event as CEvent, KeyCode as CKeyCode, KeyEventKind as CKind, KeyModifiers as CMods,
 };
@@ -10,9 +14,7 @@ use tracing::trace;
 
 /// Spawn a blocking input thread. The thread exits automatically when the
 /// receiving side of the channel is dropped (send will return Err).
-pub fn spawn_input_thread(
-    sender: tokio::sync::mpsc::UnboundedSender<Event>,
-) -> thread::JoinHandle<()> {
+pub fn spawn_input_thread(sender: tokio::sync::mpsc::Sender<Event>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let span = tracing::info_span!("input_thread");
         let _e = span.enter();
@@ -37,21 +39,34 @@ pub fn spawn_input_thread(
                         _ => continue,
                     };
                     if code == KeyCode::Char('c') && mods.contains(KeyModifiers::CTRL) {
-                        if sender.send(Event::Input(InputEvent::CtrlC)).is_err() {
+                        if sender
+                            .blocking_send(Event::Input(InputEvent::CtrlC))
+                            .is_err()
+                        {
+                            CHANNEL_SEND_FAILURES
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             break;
                         }
+                        CHANNEL_BLOCKING_SENDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         continue;
                     }
                     let evt = Event::Input(InputEvent::Key(KeyEvent { code, mods }));
-                    if sender.send(evt).is_err() {
+                    if sender.blocking_send(evt).is_err() {
+                        CHANNEL_SEND_FAILURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         break;
                     }
+                    CHANNEL_BLOCKING_SENDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 Ok(CEvent::Resize(w, h)) => {
                     trace!(w, h, "resize");
-                    if sender.send(Event::Input(InputEvent::Resize(w, h))).is_err() {
+                    if sender
+                        .blocking_send(Event::Input(InputEvent::Resize(w, h)))
+                        .is_err()
+                    {
+                        CHANNEL_SEND_FAILURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         break;
                     }
+                    CHANNEL_BLOCKING_SENDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 Ok(_other) => { /* ignore mouse/paste for now */ }
                 Err(_) => {

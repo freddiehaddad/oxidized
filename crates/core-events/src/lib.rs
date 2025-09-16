@@ -2,39 +2,31 @@
 //! Phase 0 scope: minimal input + control events.
 
 use std::fmt;
+use std::sync::atomic::AtomicU64;
 
 // -------------------------------------------------------------------------------------------------
-// Channel Policy (Refactor R1 Step 10)
+// Channel Policy (Phase 2 Step 16 – Activated)
 // -------------------------------------------------------------------------------------------------
-// We intentionally start Phase 1 with an *unbounded* mpsc channel (`tokio::sync::mpsc::unbounded_channel`)
-// feeding the single consumer event loop. This keeps early refactors simple (no backpressure /
-// error handling churn) while we only have a single producer (the blocking input thread).
-//
-// Future phases (first moment we introduce a second asynchronous producer: config watcher, timer,
-// LSP client, plugin host, etc.) will migrate to a *bounded* channel to provide memory safety and
-// natural backpressure. That migration must be a single, tightly‑scoped change. To enable that we:
-//   1. Define a central capacity constant here (`EVENT_CHANNEL_CAP`).
-//   2. Reference it (in comments + TODO) at the creation site (currently `ox-bin/src/main.rs`).
-//   3. Document the drop / overflow policy ahead of time.
-//
-// Proposed bounded semantics (documented now, implemented later):
-//   * Capacity: power‑of‑two sized ring large enough for bursts but finite (8192 chosen: 2^13).
-//   * On send when full: drop *oldest* non-critical events (likely motion spam) OR block the
-//     producer task briefly using a bounded async channel with `send().await` (decision deferred
-//     until concrete multi-producer workload exists). Critical events (Shutdown, Quit) will be
-//     prioritized by sending through a small separate control channel if necessary.
-//   * Telemetry: a counter increments each time backpressure engages or an event is dropped.
-//
-// Rationale for 8192: Empirically generous for human typing / motion bursts (thousands of keys) yet
-// trivially bounded in memory (~ a few hundred KB given small enum size). Power‑of‑two simplifies
-// potential future custom ring buffer optimizations.
-//
-// IMPORTANT: Until the migration occurs the constant is *unused*; keeping it here ensures no code
-// search is needed later and prevents scattering magic numbers. The refactor design doc marks this
-// step complete once the constant + commentary exist and `main.rs` references the planned swap.
+// The event loop now uses a bounded mpsc channel sized by `EVENT_CHANNEL_CAP` to provide memory
+// safety and natural producer backpressure. Initial policy: the blocking input thread uses
+// `blocking_send` which will park the thread until space is available rather than dropping events.
+// Rationale: with a single producer (input) and single consumer (main loop) latency remains low and
+// preserving motion / edit fidelity is preferred over lossy drop strategies. Future multi‑producer
+// scenarios (timers, LSP, watchers) may introduce a priority control channel + selective drop of
+// low‑value motion bursts. Telemetry counters record send failures (closed channel) and will later
+// record explicit backpressure timings once multiple producers exist.
 // -------------------------------------------------------------------------------------------------
-#[allow(dead_code)]
-pub const EVENT_CHANNEL_CAP: usize = 8192; // Future bounded channel capacity (see comment block).
+pub const EVENT_CHANNEL_CAP: usize = 8192;
+
+// -------------------------------------------------------------------------------------------------
+// Telemetry (Phase 2 Step 16)
+// -------------------------------------------------------------------------------------------------
+// Simple atomic counters (no locking, fetch_add relaxed). These are intentionally minimal; a future
+// metrics crate integration can export them via structured events. For now they can be inspected in
+// unit tests or periodically logged.
+// -------------------------------------------------------------------------------------------------
+pub static CHANNEL_SEND_FAILURES: AtomicU64 = AtomicU64::new(0);
+pub static CHANNEL_BLOCKING_SENDS: AtomicU64 = AtomicU64::new(0); // increments for each successful blocking_send (backpressure aware later)
 
 /// Top-level event enum consumed by the central event loop.
 #[derive(Debug, Clone)]

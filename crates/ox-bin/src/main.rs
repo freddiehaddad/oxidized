@@ -1,16 +1,12 @@
 //! Oxidized entrypoint – Phase 0 skeleton.
 
 use anyhow::Result;
+use clap::Parser;
 use core_actions::Action;
 use core_actions::ActionObserver; // trait (currently unused in main but stored for future use)
 use core_actions::dispatcher::dispatch;
-use core_events::{CommandEvent, Event, InputEvent, KeyEvent};
-// NOTE: `EVENT_CHANNEL_CAP` lives in `core-events` (currently unused while channel is unbounded).
-// When introducing additional async producers, migrate to `mpsc::channel(EVENT_CHANNEL_CAP)` and
-// implement documented backpressure policy (Refactor R1 Step 10).
-// use core_events::EVENT_CHANNEL_CAP; // (future bounded channel capacity activation point)
-use clap::Parser;
 use core_config::load_from;
+use core_events::{CommandEvent, EVENT_CHANNEL_CAP, Event, InputEvent, KeyEvent};
 use core_render::scheduler::RenderScheduler;
 use core_render::status::{StatusContext, build_status};
 use core_render::{Frame, Renderer};
@@ -130,10 +126,8 @@ async fn main() -> Result<()> {
     // Store effective margin inside state (temporary field addition in Phase 2 Step 14).
     state.config_vertical_margin = config.effective_vertical_margin as usize;
 
-    // Async unbounded channel (single consumer main loop). Input thread forwards blocking
-    // crossterm events. Future bounded migration: swap to `mpsc::channel(EVENT_CHANNEL_CAP)` when
-    // the first additional async producer (config watcher, timers, LSP, plugin host) lands.
-    let (tx, mut rx) = mpsc::unbounded_channel::<Event>();
+    // Phase 2 Step 16: bounded channel activation (natural backpressure via blocking_send).
+    let (tx, mut rx) = mpsc::channel::<Event>(EVENT_CHANNEL_CAP);
     let _input_handle = core_input::spawn_input_thread(tx.clone());
 
     // Command line now stored within EditorState (Refactor R1 Step 2)
@@ -357,6 +351,26 @@ mod tests {
     use super::*;
     use core_actions::{EditKind, ModeChange};
     use core_text::Buffer;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn bounded_channel_capacity_blocking() {
+        // Tiny channel to exercise pending send; we manually receive to free space.
+        let (tx, mut rx) = mpsc::channel::<Event>(2);
+        tx.send(Event::RenderRequested).await.unwrap();
+        tx.send(Event::RenderRequested).await.unwrap();
+        // Next send would await until a recv occurs. Spawn a task to release one slot.
+        let tx2 = tx.clone();
+        let send_fut = tokio::spawn(async move {
+            tx2.send(Event::RenderRequested).await.unwrap();
+        });
+        // Yield to ensure task is pending, then receive one event to free space.
+        tokio::task::yield_now().await;
+        rx.recv().await.unwrap();
+        // Now the blocked send should complete.
+        send_fut.await.unwrap();
+        assert!(rx.recv().await.is_some());
+    }
 
     fn mk_state(initial: &str) -> EditorState {
         let buf = Buffer::from_str("test", initial).unwrap();
