@@ -25,6 +25,41 @@ pub struct RenderScheduler {
     pending: Vec<RenderDelta>,
 }
 
+/// Result of a consume operation (Phase 2 Step 18):
+/// - `semantic`: the collapsed/merged delta representing theoretical minimal damage.
+/// - `effective`: what the renderer should act upon *now* (Phase 2 always `Full`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderDecision {
+    pub semantic: RenderDelta,
+    pub effective: RenderDelta,
+}
+
+/// Simple atomic metrics for delta kind frequency (Phase 2 instrumentation).
+pub mod metrics {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    pub static DELTA_FULL: AtomicU64 = AtomicU64::new(0);
+    pub static DELTA_LINES: AtomicU64 = AtomicU64::new(0);
+    pub static DELTA_STATUS: AtomicU64 = AtomicU64::new(0);
+    pub static DELTA_CURSOR: AtomicU64 = AtomicU64::new(0);
+
+    pub fn incr(delta: &crate::scheduler::RenderDelta) {
+        match delta {
+            crate::scheduler::RenderDelta::Full => {
+                DELTA_FULL.fetch_add(1, Ordering::Relaxed);
+            }
+            crate::scheduler::RenderDelta::Lines(_) => {
+                DELTA_LINES.fetch_add(1, Ordering::Relaxed);
+            }
+            crate::scheduler::RenderDelta::StatusLine => {
+                DELTA_STATUS.fetch_add(1, Ordering::Relaxed);
+            }
+            crate::scheduler::RenderDelta::CursorOnly => {
+                DELTA_CURSOR.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
 impl RenderScheduler {
     pub fn new() -> Self {
         Self {
@@ -38,15 +73,19 @@ impl RenderScheduler {
         self.pending.push(delta);
     }
 
-    /// Collapse queued deltas and return (Phase 2: always `Full`).
-    pub fn consume(&mut self) -> Option<RenderDelta> {
+    /// Collapse queued deltas and return decision (Phase 2: effective always Full).
+    pub fn consume(&mut self) -> Option<RenderDecision> {
         if self.pending.is_empty() {
             return None;
         }
         let merged = self.collapse();
         tracing::trace!(?merged, "render_delta_collapse");
         self.pending.clear();
-        Some(RenderDelta::Full) // Phase 2 policy
+        metrics::incr(&merged);
+        Some(RenderDecision {
+            semantic: merged,
+            effective: RenderDelta::Full,
+        })
     }
 
     fn collapse(&self) -> RenderDelta {
@@ -121,11 +160,13 @@ mod tests {
     }
 
     #[test]
-    fn consume_always_returns_full_phase2() {
+    fn consume_decision_semantic_and_full_effective() {
         let mut s = RenderScheduler::new();
         s.mark(RenderDelta::CursorOnly);
         let out = s.consume();
-        assert!(matches!(out, Some(RenderDelta::Full)));
+        let decision = out.expect("decision");
+        assert_eq!(decision.semantic, RenderDelta::CursorOnly);
+        assert_eq!(decision.effective, RenderDelta::Full);
         assert!(s.consume().is_none(), "second consume empty");
     }
 }

@@ -201,10 +201,14 @@ async fn main() -> Result<()> {
             }
         }
         // Ask scheduler if a redraw is needed this cycle.
-        if scheduler.consume().is_some()
-            && let Err(e) = render(&state)
-        {
-            error!(?e, "render error");
+        if let Some(decision) = scheduler.consume() {
+            // TODO(Phase 3): Switch on decision.semantic to attempt partial paints.
+            // match decision.semantic { ... } retaining Full fallback.
+            if let Err(e) = render(&state) {
+                error!(?e, "render error");
+            }
+            // NOTE: decision.effective is ignored (Phase 2 always Full) but kept for future flexibility.
+            let _ = decision; // suppress unused warning until Phase 3.
         }
     }
     // Guard drop will restore terminal.
