@@ -1,7 +1,15 @@
-//! Status line formatter (Refactor R1 Step 1).
+//! Status line formatter.
 //!
-//! Breadth-first: intentionally minimal. Later enhancements (file name, modified flag,
-//! diagnostics, LSP state) extend this API without changing call sites in the main loop.
+//! Phase 2 Step 19 finalized the format:
+//! `[MODE] <name>[*] Ln X, Col Y :` (command inactive) or
+//! `[MODE] <name>[*] Ln X, Col Y :<command>` (command active).
+//! * `<name>` is base file name or `[No Name]` for an unsaved buffer.
+//! * `*` appears only when the buffer is dirty.
+//! * A single colon precedes the command buffer; the internal stored buffer may begin with
+//!   a sentinel ':' which we strip for display.
+//!
+//! Rationale: matches familiar modal editors (Vim) while remaining allocation-light and easy to
+//! extend in future phases (LSP, diagnostics, git branch segment, etc.).
 
 use core_state::Mode;
 

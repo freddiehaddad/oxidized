@@ -1,33 +1,47 @@
-//! Render scheduler (Phase 2 Step 17 – RenderDelta scaffold).
+//! Render scheduler (Phase 2 Steps 17–18).
 //!
-//! Evolves the initial dirty-flag-only scheduler into a semantic delta
-//! accumulator. Producers call `mark(RenderDelta)`; on `consume()` we collapse
-//! all queued deltas into a single merged representation. Phase 2 still forces
-//! full-frame redraws for simplicity: `consume()` always returns
-//! `RenderDelta::Full` but logs the merged pre-collapse shape for future
-//! optimization.
+//! Breadth-first foundation for future partial rendering. Producers report
+//! fine-grained invalidation intents (`RenderDelta`) via `mark`; on `consume`
+//! we merge queued deltas into a single semantic shape and (for Phase 2)
+//! always request a full-frame redraw. The semantic result is retained in the
+//! returned `RenderDecision` and counted via lightweight atomic metrics so we
+//! can later quantify optimization headroom before enabling partial paints.
 //!
-//! Future phases will interpret non-Full variants to perform partial paints
-//! (e.g. line range diff, status-only, cursor-only). By landing this scaffold
-//! early we avoid later refactors across numerous call sites.
+//! Merge semantics:
+//! * Any `Full` present => `Full`.
+//! * Multiple `Lines` coalesce into a single inclusive/exclusive range.
+//! * Precedence order when heterogeneous: `Lines` > `StatusLine` > `CursorOnly`.
+//! * `CursorOnly` + `StatusLine` collapses to `StatusLine`.
+//!
+//! Phase 2 policy: renderer still performs a full redraw (flicker-free, simple)
+//! while instrumentation accumulates real semantic patterns. Phase 3+ may branch
+//! on `decision.semantic` to drive incremental paint strategies.
 
+/// Granular render invalidation intents produced by editor state changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RenderDelta {
+    /// Entire frame must be repainted.
     Full,
-    /// Inclusive start, exclusive end line range (buffer line indices)
+    /// Text modifications confined to a (line) span. Range is half-open `[start, end)` using
+    /// buffer line indices after internal normalization (LF-only lines).
     Lines(std::ops::Range<usize>),
+    /// Only the status line contents changed (e.g. mode switch, filename, ephemeral message).
     StatusLine,
+    /// Only the logical cursor moved within an otherwise unchanged line.
     CursorOnly,
 }
 
 #[derive(Debug, Default)]
 pub struct RenderScheduler {
+    /// Queue of deltas recorded since last `consume`.
     pending: Vec<RenderDelta>,
 }
 
-/// Result of a consume operation (Phase 2 Step 18):
-/// - `semantic`: the collapsed/merged delta representing theoretical minimal damage.
-/// - `effective`: what the renderer should act upon *now* (Phase 2 always `Full`).
+/// Result of a consume operation.
+///
+/// * `semantic`  – merged minimal damage (see merge semantics above).
+/// * `effective` – delta the renderer should act on immediately (Phase 2 hard-coded `Full`).
+///   Future phases may let this differ from `Full` for partial paints.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderDecision {
     pub semantic: RenderDelta,
@@ -73,7 +87,10 @@ impl RenderScheduler {
         self.pending.push(delta);
     }
 
-    /// Collapse queued deltas and return decision (Phase 2: effective always Full).
+    /// Collapse queued deltas and return a `RenderDecision`.
+    ///
+    /// Phase 2 behavior: always sets `effective = RenderDelta::Full` while still reporting the
+    /// merged semantic delta for telemetry and future incremental render logic.
     pub fn consume(&mut self) -> Option<RenderDecision> {
         if self.pending.is_empty() {
             return None;

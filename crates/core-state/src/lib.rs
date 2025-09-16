@@ -91,7 +91,12 @@ pub struct EditorState {
     pub original_line_ending: LineEnding,
     /// Whether the original file ended with a final newline (Phase 2 Step 9).
     pub had_trailing_newline: bool,
-    /// Effective (clamped) vertical scroll margin (Phase 2 Step 14). Applied during auto-scroll.
+    /// Effective (clamped) vertical scroll margin (Phase 2 Step 14).
+    ///
+    /// Stored as a usize for direct comparison with line indices. The initial raw config value is
+    /// clamped at application time to `min(requested, text_height/2)` ensuring at least half the
+    /// viewport remains for content (prevents pathological large margins). Auto-scroll (Step 15)
+    /// enforces this by keeping the cursor inside a vertical band defined by this margin.
     pub config_vertical_margin: usize,
 }
 
