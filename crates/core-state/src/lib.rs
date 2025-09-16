@@ -875,6 +875,68 @@ mod tests {
     }
 
     #[test]
+    fn auto_scroll_with_zero_margin_matches_baseline() {
+        let buf = Buffer::from_str("t", "0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n").unwrap();
+        let mut st = EditorState::new(buf);
+        st.config_vertical_margin = 0;
+        let h = 5usize;
+        st.position.line = 5;
+        st.auto_scroll(h);
+        assert_eq!(st.viewport_first_line, 1, "baseline scroll without margin");
+    }
+
+    #[test]
+    fn auto_scroll_with_margin_scrolls_earlier() {
+        let buf = Buffer::from_str("t", "0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n").unwrap();
+        let mut st = EditorState::new(buf);
+        st.config_vertical_margin = 2; // request margin
+        let h = 6usize; // viewport 6 lines
+        // Move cursor down gradually; expect earlier upward scroll trigger due to margin.
+        // Without margin, first_line remains 0 until cursor hits line 6 (0..6 visible)
+        // With margin=2 we need at least two lines of space below the cursor. At cursor line 4
+        // the space below inside the viewport (lines 5) is only 1 line, so we scroll early.
+        st.position.line = 4;
+        st.auto_scroll(h);
+        assert_eq!(
+            st.viewport_first_line, 1,
+            "expected early scroll to supply bottom margin"
+        );
+        // Advancing to line 5 should scroll again: new_first = 5 + 2 + 1 - 6 = 2.
+        st.position.line = 5;
+        st.auto_scroll(h);
+        assert_eq!(
+            st.viewport_first_line, 2,
+            "expected subsequent scroll maintaining margin"
+        );
+    }
+
+    #[test]
+    fn auto_scroll_margin_bottom_boundary() {
+        let buf = Buffer::from_str("t", "0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n").unwrap();
+        let mut st = EditorState::new(buf);
+        st.config_vertical_margin = 2;
+        let h = 5usize;
+        st.position.line = 9; // last line
+        st.auto_scroll(h);
+        // With margin we expect first_line = cursor + margin + 1 - h; margin is clamped internally at h/2 (2)
+        // Computation: 9 + 2 + 1 - 5 = 7
+        assert_eq!(st.viewport_first_line, 7);
+    }
+
+    #[test]
+    fn auto_scroll_margin_small_viewport_disables_margin() {
+        let buf = Buffer::from_str("t", "0\n1\n2\n3\n4\n").unwrap();
+        let mut st = EditorState::new(buf);
+        st.config_vertical_margin = 10; // excessive
+        let h = 3usize; // small viewport -> internal clamp path (text_height /2 =1) but algorithm early exit may still behave
+        st.position.line = 2;
+        st.auto_scroll(h);
+        // For small height=3 with cursor at 2 we expect first line = cursor + m + 1 - h.
+        // m = min(req, h/2)=1 => 2 +1 +1 -3 =1
+        assert_eq!(st.viewport_first_line, 1);
+    }
+
+    #[test]
     fn normalize_crlf() {
         let src = "a\r\nb\r\n"; // ends with newline
         let n = normalize_line_endings(src);
