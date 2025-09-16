@@ -62,7 +62,7 @@ Out of Scope (Deferred to Phase 3 or later):
 0. (Planned) Plan scaffold (this file): objectives, scope, steps, risks.  (You are here)
 1. Extract RenderEngine: move `build_frame` + render call path; add `render_full` stub & unused `render_partial`.
 2. Separate cursor overlay: split content assembly vs cursor overlay; store previous cursor span metadata.
-3. Introduce `RenderDelta::Scroll { old_first, new_first }`; mark scroll events with it; collapse merges to Lines; tests updated.
+3. Introduce `RenderDelta::Scroll { old_first, new_first }`. Mark viewport vertical shifts with this semantic (effective render still Full in Refactor R2). Collapse precedence: Full > Lines > Scroll > StatusLine > CursorOnly. Collapse rules: multiple Scroll events coalesce (earliest old_first, latest new_first); any Lines or Full suppress Scroll; exclusive Scroll preserved. Add DELTA_SCROLL metric + tests (merge, suppression by Lines, exclusive preservation, precedence, decision effective still Full).
 4. Status segment model: add `StatusSegment` enum + `compose_status` → `format_status`; preserve exact output; add regression test comparing to legacy formatter.
 5. Extract file IO helpers (`open_file(path)`, `write_file(state)`) into `core-actions::io_ops`; dispatcher delegates; tests updated.
 6. Introduce `EditorModel` wrapper (contains `EditorState`); adapt `ox-bin` usage; no behavior changes; rustdoc updates.
@@ -112,7 +112,7 @@ Out of Scope (Deferred to Phase 3 or later):
 - [x] Step 0 – Plan scaffold (this document)
 - [x] Step 1 – RenderEngine extraction
 - [x] Step 2 – Cursor overlay separation
-- [ ] Step 3 – Scroll delta variant
+- [x] Step 3 – Scroll delta variant
 - [ ] Step 4 – Status segment model
 - [ ] Step 5 – IO helper extraction
 - [ ] Step 6 – EditorModel wrapper

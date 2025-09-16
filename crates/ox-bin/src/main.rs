@@ -197,9 +197,14 @@ async fn main() -> Result<()> {
         // Auto-scroll (Phase 2 Step 8): keep cursor visible.
         if let Ok((_, h)) = crossterm::terminal::size() {
             let text_height = if h > 0 { (h - 1) as usize } else { 0 };
+            let before_first = state.viewport_first_line;
             if state.auto_scroll(text_height) {
-                // scrolling changes visible lines -> conservatively mark full for now
-                scheduler.mark(RenderDelta::Full);
+                let after_first = state.viewport_first_line;
+                // Refactor R2 Step 3: mark semantic scroll (effective still full render later).
+                scheduler.mark(RenderDelta::Scroll {
+                    old_first: before_first,
+                    new_first: after_first,
+                });
             }
         }
         // Ask scheduler if a redraw is needed this cycle.

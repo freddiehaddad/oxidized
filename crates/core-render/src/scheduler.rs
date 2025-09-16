@@ -1,21 +1,23 @@
-//! Render scheduler (Phase 2 Steps 17–18).
+//! Render scheduler (Phase 2 Steps 17–18, Refactor R2 Step 3 update).
 //!
 //! Breadth-first foundation for future partial rendering. Producers report
 //! fine-grained invalidation intents (`RenderDelta`) via `mark`; on `consume`
-//! we merge queued deltas into a single semantic shape and (for Phase 2)
-//! always request a full-frame redraw. The semantic result is retained in the
-//! returned `RenderDecision` and counted via lightweight atomic metrics so we
-//! can later quantify optimization headroom before enabling partial paints.
+//! we merge queued deltas into a single semantic shape and (for Phase 2 /
+//! Refactor R2) always request a full-frame redraw. The semantic result is
+//! retained in the returned `RenderDecision` and counted via lightweight
+//! atomic metrics so we can later quantify optimization headroom before
+//! enabling partial paints.
 //!
 //! Merge semantics:
 //! * Any `Full` present => `Full`.
 //! * Multiple `Lines` coalesce into a single inclusive/exclusive range.
-//! * Precedence order when heterogeneous: `Lines` > `StatusLine` > `CursorOnly`.
-//! * `CursorOnly` + `StatusLine` collapses to `StatusLine`.
+//! * Multiple `Scroll` deltas coalesce (earliest `old_first`, latest `new_first`).
+//! * Precedence when heterogeneous: `Lines` > `Scroll` > `StatusLine` > `CursorOnly`.
+//! * `CursorOnly` + `StatusLine` collapses to `StatusLine` (unless `Lines`/`Scroll` present).
 //!
-//! Phase 2 policy: renderer still performs a full redraw (flicker-free, simple)
-//! while instrumentation accumulates real semantic patterns. Phase 3+ may branch
-//! on `decision.semantic` to drive incremental paint strategies.
+//! Refactor R2 policy: renderer still performs a full redraw (flicker-free,
+//! simple) while instrumentation accumulates real semantic patterns. Phase 3+
+//! may branch on `decision.semantic` to drive incremental paint strategies.
 
 /// Granular render invalidation intents produced by editor state changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +27,9 @@ pub enum RenderDelta {
     /// Text modifications confined to a (line) span. Range is half-open `[start, end)` using
     /// buffer line indices after internal normalization (LF-only lines).
     Lines(std::ops::Range<usize>),
+    /// Viewport vertical scroll (semantic only in Refactor R2 – effective repaint still Full).
+    /// `old_first` = previous first visible buffer line, `new_first` = new first visible line.
+    Scroll { old_first: usize, new_first: usize },
     /// Only the status line contents changed (e.g. mode switch, filename, ephemeral message).
     StatusLine,
     /// Only the logical cursor moved within an otherwise unchanged line.
@@ -48,11 +53,12 @@ pub struct RenderDecision {
     pub effective: RenderDelta,
 }
 
-/// Simple atomic metrics for delta kind frequency (Phase 2 instrumentation).
+/// Simple atomic metrics for delta kind frequency (Phase 2 / Refactor R2 instrumentation).
 pub mod metrics {
     use std::sync::atomic::{AtomicU64, Ordering};
     pub static DELTA_FULL: AtomicU64 = AtomicU64::new(0);
     pub static DELTA_LINES: AtomicU64 = AtomicU64::new(0);
+    pub static DELTA_SCROLL: AtomicU64 = AtomicU64::new(0);
     pub static DELTA_STATUS: AtomicU64 = AtomicU64::new(0);
     pub static DELTA_CURSOR: AtomicU64 = AtomicU64::new(0);
 
@@ -63,6 +69,9 @@ pub mod metrics {
             }
             crate::scheduler::RenderDelta::Lines(_) => {
                 DELTA_LINES.fetch_add(1, Ordering::Relaxed);
+            }
+            crate::scheduler::RenderDelta::Scroll { .. } => {
+                DELTA_SCROLL.fetch_add(1, Ordering::Relaxed);
             }
             crate::scheduler::RenderDelta::StatusLine => {
                 DELTA_STATUS.fetch_add(1, Ordering::Relaxed);
@@ -89,7 +98,7 @@ impl RenderScheduler {
 
     /// Collapse queued deltas and return a `RenderDecision`.
     ///
-    /// Phase 2 behavior: always sets `effective = RenderDelta::Full` while still reporting the
+    /// Refactor R2 behavior: always sets `effective = RenderDelta::Full` while still reporting the
     /// merged semantic delta for telemetry and future incremental render logic.
     pub fn consume(&mut self) -> Option<RenderDecision> {
         if self.pending.is_empty() {
@@ -106,16 +115,18 @@ impl RenderScheduler {
     }
 
     fn collapse(&self) -> RenderDelta {
-        // Start pessimistic: if any Full present -> Full.
+        // If any Full present -> Full.
         if self.pending.iter().any(|d| matches!(d, RenderDelta::Full)) {
             return RenderDelta::Full;
         }
         let mut have_status = false;
         let mut have_cursor = false;
         let mut line_range: Option<std::ops::Range<usize>> = None;
+        let mut scroll_old_first: Option<usize> = None;
+        let mut scroll_new_first: Option<usize> = None;
         for d in &self.pending {
             match d {
-                RenderDelta::Full => return RenderDelta::Full, // already handled
+                RenderDelta::Full => return RenderDelta::Full, // already handled above
                 RenderDelta::StatusLine => have_status = true,
                 RenderDelta::CursorOnly => have_cursor = true,
                 RenderDelta::Lines(r) => {
@@ -127,11 +138,27 @@ impl RenderScheduler {
                         },
                     });
                 }
+                RenderDelta::Scroll {
+                    old_first,
+                    new_first,
+                } => {
+                    if scroll_old_first.is_none() {
+                        scroll_old_first = Some(*old_first);
+                    }
+                    scroll_new_first = Some(*new_first); // always update latest
+                }
             }
         }
-        // Precedence: lines outrank status/cursor because text change implies repaint there.
+        // Precedence: Lines outrank all other semantic kinds.
         if let Some(r) = line_range {
             return RenderDelta::Lines(r);
+        }
+        // Next: Scroll (if any recorded and not superseded by Lines).
+        if let (Some(of), Some(nf)) = (scroll_old_first, scroll_new_first) {
+            return RenderDelta::Scroll {
+                old_first: of,
+                new_first: nf,
+            };
         }
         if have_status {
             return RenderDelta::StatusLine;
@@ -139,7 +166,7 @@ impl RenderScheduler {
         if have_cursor {
             return RenderDelta::CursorOnly;
         }
-        // Should not reach (pending non-empty). Fallback Full.
+        // Should not happen (pending non-empty) – fallback Full.
         RenderDelta::Full
     }
 }
@@ -174,6 +201,79 @@ mod tests {
         s.mark(RenderDelta::StatusLine);
         let merged = s.collapse();
         assert_eq!(merged, RenderDelta::StatusLine);
+    }
+
+    #[test]
+    fn scroll_exclusive_preserved() {
+        let mut s = RenderScheduler::new();
+        s.mark(RenderDelta::Scroll {
+            old_first: 5,
+            new_first: 7,
+        });
+        let merged = s.collapse();
+        assert_eq!(
+            merged,
+            RenderDelta::Scroll {
+                old_first: 5,
+                new_first: 7
+            }
+        );
+    }
+
+    #[test]
+    fn scroll_multiple_merge() {
+        let mut s = RenderScheduler::new();
+        s.mark(RenderDelta::Scroll {
+            old_first: 5,
+            new_first: 6,
+        });
+        s.mark(RenderDelta::Scroll {
+            old_first: 6,
+            new_first: 10,
+        });
+        s.mark(RenderDelta::Scroll {
+            old_first: 10,
+            new_first: 12,
+        });
+        let merged = s.collapse();
+        assert_eq!(
+            merged,
+            RenderDelta::Scroll {
+                old_first: 5,
+                new_first: 12
+            }
+        );
+    }
+
+    #[test]
+    fn lines_suppress_scroll() {
+        let mut s = RenderScheduler::new();
+        s.mark(RenderDelta::Scroll {
+            old_first: 3,
+            new_first: 5,
+        });
+        s.mark(RenderDelta::Lines(10..11));
+        let merged = s.collapse();
+        assert_eq!(merged, RenderDelta::Lines(10..11));
+    }
+
+    #[test]
+    fn scroll_precedence_over_status_and_cursor() {
+        let mut s = RenderScheduler::new();
+        s.mark(RenderDelta::CursorOnly);
+        s.mark(RenderDelta::StatusLine);
+        s.mark(RenderDelta::Scroll {
+            old_first: 0,
+            new_first: 1,
+        });
+        let merged = s.collapse();
+        assert_eq!(
+            merged,
+            RenderDelta::Scroll {
+                old_first: 0,
+                new_first: 1
+            }
+        );
     }
 
     #[test]
