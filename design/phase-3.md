@@ -269,6 +269,22 @@ Timing:
 - Risk Mitigation: By inserting writer before enabling partial output, any escape sequencing or buffering bugs surface while still using the simpler full repaint comparison baseline; simplifies debugging.
 - Next Steps Dependency: Steps 7–8 will reuse writer to emit only changed lines (adding `ClearLine` usage and selective `MoveTo` calls) while preserving existing frame-building code for status line composition until a dedicated partial line composer is carved out.
 
+### Step 6.1 Hotfix Details – Writer Row Alignment / Wrap Leak
+
+- Problem: Long content lines that exactly fill the terminal width (or include wide emoji clusters at the boundary) caused the terminal to perform an implicit wrap. Our writer logic assumed cursor position continuity and did not reassert the start-of-line position for the next logical row. Consequences:
+  - First visible line sometimes appeared "missing" (actually rendered but vertically shifted by a preceding wrap side-effect).
+  - Bullet list indentation could appear incorrect (lost leading spaces due to misaligned cursor start).
+  - A spill of the first character of the next logical line (or a content character) into the status line's first cell when the final text row wrapped into the reserved status row.
+- Root Cause: Sequential flat iteration over `frame.cells` avoided redundant `MoveTo` commands relying on our internal `(current_x,current_y)` tracking. Terminal implicit wrap changed the actual cursor while our logical tracker remained optimistic.
+- Fix: Emit an explicit `MoveTo(0, y)` at the start of every row (row‑major iteration) and abandon the implicit continuity optimization (micro cost << correctness gain). This guarantees re-synchronization each row and prevents wrap leakage into subsequent rows or status line.
+- Implementation Adjustments:
+  - Rewrote `render_via_writer` to iterate row-by-row (`for y in 0..frame.height`), issuing a leading `MoveTo(0,y)` and then printing each cell in that row sequentially with no reliance on inferred cursor state.
+  - Retained reverse video styling behavior unchanged.
+  - Added inline comment referencing Phase 3 / Step 6.1 for future audit.
+- Performance Consideration: Adds `height` additional `MoveTo` commands per full frame. For typical terminal heights (< 100), negligible versus per-cell Print overhead. Future partial path will drastically reduce number of printed cells making this overhead even more trivial.
+- Future Optimization (Deferred): Batch contiguous non-styled single-width glyph runs into one `Print` string to reduce queue calls. Not required for correctness; postpone until after partial rendering stabilization.
+- Testing Gap Noted: Current tests do not simulate terminal wrap mechanics. Follow-up (later Step 13 parity tests) should include constructing frames with exact-width lines to assert no status line contamination in command emission transcript.
+
 ## 16. Progress Log
 
 (Will be updated as steps complete.)
@@ -281,6 +297,7 @@ Timing:
 - [x] Step 4 – Cache last cursor line + metrics scaffold
 - [x] Step 5 – Hash compare logic tests (still full fallback)
 - [x] Step 6 – Terminal writer abstraction (prep partial)
+- [x] Step 6.1 – Writer row alignment hotfix
 - [ ] Step 7 – Activate CursorOnly partial rendering
 - [ ] Step 8 – Extend partial to Lines semantic delta
 - [ ] Step 9 – Resize invalidation (force full + clear cache)

@@ -152,35 +152,27 @@ impl RenderEngine {
     /// Temporary full-frame translation using Writer (Step 6). Keeps behavior identical
     /// to legacy Renderer::render while establishing the abstraction for later partial path.
     fn render_via_writer(&self, frame: &Frame) -> Result<()> {
-        let mut w = Writer::new();
-        w.move_to(0, 0);
-        let mut current_y = 0u16;
-        let mut current_x = 0u16;
-        for (i, cell) in frame.cells.iter().enumerate() {
-            let y = i as u16 / frame.width;
-            let x = i as u16 % frame.width;
-            if y != current_y || x != current_x {
-                w.move_to(x, y);
-                current_x = x;
-                current_y = y;
-            }
-            if cell.flags.contains(CellFlags::REVERSE) {
-                let mut s = String::from("\x1b[7m");
-                s.push(cell.ch);
-                s.push_str("\x1b[0m");
-                w.print(s);
-            } else {
-                w.print(cell.ch.to_string());
-            }
-            // Advance logical cursor
-            if current_x + 1 == frame.width {
-                current_x = 0;
-                current_y += 1;
-            } else {
-                current_x += 1;
+        // Step 6.1 hotfix: row-major iteration with explicit MoveTo at each row start
+        // eliminates reliance on terminal implicit wrap behavior (prevents content
+        // bleeding into subsequent rows or the status line). Slightly more commands
+        // (one MoveTo per row) but guarantees alignment correctness.
+        let mut writer = Writer::new();
+        for y in 0..frame.height {
+            writer.move_to(0, y);
+            let row_start = y as usize * frame.width as usize;
+            let row_end = row_start + frame.width as usize;
+            for cell in &frame.cells[row_start..row_end] {
+                if cell.flags.contains(CellFlags::REVERSE) {
+                    let mut s = String::from("\x1b[7m");
+                    s.push(cell.ch);
+                    s.push_str("\x1b[0m");
+                    writer.print(s);
+                } else {
+                    writer.print(cell.ch.to_string());
+                }
             }
         }
-        w.flush()
+        writer.flush()
     }
 }
 
