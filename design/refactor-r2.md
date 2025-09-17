@@ -65,7 +65,7 @@ Out of Scope (Deferred to Phase 3 or later):
 3. Introduce `RenderDelta::Scroll { old_first, new_first }`. Mark viewport vertical shifts with this semantic (effective render still Full in Refactor R2). Collapse precedence: Full > Lines > Scroll > StatusLine > CursorOnly. Collapse rules: multiple Scroll events coalesce (earliest old_first, latest new_first); any Lines or Full suppress Scroll; exclusive Scroll preserved. Add DELTA_SCROLL metric + tests (merge, suppression by Lines, exclusive preservation, precedence, decision effective still Full).
 4. Status segment model: add `StatusSegment` enum + `compose_status` → `format_status` two‑stage pipeline; preserve exact output (regression tests compare legacy and segmented forms 1:1).
 5. Extract file IO helpers (`open_file(path)`, `write_file(state)`) into `core-actions::io_ops`; dispatcher delegates; tests updated (added `io_ops` with `open_file`/`write_file`, dispatcher delegates, normalization & write tests).
-6. Introduce `EditorModel` wrapper (contains `EditorState`); adapt `ox-bin` usage; no behavior changes; rustdoc updates.
+6. Introduce `EditorModel` wrapper (contains `EditorState`); adapt `ox-bin` usage; no behavior changes; rustdoc updates (added crate `core-model`, thin newtype over `EditorState`, `ox-bin` migrated; no behavior change).
 7. Config re-clamp on resize: add `Config::recompute_after_resize(height)`; call in resize path; if margin changes, mark status or scroll as needed (Full for now); tests.
 8. Key normalization: remove `KeyCode::Colon`; add `normalize_keycode`; adjust input thread & translator tests; purge dual handling.
 9. Metrics grouping: `RenderDeltaMetrics` with increment + snapshot API; replace free statics; adjust tests.
@@ -115,7 +115,7 @@ Out of Scope (Deferred to Phase 3 or later):
 - [x] Step 3 – Scroll delta variant
 - [x] Step 4 – Status segment model
 - [x] Step 5 – IO helper extraction
-- [ ] Step 6 – EditorModel wrapper
+- [x] Step 6 – EditorModel wrapper
 - [ ] Step 7 – Config re-clamp on resize
 - [ ] Step 8 – Key normalization removal Colon
 - [ ] Step 9 – Metrics grouping struct

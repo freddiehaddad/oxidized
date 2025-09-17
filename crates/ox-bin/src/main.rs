@@ -9,6 +9,7 @@ use core_config::load_from;
 use core_events::{CommandEvent, EVENT_CHANNEL_CAP, Event, InputEvent, KeyEvent};
 use core_render::scheduler::{RenderDelta, RenderScheduler};
 // Frame kept for tests still referencing type
+use core_model::EditorModel;
 use core_render::render_engine::RenderEngine;
 use core_state::Mode;
 use core_state::{EditorState, normalize_line_endings};
@@ -94,19 +95,20 @@ async fn main() -> Result<()> {
             None,
         )
     };
-    let mut state = EditorState::new(buffer);
-    state.file_name = file_name;
-    if let Some(n) = norm_meta {
-        state.original_line_ending = n.original;
-        state.had_trailing_newline = n.had_trailing_newline;
-        if n.mixed {
-            tracing::warn!("mixed_line_endings_detected_startup");
+    let mut model = EditorModel::new(EditorState::new(buffer));
+    {
+        let state = model.state_mut();
+        state.file_name = file_name;
+        if let Some(n) = norm_meta {
+            state.original_line_ending = n.original;
+            state.had_trailing_newline = n.had_trailing_newline;
+            if n.mixed {
+                tracing::warn!("mixed_line_endings_detected_startup");
+            }
         }
-    }
-    state.dirty = false; // explicit for clarity (new buffer always clean at load)
-    if state.file_name.is_none() {
-        // Detect prior error case via welcome buffer content heuristic; ephemeral message for visibility.
-        if state.active_buffer().name == "welcome"
+        state.dirty = false; // new buffer always clean at load
+        if state.file_name.is_none()
+            && state.active_buffer().name == "welcome"
             && state
                 .active_buffer()
                 .line(0)
@@ -123,7 +125,7 @@ async fn main() -> Result<()> {
         config.apply_viewport_height(h.saturating_sub(1)); // text rows (exclude status)
     }
     // Store effective margin inside state (temporary field addition in Phase 2 Step 14).
-    state.config_vertical_margin = config.effective_vertical_margin as usize;
+    model.state_mut().config_vertical_margin = config.effective_vertical_margin as usize;
 
     // Phase 2 Step 16: bounded channel activation (natural backpressure via blocking_send).
     let (tx, mut rx) = mpsc::channel::<Event>(EVENT_CHANNEL_CAP);
@@ -138,7 +140,7 @@ async fn main() -> Result<()> {
     let mut render_engine = RenderEngine::new();
 
     // Initial render so the user sees content before pressing a key.
-    if let Err(e) = render(&mut render_engine, &state) {
+    if let Err(e) = render(&mut render_engine, model.state()) {
         error!(?e, "initial render error");
     }
 
@@ -156,24 +158,20 @@ async fn main() -> Result<()> {
             }
             Event::Input(InputEvent::Key(k)) => {
                 // Single unified path: every key translated (breadth-first simplicity)
-                if let Some(act) =
-                    translate_key_wrapper(state.mode, state.command_line.buffer(), &k)
-                {
-                    let before_line = state.position.line; // capture before dispatch for heuristic
-                    let dr = dispatch(act, &mut state, &mut sticky_visual_col, &observers);
+                let snapshot_mode = model.state().mode; // minimize immutable borrows
+                let cmd_buf = model.state().command_line.buffer().to_string();
+                if let Some(act) = translate_key_wrapper(snapshot_mode, &cmd_buf, &k) {
+                    let before_line = model.state().position.line;
+                    let dr = dispatch(act, model.state_mut(), &mut sticky_visual_col, &observers);
                     if dr.dirty {
                         // Heuristic mapping (Phase 2 Step 17): if line changed -> Lines(range of that line),
                         // if only cursor moved within same line -> CursorOnly, else fallback Full.
-                        let after_line = state.position.line;
-                        if before_line != after_line {
+                        let after_line = model.state().position.line;
+                        let insert_mode = matches!(model.state().mode, Mode::Insert);
+                        if before_line != after_line || insert_mode {
                             scheduler.mark(RenderDelta::Lines(after_line..after_line + 1));
                         } else {
-                            // Cursor move or intra-line edit; we cannot cheaply know if text mutated -> use Lines for safety if in Insert, else CursorOnly.
-                            if matches!(state.mode, Mode::Insert) {
-                                scheduler.mark(RenderDelta::Lines(after_line..after_line + 1));
-                            } else {
-                                scheduler.mark(RenderDelta::CursorOnly);
-                            }
+                            scheduler.mark(RenderDelta::CursorOnly);
                         }
                     }
                     if dr.quit {
@@ -191,15 +189,15 @@ async fn main() -> Result<()> {
             }
         }
         // Expire ephemeral status if needed (breadth-first synchronous check)
-        if state.tick_ephemeral() {
+        if model.state_mut().tick_ephemeral() {
             scheduler.mark(RenderDelta::StatusLine);
         }
         // Auto-scroll (Phase 2 Step 8): keep cursor visible.
         if let Ok((_, h)) = crossterm::terminal::size() {
             let text_height = if h > 0 { (h - 1) as usize } else { 0 };
-            let before_first = state.viewport_first_line;
-            if state.auto_scroll(text_height) {
-                let after_first = state.viewport_first_line;
+            let before_first = model.state().viewport_first_line;
+            if model.state_mut().auto_scroll(text_height) {
+                let after_first = model.state().viewport_first_line;
                 // Refactor R2 Step 3: mark semantic scroll (effective still full render later).
                 scheduler.mark(RenderDelta::Scroll {
                     old_first: before_first,
@@ -211,7 +209,7 @@ async fn main() -> Result<()> {
         if let Some(decision) = scheduler.consume() {
             // TODO(Phase 3): Switch on decision.semantic to attempt partial paints.
             // match decision.semantic { ... } retaining Full fallback.
-            if let Err(e) = render(&mut render_engine, &state) {
+            if let Err(e) = render(&mut render_engine, model.state()) {
                 error!(?e, "render error");
             }
             // NOTE: decision.effective is ignored (Phase 2 always Full) but kept for future flexibility.

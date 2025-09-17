@@ -220,6 +220,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "core-model"
+version = "0.1.0"
+dependencies = [
+ "core-actions",
+ "core-state",
+]
+
+[[package]]
 name = "core-render"
 version = "0.1.0"
 dependencies = [
@@ -589,6 +597,7 @@ dependencies = [
  "core-config",
  "core-events",
  "core-input",
+ "core-model",
  "core-render",
  "core-state",
  "core-terminal",

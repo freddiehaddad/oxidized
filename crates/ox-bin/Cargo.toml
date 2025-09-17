@@ -21,3 +21,4 @@ core-state = { path = "../core-state" }
 core-input = { path = "../core-input" }
 core-config = { path = "../core-config" }
 core-actions = { path = "../core-actions" }
+core-model = { path = "../core-model" }
