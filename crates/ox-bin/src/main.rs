@@ -261,6 +261,11 @@ fn render(
         core_render::scheduler::RenderDelta::CursorOnly => {
             engine.render_cursor_only(state, view, w, h)
         }
+        core_render::scheduler::RenderDelta::Lines(_) => {
+            // Current architecture: DirtyLinesTracker lives in scheduler or event loop scope; for MVP call full until plumbed.
+            // Placeholder: invoke full render; follow-up Step 8 test harness will directly call engine.render_lines_partial.
+            engine.render_full(state, view, w, h)
+        }
         _ => engine.render_full(state, view, w, h),
     };
     let elapsed = start.elapsed();

@@ -163,8 +163,10 @@ impl RenderScheduler {
         self.metrics.incr_frame();
         // Phase 3 Step 7: allow CursorOnly semantic to execute as a partial effective path.
         let effective = match &merged {
+            // Phase 3 Step 7: CursorOnly partial; Phase 3 Step 8: Lines partial path
             RenderDelta::CursorOnly => RenderDelta::CursorOnly,
-            _ => RenderDelta::Full, // All other kinds still force full repaint (Step 8+ will expand)
+            RenderDelta::Lines(r) => RenderDelta::Lines(r.clone()),
+            _ => RenderDelta::Full,
         };
         Some(RenderDecision {
             semantic: merged.clone(),

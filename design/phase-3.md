@@ -316,6 +316,81 @@ Timing:
 - Deferred (Step 8): hash-driven arbitrary line repaints & candidate escalation.
 - Failure Handling: Bubble errors; future improvement may auto-escalate to full.
 
+### Step 8 Details – Extend Partial Rendering to `Lines` Semantic Delta
+
+- Goal: When text edits affect one or more lines (but not a scroll / resize), repaint only
+  the subset of viewport lines whose content actually changed plus the old & new cursor
+  lines (always) while leaving untouched lines and the status line intact. This generalizes
+  the cursor-only path into a line-diff driven partial path.
+- Trigger Conditions:
+  - `RenderDecision.semantic == Lines` (content mutation localized) AND scheduler decides
+    `effective == Lines` (may still force Full if cold / large candidate set or cache invalid).
+  - Viewport start, width stable (scroll / resize produce Full).
+  - Partial cache warm (viewport_start & width match; otherwise escalate to Full and rebuild).
+- Scheduler Update (Step 8 code work): allow `effective = Lines` when semantic merged value
+  is Lines; prior steps forced Full for anything except CursorOnly.
+- Candidate Collection Algorithm:
+  1. Take dirty indices from `DirtyLinesTracker::take()` after event loop dispatch pass.
+  2. Intersect with `[viewport_first_line, viewport_first_line + visible_rows)`.
+  3. Insert `cache.last_cursor_line` (if still within viewport and different from current).
+  4. Insert current cursor line.
+  5. Deduplicate & sort (SmallVec -> Vec fallback if > inline capacity).
+  6. If candidate count >= `LINES_ESCALATION_THRESHOLD_PCT * visible_rows` → escalate to Full
+     (metric: `escalated_large_set`) and short-circuit.
+- Hash / Change Classification:
+  - For each candidate line, recompute `(len, hash)` as in Step 5 logic but only for those
+    indices (avoid scanning full viewport). Compare with cached entry; repaint if (a) entry
+    missing, (b) pair differs, or (c) line is old/new cursor line (overlay correctness).
+  - Update cache entry on repaint; leave unchanged entries untouched to preserve warm path.
+- Writer Emission Sequence per repainted line:
+  - `MoveTo(0, row)` (row = line_index - viewport_first_line)
+  - `ClearLine`
+  - Print grapheme sequence, respecting column clipping at terminal width, computing display
+    width (Unicode correctness) identical to full path. Avoid trailing newline print (editor
+    renders logical lines only).
+- Cursor Overlay Application:
+  - After all line repaints, re-run overlay on current cursor line (similar to cursor-only path).
+  - Guarantee old cursor line was repainted if different; otherwise overlay removal would be stale.
+- Metrics (incremental extensions):
+  - Increment `partial_frames` and `lines_partial_frames` (new counter) distinct from
+    `cursor_only_frames`.
+  - Track `dirty_lines_marked` (sum of raw marks pre-intersection) – already collected earlier.
+  - Track `dirty_lines_candidates` (post intersection + cursor additions) for this frame.
+  - Track `dirty_lines_repainted` (actual lines emitted via writer) for this frame.
+  - Record `last_partial_render_ns` duration; optionally introduce moving average later.
+- Escalation Causes Enumerated:
+  1. Cold cache (viewport moved, width changed, or empty) → Full (metric unaffected except full_frames).
+  2. Large candidate percentage (>= threshold) → Full + `escalated_large_set`.
+  3. Explicit semantic `Full` or `Scroll` already handled prior (unchanged from earlier steps).
+- Safety / Correctness Invariants:
+  - Every repaint line either differs in content OR is necessary for cursor overlay cleanup.
+  - No line outside candidate set is touched, preventing flicker.
+  - Cache coherence: every repainted line has its hash entry updated before method return.
+  - After escalation, cache is fully rebuilt by full path ensuring future warm classifications.
+- Performance Considerations:
+  - Bounds number of hash computations to candidate set size (vs whole viewport in Step 5).
+  - SmallVec capacity tuned (e.g., 8) to cover common small edit bursts; heap allocate only on larger sets.
+  - Threshold initially 60%; documented constant `LINES_ESCALATION_THRESHOLD_PCT: f32 = 0.6`.
+  - Future optimization (Phase 4): prefix/suffix diff to trim printing trailing unchanged segments.
+- Testing Strategy (added in Step 8 commit):
+  - Single line edit → exactly that line + cursor line repainted (if same line, count = 1).
+  - Multi-line contiguous edits below threshold → only those lines repainted.
+  - Candidate count just below threshold does partial; just above triggers escalation (assert metrics).
+  - Viewport boundary edits (first & last visible line) still partial; off-viewport edits produce no repaint until scrolled.
+  - Old cursor line inclusion verified when moving during multi-line edit sequences.
+- Deferred / Out-of-Scope Here:
+  - Horizontal scroll / gutter painting (kept simple column 0 origin).
+  - Batch grouping of adjacent repainted lines (each repainted independently for MVP readability).
+  - Region-based dirty compression (line indices only, no ranges) — potential later improvement.
+- Failure Handling:
+  - On writer error mid-frame, propagate; higher layer may choose to force a Full next cycle.
+  - On unexpected cache mismatch (should not occur), escalate to Full + log warning (defensive path).
+
+Rationale: Step 8 converts semantic Lines into an actual selective physical repaint to capture
+the majority of typical editing workloads (insertion, deletion within a small vicinity) while
+preserving a simple fallback strategy. It leverages prior hashing groundwork and cursor-only
+path confidence, advancing breadth-first goals without premature micro-optimizations.
+
 ## 16. Progress Log
 
 (Will be updated as steps complete.)
@@ -330,7 +405,7 @@ Timing:
 - [x] Step 6 – Terminal writer abstraction (prep partial)
 - [x] Step 6.1 – Writer row alignment hotfix
 - [x] Step 7 – Activate CursorOnly partial rendering
-- [ ] Step 8 – Extend partial to Lines semantic delta
+- [x] Step 8 – Extend partial to Lines semantic delta
 - [ ] Step 9 – Resize invalidation (force full + clear cache)
 - [ ] Step 10 – Large candidate escalation heuristic
 - [ ] Step 11 – Undo snapshot dedupe + metric

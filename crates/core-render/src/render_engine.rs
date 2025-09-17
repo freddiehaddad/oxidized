@@ -203,6 +203,174 @@ impl RenderEngine {
         Ok(())
     }
 
+    /// Phase 3 Step 8: lines partial repaint. Repaints only changed lines (hash diff) plus
+    /// old & new cursor lines (always) unless escalation threshold exceeded (handled by scheduler decision upstream).
+    pub fn render_lines_partial(
+        &mut self,
+        state: &EditorState,
+        view: &View,
+        w: u16,
+        h: u16,
+        dirty_tracker: &mut crate::dirty::DirtyLinesTracker,
+    ) -> Result<()> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let start_time = std::time::Instant::now();
+        if h == 0 {
+            return Ok(());
+        }
+        let text_height = h - 1; // reserve status line
+        let viewport_first = view.viewport_first_line;
+        let visible_rows = text_height as usize;
+        let viewport_last_excl = viewport_first + visible_rows;
+
+        // If cache cold (viewport changed or width mismatch) fallback via full render (caller should have escalated).
+        if self.cache.viewport_start != viewport_first || self.cache.width != w {
+            // Defensive: escalate by calling full render.
+            return self.render_full(state, view, w, h);
+        }
+
+        let mut writer = Writer::new();
+        let buf = state.active_buffer();
+        // Collect dirty lines inside viewport.
+        let mut candidates = dirty_tracker.take_in_viewport(viewport_first, visible_rows);
+        // Always include old cursor line (if different & visible) and current cursor line.
+        if let Some(old) = self.cache.last_cursor_line
+            && old >= viewport_first
+            && old < viewport_last_excl
+        {
+            candidates.push(old);
+        }
+        let curr_cursor = view.cursor.line;
+        if curr_cursor >= viewport_first && curr_cursor < viewport_last_excl {
+            candidates.push(curr_cursor);
+        }
+        if candidates.is_empty() {
+            return Ok(());
+        }
+        candidates.sort_unstable();
+        candidates.dedup();
+
+        // Escalation threshold (documented constant). 60% of visible rows.
+        const LINES_ESCALATION_THRESHOLD_PCT: f32 = 0.60;
+        if candidates.len() as f32 >= (visible_rows as f32 * LINES_ESCALATION_THRESHOLD_PCT) {
+            // Escalate defensively.
+            self.metrics.escalated_large_set.fetch_add(1, Relaxed);
+            return self.render_full(state, view, w, h);
+        }
+
+        // Update metrics for candidate set (dirty_lines_marked already counted earlier by diff classifier in full frames; here we just record candidates & repaints).
+        self.metrics.partial_frames.fetch_add(1, Relaxed);
+        self.metrics.lines_frames.fetch_add(1, Relaxed);
+        self.metrics
+            .dirty_candidate_lines
+            .fetch_add(candidates.len() as u64, Relaxed);
+
+        // Paint each candidate line if content differs or it is a cursor line (always repaint).
+        let mut repainted = 0u64;
+        for line_idx in candidates.iter().copied() {
+            if line_idx < viewport_first || line_idx >= viewport_last_excl {
+                continue;
+            }
+            let rel_y = (line_idx - viewport_first) as u16;
+            // Compute hash for this line to compare with cache entry.
+            let mut changed = true; // default repaint for safety
+            if let Some(raw_line) = buf.line(line_idx) {
+                let content_trim: &str = if raw_line.ends_with(['\n', '\r']) {
+                    &raw_line[..raw_line.len() - 1]
+                } else {
+                    raw_line.as_str()
+                };
+                let vh = crate::partial_cache::PartialCache::compute_hash(content_trim);
+                if let Some(entry) = self.cache.line_hashes.get(line_idx - viewport_first)
+                    && entry.hash == vh.hash
+                    && entry.len == vh.len
+                {
+                    changed = false;
+                }
+                // Always repaint if line is cursor line(s)
+                if line_idx == curr_cursor || Some(line_idx) == self.cache.last_cursor_line {
+                    changed = true;
+                }
+                if changed {
+                    writer.move_to(0, rel_y);
+                    writer.clear_line(0, rel_y);
+                    // Re-render graphemes.
+                    let mut byte = 0;
+                    let mut vis_col = 0u16;
+                    while byte < content_trim.len() && vis_col < w {
+                        let next = grapheme::next_boundary(content_trim, byte);
+                        let cluster = &content_trim[byte..next];
+                        let width = grapheme::cluster_width(cluster) as u16;
+                        let mut chars = cluster.chars();
+                        if let Some(first) = chars.next() {
+                            writer.print(first.to_string());
+                        }
+                        if width > 1 {
+                            for _ in 1..width {
+                                if vis_col + 1 >= w {
+                                    break;
+                                }
+                                writer.print(" ");
+                                vis_col += 1;
+                            }
+                        }
+                        vis_col = vis_col.saturating_add(width.max(1));
+                        byte = next;
+                    }
+                    // Update cache entry (allocate if needed)
+                    if line_idx - viewport_first < self.cache.line_hashes.len()
+                        && let Some(raw) = self.cache.line_hashes.get_mut(line_idx - viewport_first)
+                    {
+                        raw.hash = vh.hash;
+                        raw.len = vh.len;
+                    }
+                    repainted += 1;
+                }
+            }
+        }
+
+        // Cursor overlay on current cursor line.
+        if curr_cursor >= viewport_first && curr_cursor < viewport_last_excl {
+            let line_content = buf.line(curr_cursor).unwrap_or_default();
+            let content_trim: &str = if line_content.ends_with(['\n', '\r']) {
+                &line_content[..line_content.len() - 1]
+            } else {
+                line_content.as_str()
+            };
+            let vis_col = grapheme::visual_col(content_trim, view.cursor.byte) as u16;
+            if vis_col < w {
+                let next_byte = grapheme::next_boundary(content_trim, view.cursor.byte);
+                let cluster = &content_trim[view.cursor.byte..next_byte];
+                let width = grapheme::cluster_width(cluster).max(1) as u16;
+                writer.move_to(vis_col, (curr_cursor - viewport_first) as u16);
+                let mut chars = cluster.chars();
+                if let Some(first) = chars.next() {
+                    let mut s = String::from("\x1b[7m");
+                    s.push(first);
+                    s.push_str("\x1b[0m");
+                    writer.print(s);
+                } else {
+                    writer.print("\x1b[7m \x1b[0m".to_string());
+                }
+                for dx in 1..width {
+                    if vis_col + dx >= w {
+                        break;
+                    }
+                    writer.move_to(vis_col + dx, (curr_cursor - viewport_first) as u16);
+                    writer.print("\x1b[7m \x1b[0m");
+                }
+            }
+        }
+        writer.flush()?;
+        self.metrics
+            .dirty_lines_repainted
+            .fetch_add(repainted, Relaxed);
+        let dur = start_time.elapsed().as_nanos() as u64;
+        self.metrics.last_partial_render_ns.store(dur, Relaxed);
+        self.cache.last_cursor_line = Some(curr_cursor);
+        Ok(())
+    }
+
     /// Access a snapshot of current metrics (for tests and future status integration).
     pub fn metrics_snapshot(&self) -> RenderPathMetricsSnapshot {
         self.metrics.snapshot()
