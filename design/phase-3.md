@@ -227,27 +227,13 @@ Timing:
 
 ### Step 5 Details
 
-- Added `core-render::partial_diff` module with `classify_viewport_changes` performing
-    per-viewport line hash comparison against `PartialCache`.
-- Cold criteria: (a) cache empty, (b) viewport start changed, or (c) width changed.
-    Cold path resets cache and classifies all visible text rows as changed. Visible rows
-    = `height - 1` to reserve a status line; includes trailing empty line when the
-    buffer ends with a newline (ropey exposes it as a line) — test documents this.
-- Warm path recomputes `(len, hash)` after trimming trailing newline/CR and only
-    updates entries + records lines whose pair changed. Height-only viewport changes
-    that produce a cache length mismatch also trigger a conservative cold reset
-    (breadth-first correctness > premature complexity).
-- Metrics: increments `dirty_lines_marked` & `dirty_candidate_lines` by viewport
-    line count (candidate filtering deferred) and `dirty_lines_repainted` by number
-    of changed lines (all on cold start, possibly zero on warm unchanged frame).
-- Integration: invoked at start of `RenderEngine::render_full` (still full frame
-    emission) so hashing path is battle-tested before partial output activation
-    in Steps 7–8. No behavioral terminal change yet → flicker-free baseline intact.
-- Tests: cold population, unchanged warm frame, single-line edit (cluster insert),
-    newline insertion shifting lines. Adjusted initial test to account for trailing
-    empty line semantics; added explanatory comment to prevent future regressions.
-- Aligns doc terminology with code (`dirty_candidate_lines` instead of earlier
-    draft `dirty_lines_candidates`). Single source of truth principle upheld.
+- Added `core-render::partial_diff` module with `classify_viewport_changes` performing per-viewport line hash comparison against `PartialCache`.
+- Cold criteria: (a) cache empty, (b) viewport start changed, or (c) width changed.  Cold path resets cache and classifies all visible text rows as changed. Visible rows = `height - 1` to reserve a status line; includes trailing empty line when the buffer ends with a newline (ropey exposes it as a line) — test documents this.
+- Warm path recomputes `(len, hash)` after trimming trailing newline/CR and only updates entries + records lines whose pair changed. Height-only viewport changes that produce a cache length mismatch also trigger a conservative cold reset (breadth-first correctness > premature complexity).
+- Metrics: increments `dirty_lines_marked` & `dirty_candidate_lines` by viewport line count (candidate filtering deferred) and `dirty_lines_repainted` by number of changed lines (all on cold start, possibly zero on warm unchanged frame).
+- Integration: invoked at start of `RenderEngine::render_full` (still full frame emission) so hashing path is battle-tested before partial output activation in Steps 7–8. No behavioral terminal change yet → flicker-free baseline intact.
+- Tests: cold population, unchanged warm frame, single-line edit (cluster insert), newline insertion shifting lines. Adjusted initial test to account for trailing empty line semantics; added explanatory comment to prevent future regressions.
+- Aligns doc terminology with code (`dirty_candidate_lines` instead of earlier draft `dirty_lines_candidates`). Single source of truth principle upheld.
 
 ---
 (Each completed step updates this document; commit subjects follow template and reference Phase 3 step numbers.)
@@ -318,36 +304,26 @@ Timing:
 
 ### Step 8 Details – Extend Partial Rendering to `Lines` Semantic Delta
 
-- Goal: When text edits affect one or more lines (but not a scroll / resize), repaint only
-  the subset of viewport lines whose content actually changed plus the old & new cursor
-  lines (always) while leaving untouched lines and the status line intact. This generalizes
-  the cursor-only path into a line-diff driven partial path.
+- Goal: When text edits affect one or more lines (but not a scroll / resize), repaint only the subset of viewport lines whose content actually changed plus the old & new cursor lines (always) while leaving untouched lines and the status line intact. This generalizes the cursor-only path into a line-diff driven partial path.
 - Trigger Conditions:
-  - `RenderDecision.semantic == Lines` (content mutation localized) AND scheduler decides
-    `effective == Lines` (may still force Full if cold / large candidate set or cache invalid).
+  - `RenderDecision.semantic == Lines` (content mutation localized) AND scheduler decides `effective == Lines` (may still force Full if cold / large candidate set or cache invalid).
   - Viewport start, width stable (scroll / resize produce Full).
   - Partial cache warm (viewport_start & width match; otherwise escalate to Full and rebuild).
-- Scheduler Update (Step 8 code work): allow `effective = Lines` when semantic merged value
-  is Lines; prior steps forced Full for anything except CursorOnly.
+- Scheduler Update (Step 8 code work): allow `effective = Lines` when semantic merged value is Lines; prior steps forced Full for anything except CursorOnly.
 - Candidate Collection Algorithm:
   1. Take dirty indices from `DirtyLinesTracker::take()` after event loop dispatch pass.
   2. Intersect with `[viewport_first_line, viewport_first_line + visible_rows)`.
   3. Insert `cache.last_cursor_line` (if still within viewport and different from current).
   4. Insert current cursor line.
   5. Deduplicate & sort (SmallVec -> Vec fallback if > inline capacity).
-  6. If candidate count >= `LINES_ESCALATION_THRESHOLD_PCT * visible_rows` → escalate to Full
-     (metric: `escalated_large_set`) and short-circuit.
+  6. If candidate count >= `LINES_ESCALATION_THRESHOLD_PCT * visible_rows` → escalate to Full (metric: `escalated_large_set`) and short-circuit.
 - Hash / Change Classification:
-  - For each candidate line, recompute `(len, hash)` as in Step 5 logic but only for those
-    indices (avoid scanning full viewport). Compare with cached entry; repaint if (a) entry
-    missing, (b) pair differs, or (c) line is old/new cursor line (overlay correctness).
+  - For each candidate line, recompute `(len, hash)` as in Step 5 logic but only for those indices (avoid scanning full viewport). Compare with cached entry; repaint if (a) entry missing, (b) pair differs, or (c) line is old/new cursor line (overlay correctness).
   - Update cache entry on repaint; leave unchanged entries untouched to preserve warm path.
 - Writer Emission Sequence per repainted line:
   - `MoveTo(0, row)` (row = line_index - viewport_first_line)
   - `ClearLine`
-  - Print grapheme sequence, respecting column clipping at terminal width, computing display
-    width (Unicode correctness) identical to full path. Avoid trailing newline print (editor
-    renders logical lines only).
+  - Print grapheme sequence, respecting column clipping at terminal width, computing display width (Unicode correctness) identical to full path. Avoid trailing newline print (editor renders logical lines only).
 - Cursor Overlay Application:
   - After all line repaints, re-run overlay on current cursor line (similar to cursor-only path).
   - Guarantee old cursor line was repainted if different; otherwise overlay removal would be stale.
@@ -386,10 +362,31 @@ Timing:
   - On writer error mid-frame, propagate; higher layer may choose to force a Full next cycle.
   - On unexpected cache mismatch (should not occur), escalate to Full + log warning (defensive path).
 
-Rationale: Step 8 converts semantic Lines into an actual selective physical repaint to capture
-the majority of typical editing workloads (insertion, deletion within a small vicinity) while
-preserving a simple fallback strategy. It leverages prior hashing groundwork and cursor-only
-path confidence, advancing breadth-first goals without premature micro-optimizations.
+Rationale: Step 8 converts semantic Lines into an actual selective physical repaint to capture the majority of typical editing workloads (insertion, deletion within a small vicinity) while preserving a simple fallback strategy. It leverages prior hashing groundwork and cursor-only path confidence, advancing breadth-first goals without premature micro-optimizations.
+
+### Step 8.1 Hotfix – Horizontal Motions Not Updating Status Line
+
+Observed Issue:
+Horizontal cursor motions (e.g. `h` / `l`) left the status line column value stale; it only updated after a vertical motion or edit. This created the perception of random column jumps and hid potential Unicode width issues.
+
+Root Cause:
+The initial CursorOnly partial render path intentionally repainted only the old and new cursor lines, skipping the status line to minimize output. The status line, however, encodes cursor position (line/column) and must refresh on every cursor movement. Horizontal motions scheduled a CursorOnly delta, which never touched the status line, leaving stale column text.
+
+Chosen Fix:
+Modify `render_cursor_only` to always rebuild and repaint the status line (single bottom row) in addition to the necessary text lines. This confines the change to the render layer without altering scheduler semantics mid-phase.
+
+Why This Approach:
+Low risk (one extra line write per cursor-only frame), preserves existing semantics, and avoids introducing a new semantic delta variant mid-Phase. Future refinement may add a dedicated `StatusLine` semantic for finer granularity.
+
+Metrics Impact:
+Slight increase in bytes written for frequent cursor motions; negligible relative to correctness gain. Existing partial frame counters (`cursor_only_frames`) continue to reflect actual frames.
+
+Tests Added:
+
+- New test ensuring repeated horizontal motions trigger cursor-only frames (implicitly exercising status repaint path).
+
+Future Follow-Up (Deferred):
+Introduce a `RenderDelta::StatusLine` to allow coalescing with other deltas and optionally skip repaint if purely cosmetic fields unchanged.
 
 ## 16. Progress Log
 
@@ -406,6 +403,7 @@ path confidence, advancing breadth-first goals without premature micro-optimizat
 - [x] Step 6.1 – Writer row alignment hotfix
 - [x] Step 7 – Activate CursorOnly partial rendering
 - [x] Step 8 – Extend partial to Lines semantic delta
+- [x] Step 8.1 – Hotfix: horizontal motions repaint status line
 - [ ] Step 9 – Resize invalidation (force full + clear cache)
 - [ ] Step 10 – Large candidate escalation heuristic
 - [ ] Step 11 – Undo snapshot dedupe + metric

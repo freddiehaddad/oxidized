@@ -191,6 +191,22 @@ impl RenderEngine {
             }
         }
 
+        // Step 8.1 Hotfix: also repaint status line (cursor column displayed there changes on any motion).
+        use crate::status::{StatusContext, build_status};
+        let status_y = h - 1;
+        let ctx = StatusContext {
+            mode: state.mode,
+            line: view.cursor.line,
+            col: view.cursor.byte, // TODO(Phase4): use visual column cache.
+            command_active: state.command_line.is_active(),
+            command_buffer: state.command_line.buffer(),
+            file_name: state.file_name.as_deref(),
+            dirty: state.dirty,
+        };
+        let status = build_status(&ctx);
+        writer.move_to(0, status_y);
+        writer.clear_line(0, status_y);
+        writer.print(status);
         writer.flush()?;
         // Update metrics
         let dur = start_time.elapsed().as_nanos() as u64;
