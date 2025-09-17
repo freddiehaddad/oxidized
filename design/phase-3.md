@@ -388,6 +388,39 @@ Tests Added:
 Future Follow-Up (Deferred):
 Introduce a `RenderDelta::StatusLine` to allow coalescing with other deltas and optionally skip repaint if purely cosmetic fields unchanged.
 
+### Step 8.2 Hotfix – Unicode Status Column Correctness
+
+Observed Issue:
+After Step 8.1 began repainting the status line on every horizontal cursor motion, a latent Unicode column bug surfaced: moving the cursor one grapheme to the right over a leading multi-byte emoji (e.g. `😀`) caused the status column to jump from `Col 1` to `Col 7` (example value) rather than reflecting the emoji's true display width (2). The cursor-only partial path passed a raw byte index (`view.cursor.byte`) to the status builder instead of the visual (grapheme / display cell) column used in the full frame path.
+
+Root Cause:
+Full renders compute `col` via `grapheme::visual_col(trimmed_line, cursor_byte)`. The cursor-only partial repaint path (added in Step 7, amended in Step 8.1 to repaint status) reused the raw byte offset. Multi-codepoint grapheme clusters and wide characters (emoji, CJK, combining sequences, ZWJ sequences) have byte lengths that exceed their display cell width, producing inflated reported columns.
+
+Chosen Fix:
+Replace the raw byte index with the same grapheme-aware visual column computation inside `render_cursor_only` when constructing the `StatusContext`. This maintains a single source of truth for column width logic (currently the `visual_col` helper) without introducing premature caching complexity.
+
+Why This Approach:
+Surgical change (one code site) restores invariant: status column always reflects visual cell position independent of partial/full path. Keeps breadth-first momentum; defers optimization (e.g., incremental visual column tracking or per-line width prefix sums) until a later performance phase.
+
+Tests Added:
+
+- `unicode_status_col.rs`: validates that after a cursor-only partial render over a leading emoji, the status line shows the correct 1-based column (`Col 3` for a width-2 emoji followed by a space).
+
+Performance Considerations:
+`visual_col` performs a forward grapheme iteration over the (trimmed) line each time. For typical short lines and given this runs only on cursor-only frames, overhead is negligible at current scale. Future optimization ticket (deferred) will add incremental visual column updates or caching keyed by (buffer revision, line id).
+
+Follow-Up (Deferred):
+
+- Broaden test matrix to include combining marks, zero-width joiner sequences, wide CJK characters, and (if/when implemented) tab expansion interactions with preceding wide clusters.
+- Optional `compute_visual_col` abstraction that can later dispatch to a cached fast path.
+
+Risk Assessment:
+
+- Low: Purely affects a diagnostic value (status text) and shares existing, tested utility logic. No change to rendering of buffer content or cursor overlay.
+
+Result:
+Status line column now matches full render behavior for Unicode grapheme clusters in both full and cursor-only partial paths.
+
 ## 16. Progress Log
 
 (Will be updated as steps complete.)
@@ -404,6 +437,7 @@ Introduce a `RenderDelta::StatusLine` to allow coalescing with other deltas and 
 - [x] Step 7 – Activate CursorOnly partial rendering
 - [x] Step 8 – Extend partial to Lines semantic delta
 - [x] Step 8.1 – Hotfix: horizontal motions repaint status line
+- [x] Step 8.2 – Hotfix: Unicode status column correctness (visual vs byte)
 - [ ] Step 9 – Resize invalidation (force full + clear cache)
 - [ ] Step 10 – Large candidate escalation heuristic
 - [ ] Step 11 – Undo snapshot dedupe + metric

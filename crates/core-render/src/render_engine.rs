@@ -197,7 +197,18 @@ impl RenderEngine {
         let ctx = StatusContext {
             mode: state.mode,
             line: view.cursor.line,
-            col: view.cursor.byte, // TODO(Phase4): use visual column cache.
+            // Phase 3 Step 8.2: use grapheme-aware visual column instead of raw byte index
+            // to ensure Unicode correctness for wide/combining/ZWJ clusters. Future optimization
+            // may cache this per line; for now a direct computation preserves breadth-first goals.
+            col: {
+                let line_content = buf.line(view.cursor.line).unwrap_or_default();
+                let content_trim: &str = if line_content.ends_with(['\n', '\r']) {
+                    &line_content[..line_content.len() - 1]
+                } else {
+                    line_content.as_str()
+                };
+                grapheme::visual_col(content_trim, view.cursor.byte)
+            },
             command_active: state.command_line.is_active(),
             command_buffer: state.command_line.buffer(),
             file_name: state.file_name.as_deref(),
