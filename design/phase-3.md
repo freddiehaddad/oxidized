@@ -204,6 +204,17 @@ Timing:
 - Aggressive simplicity: Scroll & resize full fallbacks keep correctness obvious while gathering telemetry for optimization ROI.
 - Metrics-first approach ensures data-driven refinement in later phases (Phase 4+).
 
+### Step 3.2 Migration Details (moved from Progress Log)
+
+- Result: Cursor and viewport ownership fully transferred from `EditorState` to `core-model::View`; `EditorState` no longer contains `position` or `viewport_first_line` and has no `auto_scroll` logic.
+- Highlights:
+  - Added `View::auto_scroll` with vertical margin handling; ported & re-homed auto-scroll tests into `core-model` (now validate margins, boundaries, small viewport clamp).
+  - Dispatcher, render engine, and binary event loop updated to operate on `(&EditorState, &View)` with external cursor threading for undo/redo and coalescing APIs.
+  - All core-state tests refactored to use local `Position` variables; snapshot/insert coalescing calls updated (`push_snapshot(kind, cursor)`, `begin_insert_coalescing(cursor)`, `undo(&mut cursor)`, etc.).
+  - Removed legacy auto-scroll + viewport tests from `core-state` (they now live where the logic resides).
+  - Verified via `cargo test` across all crates (green) and formatting checks; no lingering references to deprecated fields.
+- Rationale: Enforces architectural separation (model/view own presentation-related cursor+viewport state) preparing for multi-view expansion and enabling per-view scrolling semantics in later steps.
+
 ---
 (Each completed step updates this document; commit subjects follow template and reference Phase 3 step numbers.)
 
@@ -214,9 +225,8 @@ Timing:
 - [x] Step 1 – DirtyLinesTracker integration (dispatcher markings)
 - [x] Step 2 – Line hash structs + PartialCache skeleton (ahash dep)
 - [x] Step 3.1 – Add View struct & single-view storage
-- [ ] Step 3.2 – Migrate cursor from state to View
-- [ ] Step 3.3 – Migrate viewport_first_line + auto_scroll refactor
-- [ ] Step 3.4 – Cleanup & docs finalize migration
+- [x] Step 3.2 – Migrate cursor & viewport_first_line into View + auto_scroll refactor (merged former 3.2/3.3)
+- [ ] Step 3.3 – Cleanup & docs finalize migration (was 3.4)
 - [ ] Step 4 – Cache last cursor line + metrics scaffold
 - [ ] Step 5 – Hash compare logic tests (still full fallback)
 - [ ] Step 6 – Terminal writer abstraction (prep partial)

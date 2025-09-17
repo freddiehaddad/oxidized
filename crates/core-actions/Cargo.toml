@@ -6,11 +6,12 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+tracing.workspace = true
 core-events = { path = "../core-events" }
 core-state = { path = "../core-state" }
 core-text = { path = "../core-text" }
-tracing = "0.1"
+core-model = { path = "../core-model" }
 
 [dev-dependencies]
-anyhow = "1.0.99"
+anyhow.workspace = true
 tempfile = "3.22.0"

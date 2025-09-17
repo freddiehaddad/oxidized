@@ -7,5 +7,4 @@ rust-version.workspace = true
 
 [dependencies]
 core-state = { path = "../core-state" }
-core-actions = { path = "../core-actions" }
 core-text = { path = "../core-text" }

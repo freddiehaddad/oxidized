@@ -1,4 +1,4 @@
-//! Editor state: buffer collection, mode, and caret position.
+//! Editor state: buffer collection, mode, and core editor metadata.
 //!
 //! Insert Coalescing (Phase 1):
 //! - A contiguous run of Insert-mode text entry (grapheme inserts and backspaces) is captured
@@ -57,46 +57,19 @@ pub enum Mode {
 
 /// Top-level editor state container (single-buffer in Phase 0).
 pub struct EditorState {
-    /// All loaded buffers (Phase 0: exactly one).
     pub buffers: Vec<Buffer>,
-    /// Index into `buffers` of the active buffer.
     pub active: usize,
-    /// First buffer line currently at top of viewport (Phase 2 Step 7).
-    /// Initially 0; scrolling logic (future steps) will mutate this.
-    pub viewport_first_line: usize,
-    /// Last known text viewport height (excludes status line). Updated by `auto_scroll` and used
-    /// by page motions (Phase 2 Step 11) to compute half-page offsets.
     pub last_text_height: usize,
-    /// Current editor mode.
     pub mode: Mode,
-    /// Primary caret position (grapheme boundary) within active buffer.
-    pub position: Position,
-    /// Optional file name associated with the active buffer (Phase 2 Step 1).
-    /// None for unnamed / scratch buffer until a path is assigned via open or write-as.
     pub file_name: Option<std::path::PathBuf>,
-    /// Dirty flag indicating buffer has unsaved modifications relative to last open/save.
-    /// Phase 2 Step 1: plumbed but mutations do not yet toggle this (handled in later steps).
     pub dirty: bool,
-    /// Undo history (older at lower indices). Most recent snapshot is at the end.
     pub undo_stack: Vec<EditSnapshot>,
-    /// Redo history (most recently undone states). Cleared on new edit.
     pub redo_stack: Vec<EditSnapshot>,
-    /// Insert coalescing run state (Refactor R1 Step 6): tracks active run start & edit count.
     pub insert_run: InsertRun,
-    /// Command-line (":" style) transient input buffer state (Refactor R1 Step 2).
     pub command_line: CommandLineState,
-    /// Ephemeral status message (Phase 2 Step 6). Rendered on status line when command inactive.
     pub ephemeral_status: Option<EphemeralMessage>,
-    /// Original (majority) line ending style of the loaded file (Phase 2 Step 9).
     pub original_line_ending: LineEnding,
-    /// Whether the original file ended with a final newline (Phase 2 Step 9).
     pub had_trailing_newline: bool,
-    /// Effective (clamped) vertical scroll margin (Phase 2 Step 14).
-    ///
-    /// Stored as a usize for direct comparison with line indices. The initial raw config value is
-    /// clamped at application time to `min(requested, text_height/2)` ensuring at least half the
-    /// viewport remains for content (prevents pathological large margins). Auto-scroll (Step 15)
-    /// enforces this by keeping the cursor inside a vertical band defined by this margin.
     pub config_vertical_margin: usize,
 }
 
@@ -285,10 +258,8 @@ impl EditorState {
         Self {
             buffers: vec![buffer],
             active: 0,
-            viewport_first_line: 0,
             last_text_height: 0,
             mode: Mode::Normal,
-            position: Position::origin(),
             file_name: None,
             dirty: false,
             undo_stack: Vec::new(),
@@ -324,41 +295,11 @@ impl EditorState {
     /// Auto-scroll to keep cursor within the visible vertical viewport.
     ///
     /// `text_height` is the number of text rows (excludes status line). If zero, no-op.
-    /// Adjusts `viewport_first_line` so that:
-    /// - cursor line >= viewport_first_line
-    /// - cursor line < viewport_first_line + text_height
+    /// (Legacy note) Previously adjusted a per-state `viewport_first_line`; this responsibility
+    /// now lives in `core-model::View` and the state no longer tracks a viewport origin.
     ///
     /// Returns true if the first line changed.
-    pub fn auto_scroll(&mut self, text_height: usize) -> bool {
-        if text_height == 0 {
-            return false;
-        }
-        self.last_text_height = text_height; // record for page motions
-        let cursor_line = self.position.line;
-        // Apply vertical margin if configured (Phase 2 Step 14). Margin ensures the cursor stays
-        // at least `m` lines away from the viewport edges when possible.
-        let m = self.config_vertical_margin.min(text_height / 2); // defensive clamp
-        let mut changed = false;
-        let top = self.viewport_first_line;
-        let bottom = self.viewport_first_line + text_height;
-        if cursor_line < top + m {
-            // Scroll up but keep margin (cursor at top+m).
-            let new_first = cursor_line.saturating_sub(m);
-            if new_first != self.viewport_first_line {
-                self.viewport_first_line = new_first;
-                changed = true;
-            }
-        } else if cursor_line + m >= bottom {
-            // Scroll down so cursor is bottom - m - 1 (leaving margin below).
-            let new_first = cursor_line + m + 1 - text_height;
-            if new_first != self.viewport_first_line {
-                self.viewport_first_line = new_first;
-                changed = true;
-            }
-        }
-        changed
-    }
-
+    // Auto-scroll logic moved to `core-model::View::auto_scroll` (Phase 3 Step 3.2).
     /// Test-only helper (and future external hook) to set cached viewport height explicitly.
     pub fn set_last_text_height(&mut self, h: usize) {
         self.last_text_height = h;
@@ -376,11 +317,11 @@ impl EditorState {
     }
 
     /// Capture a snapshot of the current editable state (active single buffer only in Phase 1).
-    pub fn push_snapshot(&mut self, kind: SnapshotKind) {
+    pub fn push_snapshot(&mut self, kind: SnapshotKind, cursor: Position) {
         let snap = EditSnapshot {
             kind,
             buffer: self.active_buffer().clone(),
-            position: self.position,
+            position: cursor,
             mode: self.mode,
         };
         let rope_chars_before = self.active_buffer().line_count(); // coarse metric (lines)
@@ -412,10 +353,10 @@ impl EditorState {
     /// calls while `insert_run_active` is true are no-ops. Call this immediately before applying
     /// an Insert mutation (insert grapheme, backspace, newline) so the pre-edit state is captured
     /// exactly once.
-    pub fn begin_insert_coalescing(&mut self) {
+    pub fn begin_insert_coalescing(&mut self, cursor: Position) {
         match self.insert_run {
             InsertRun::Inactive => {
-                self.push_snapshot(SnapshotKind::Edit);
+                self.push_snapshot(SnapshotKind::Edit, cursor);
                 self.insert_run = InsertRun::Active {
                     started_at: std::time::Instant::now(),
                     edits: 0,
@@ -440,8 +381,8 @@ impl EditorState {
     /// other non-coalesced operations). Always pushes regardless of coalescing flag.
     /// Push a discrete (non-coalesced) edit snapshot. Used for Normal mode edits like `x` where
     /// each action should undo independently. Ignores any Insert coalescing state.
-    pub fn push_discrete_edit_snapshot(&mut self) {
-        self.push_snapshot(SnapshotKind::Edit);
+    pub fn push_discrete_edit_snapshot(&mut self, cursor: Position) {
+        self.push_snapshot(SnapshotKind::Edit, cursor);
     }
 
     /// Increment the edit counter for an active insert run (used for diagnostics / future heuristics).
@@ -451,7 +392,7 @@ impl EditorState {
         }
     }
     /// Restore previously captured snapshot (caller ensures existence). Returns true if restored.
-    pub fn undo(&mut self) -> bool {
+    pub fn undo(&mut self, cursor: &mut Position) -> bool {
         if let Some(last) = self.undo_stack.pop() {
             trace!(
                 undo_depth = self.undo_stack.len(),
@@ -462,13 +403,13 @@ impl EditorState {
             let current = EditSnapshot {
                 kind: last.kind,
                 buffer: self.active_buffer().clone(),
-                position: self.position,
+                position: *cursor,
                 mode: self.mode,
             };
             self.redo_stack.push(current);
             trace!(redo_depth = self.redo_stack.len(), "redo_push_from_undo");
             self.buffers[self.active] = last.buffer;
-            self.position = last.position;
+            *cursor = last.position;
             if !matches!(last.kind, SnapshotKind::Edit) {
                 self.mode = last.mode;
             }
@@ -479,7 +420,7 @@ impl EditorState {
     }
 
     /// Redo previously undone snapshot. Returns true if applied.
-    pub fn redo(&mut self) -> bool {
+    pub fn redo(&mut self, cursor: &mut Position) -> bool {
         if let Some(next) = self.redo_stack.pop() {
             trace!(
                 redo_depth = self.redo_stack.len(),
@@ -490,13 +431,13 @@ impl EditorState {
             let current = EditSnapshot {
                 kind: next.kind,
                 buffer: self.active_buffer().clone(),
-                position: self.position,
+                position: *cursor,
                 mode: self.mode,
             };
             self.undo_stack.push(current);
             trace!(undo_depth = self.undo_stack.len(), "undo_push_from_redo");
             self.buffers[self.active] = next.buffer;
-            self.position = next.position;
+            *cursor = next.position;
             if !matches!(next.kind, SnapshotKind::Edit) {
                 self.mode = next.mode;
             }
@@ -520,51 +461,53 @@ mod tests {
     fn cursor_initializes_at_origin() {
         let buf = Buffer::from_str("test", "Hello").unwrap();
         let st = EditorState::new(buf);
-        assert_eq!(st.position.line, 0);
-        assert_eq!(st.position.byte, 0);
+        let cursor = Position { line: 0, byte: 0 };
+        assert_eq!(cursor.line, 0);
+        assert_eq!(cursor.byte, 0);
         assert!(matches!(st.mode, Mode::Normal));
     }
 
     #[test]
     fn cursor_clamp() {
         let buf = Buffer::from_str("test", "Hello\nWorld").unwrap();
-        let mut st = EditorState::new(buf);
-        st.position.line = 10; // beyond
-        st.position.byte = 999;
+        let st = EditorState::new(buf);
+        let mut pos = Position {
+            line: 10,
+            byte: 999,
+        }; // beyond
         let line_count = st.active_buffer().line_count();
         let last_len = st.active_buffer().line_byte_len(line_count - 1);
         // Provide a closure that does not borrow `st` to satisfy borrow checker.
-        st.position.clamp_to(line_count, |_| last_len);
-        assert_eq!(st.position.line, line_count - 1); // last valid line index
-        assert_eq!(st.position.byte, last_len);
+        pos.clamp_to(line_count, |_| last_len);
+        assert_eq!(pos.line, line_count - 1); // last valid line index
+        assert_eq!(pos.byte, last_len);
     }
 
     #[test]
     fn snapshot_push_and_undo_redo() {
         let buf = Buffer::from_str("t", "one").unwrap();
         let mut st = EditorState::new(buf);
-        // initial snapshot
-        st.push_snapshot(SnapshotKind::Edit);
+        let mut cursor = Position { line: 0, byte: 0 };
+        st.push_snapshot(SnapshotKind::Edit, cursor);
         // mutate buffer by inserting (simulate via direct buffer clone replace for now)
         {
             let mut modified = st.active_buffer().clone();
-            let mut pos = st.position;
-            modified.insert_grapheme(&mut pos, "X");
+            modified.insert_grapheme(&mut cursor, "X");
             st.buffers[st.active] = modified;
-            st.position = pos;
         }
-        st.push_snapshot(SnapshotKind::Edit);
-        assert!(st.undo());
+        st.push_snapshot(SnapshotKind::Edit, cursor);
+        assert!(st.undo(&mut cursor));
         // After undo we can redo
-        assert!(st.redo());
+        assert!(st.redo(&mut cursor));
     }
 
     #[test]
     fn coalescing_run_only_pushes_once() {
         let buf = Buffer::from_str("t", "").unwrap();
         let mut st = EditorState::new(buf);
+        let mut cursor = Position { line: 0, byte: 0 };
         st.mode = Mode::Insert;
-        st.begin_insert_coalescing(); // should push snapshot
+        st.begin_insert_coalescing(cursor); // should push snapshot
         let len_after_first = st.undo_stack.len();
         assert_eq!(len_after_first, 1);
         assert!(matches!(st.insert_run, InsertRun::Active { .. }));
@@ -572,11 +515,9 @@ mod tests {
         // Simulate multiple inserts inside same run (no further snapshots expected)
         for ch in ["a", "b", "c"] {
             let mut modified = st.active_buffer().clone();
-            let mut pos = st.position;
-            modified.insert_grapheme(&mut pos, ch);
+            modified.insert_grapheme(&mut cursor, ch);
             st.buffers[st.active] = modified;
-            st.position = pos;
-            st.begin_insert_coalescing(); // no-op after first
+            st.begin_insert_coalescing(cursor); // no-op after first
             st.note_insert_edit();
         }
         assert_eq!(
@@ -587,7 +528,7 @@ mod tests {
 
         // End run and start new one -> pushes again
         st.end_insert_coalescing();
-        st.begin_insert_coalescing();
+        st.begin_insert_coalescing(cursor);
         st.note_insert_edit();
         assert_eq!(
             st.undo_stack.len(),
@@ -603,22 +544,21 @@ mod tests {
     fn redo_cleared_after_new_coalesced_edit() {
         let buf = Buffer::from_str("t", "Hello").unwrap();
         let mut st = EditorState::new(buf);
-        st.push_snapshot(SnapshotKind::Edit); // baseline snapshot
+        let mut cursor = Position { line: 0, byte: 0 };
+        st.push_snapshot(SnapshotKind::Edit, cursor); // baseline snapshot
         // Apply an edit by direct mutation and push snapshot to simulate earlier approach
         {
             let mut modified = st.active_buffer().clone();
-            let mut pos = st.position;
-            modified.insert_grapheme(&mut pos, "!");
+            modified.insert_grapheme(&mut cursor, "!");
             st.buffers[st.active] = modified;
-            st.position = pos;
         }
-        st.push_snapshot(SnapshotKind::Edit);
-        assert!(st.undo()); // creates one entry in redo
+        st.push_snapshot(SnapshotKind::Edit, cursor);
+        assert!(st.undo(&mut cursor)); // creates one entry in redo
         assert_eq!(st.redo_stack.len(), 1);
 
         // New coalesced run should clear redo stack
         st.mode = Mode::Insert;
-        st.begin_insert_coalescing();
+        st.begin_insert_coalescing(cursor);
         assert_eq!(st.redo_stack.len(), 0, "redo stack not cleared on new edit");
     }
 
@@ -626,15 +566,14 @@ mod tests {
     fn undo_stack_capped() {
         let buf = Buffer::from_str("t", "").unwrap();
         let mut st = EditorState::new(buf);
+        let mut cursor = Position { line: 0, byte: 0 };
         // Push more than max
         for i in 0..(UNDO_HISTORY_MAX + 10) {
             // Apply a trivial mutation to differentiate snapshots
             let mut modified = st.active_buffer().clone();
-            let mut pos = st.position;
-            modified.insert_grapheme(&mut pos, "x");
+            modified.insert_grapheme(&mut cursor, "x");
             st.buffers[st.active] = modified;
-            st.position = pos;
-            st.push_snapshot(SnapshotKind::Edit);
+            st.push_snapshot(SnapshotKind::Edit, cursor);
             // ensure length never exceeds cap + 1 transiently (since we remove after push)
             assert!(st.undo_stack.len() <= UNDO_HISTORY_MAX);
             // Reset to allow next iteration to mutate from previous base (simplistic)
@@ -648,24 +587,21 @@ mod tests {
         // Simulate minimal insert mode run: enter Insert, type 'a','b','c', Esc boundary.
         let buf = Buffer::from_str("t", "").unwrap();
         let mut st = EditorState::new(buf);
+        let mut cursor = Position { line: 0, byte: 0 };
         st.mode = Mode::Insert;
         // First insert triggers snapshot
-        st.begin_insert_coalescing();
+        st.begin_insert_coalescing(cursor);
         {
             let mut modified = st.active_buffer().clone();
-            let mut pos = st.position;
-            modified.insert_grapheme(&mut pos, "a");
+            modified.insert_grapheme(&mut cursor, "a");
             st.buffers[st.active] = modified;
-            st.position = pos;
         }
         // Additional inserts in same run (should not push extra snapshots)
         for ch in ["b", "c"] {
             let mut modified = st.active_buffer().clone();
-            let mut pos = st.position;
-            modified.insert_grapheme(&mut pos, ch);
+            modified.insert_grapheme(&mut cursor, ch);
             st.buffers[st.active] = modified;
-            st.position = pos;
-            st.begin_insert_coalescing(); // no-op while active
+            st.begin_insert_coalescing(cursor); // no-op while active
             st.note_insert_edit();
         }
         if let InsertRun::Active { edits, .. } = st.insert_run {
@@ -677,14 +613,14 @@ mod tests {
         st.mode = Mode::Normal;
         assert_eq!(st.undo_stack.len(), 1, "expected single snapshot for run");
         // Perform undo: buffer should become empty again
-        assert!(st.undo());
+        assert!(st.undo(&mut cursor));
         assert_eq!(st.active_buffer().line(0).unwrap_or_default(), "");
         assert!(
             matches!(st.mode, Mode::Normal),
             "mode restored unexpectedly to Insert"
         );
         // Redo should restore 'abc'
-        assert!(st.redo());
+        assert!(st.redo(&mut cursor));
         assert!(
             st.active_buffer()
                 .line(0)
@@ -701,21 +637,20 @@ mod tests {
     fn undo_does_not_restore_insert_mode() {
         let buf = Buffer::from_str("t", "").unwrap();
         let mut st = EditorState::new(buf);
+        let mut cursor = Position { line: 0, byte: 0 };
         st.mode = Mode::Insert;
-        st.begin_insert_coalescing();
+        st.begin_insert_coalescing(cursor);
         for ch in ["a", "b"] {
             let mut modified = st.active_buffer().clone();
-            let mut pos = st.position;
-            modified.insert_grapheme(&mut pos, ch);
+            modified.insert_grapheme(&mut cursor, ch);
             st.buffers[st.active] = modified;
-            st.position = pos;
-            st.begin_insert_coalescing();
+            st.begin_insert_coalescing(cursor);
         }
         st.end_insert_coalescing();
         st.mode = Mode::Normal; // simulate Esc
-        assert!(st.undo());
+        assert!(st.undo(&mut cursor));
         assert!(matches!(st.mode, Mode::Normal));
-        assert!(st.redo());
+        assert!(st.redo(&mut cursor));
         assert!(matches!(st.mode, Mode::Normal));
     }
 
@@ -723,33 +658,28 @@ mod tests {
     fn newline_is_coalescing_boundary() {
         let buf = Buffer::from_str("t", "").unwrap();
         let mut st = EditorState::new(buf);
+        let mut cursor = Position { line: 0, byte: 0 };
         st.mode = Mode::Insert;
         // Insert 'a' then newline then 'b'; expect two snapshots (one for first run before 'a', one for second run after newline)
-        st.begin_insert_coalescing();
+        st.begin_insert_coalescing(cursor);
         {
             let mut modified = st.active_buffer().clone();
-            let mut pos = st.position;
-            modified.insert_grapheme(&mut pos, "a");
+            modified.insert_grapheme(&mut cursor, "a");
             st.buffers[st.active] = modified;
-            st.position = pos;
         }
         // Newline ends run
         {
             let mut modified = st.active_buffer().clone();
-            let mut pos = st.position;
-            modified.insert_newline(&mut pos);
+            modified.insert_newline(&mut cursor);
             st.buffers[st.active] = modified;
-            st.position = pos;
         }
         st.end_insert_coalescing();
         // Start second run after boundary
-        st.begin_insert_coalescing();
+        st.begin_insert_coalescing(cursor);
         {
             let mut modified = st.active_buffer().clone();
-            let mut pos = st.position;
-            modified.insert_grapheme(&mut pos, "b");
+            modified.insert_grapheme(&mut cursor, "b");
             st.buffers[st.active] = modified;
-            st.position = pos;
         }
         assert_eq!(
             st.undo_stack.len(),
@@ -762,26 +692,23 @@ mod tests {
     fn backspace_stays_in_run() {
         let buf = Buffer::from_str("t", "").unwrap();
         let mut st = EditorState::new(buf);
+        let mut cursor = Position { line: 0, byte: 0 };
         st.mode = Mode::Insert;
-        st.begin_insert_coalescing();
+        st.begin_insert_coalescing(cursor);
         // Insert two characters
         for ch in ["a", "b"] {
             let mut modified = st.active_buffer().clone();
-            let mut pos = st.position;
-            modified.insert_grapheme(&mut pos, ch);
+            modified.insert_grapheme(&mut cursor, ch);
             st.buffers[st.active] = modified;
-            st.position = pos;
-            st.begin_insert_coalescing();
+            st.begin_insert_coalescing(cursor);
             st.note_insert_edit();
         }
         // Backspace one character (should not end run or create new snapshot)
         {
             let mut modified = st.active_buffer().clone();
-            let mut pos = st.position;
-            modified.delete_grapheme_before(&mut pos);
+            modified.delete_grapheme_before(&mut cursor);
             st.buffers[st.active] = modified;
-            st.position = pos;
-            st.begin_insert_coalescing(); // still active
+            st.begin_insert_coalescing(cursor); // still active
             st.note_insert_edit();
         }
         assert_eq!(
@@ -795,7 +722,7 @@ mod tests {
         // End run and undo should revert to empty buffer
         st.end_insert_coalescing();
         st.mode = Mode::Normal;
-        assert!(st.undo());
+        assert!(st.undo(&mut cursor));
         assert_eq!(st.active_buffer().line(0).unwrap_or_default(), "");
     }
 
@@ -803,24 +730,21 @@ mod tests {
     fn insert_run_newline_resets_counter() {
         let buf = Buffer::from_str("t", "").unwrap();
         let mut st = EditorState::new(buf);
+        let mut cursor = Position { line: 0, byte: 0 };
         st.mode = Mode::Insert;
-        st.begin_insert_coalescing();
+        st.begin_insert_coalescing(cursor);
         {
             let mut modified = st.active_buffer().clone();
-            let mut pos = st.position;
-            modified.insert_grapheme(&mut pos, "a");
+            modified.insert_grapheme(&mut cursor, "a");
             st.buffers[st.active] = modified;
-            st.position = pos;
         }
         st.note_insert_edit();
         st.end_insert_coalescing();
-        st.begin_insert_coalescing();
+        st.begin_insert_coalescing(cursor);
         {
             let mut modified = st.active_buffer().clone();
-            let mut pos = st.position;
-            modified.insert_grapheme(&mut pos, "b");
+            modified.insert_grapheme(&mut cursor, "b");
             st.buffers[st.active] = modified;
-            st.position = pos;
         }
         st.note_insert_edit();
         if let InsertRun::Active { edits, .. } = st.insert_run {
@@ -842,103 +766,6 @@ mod tests {
         }
         assert!(st.tick_ephemeral(), "expected expiration");
         assert!(st.ephemeral_status.is_none());
-    }
-
-    #[test]
-    fn viewport_first_line_defaults_and_mutates() {
-        let buf = Buffer::from_str("t", "Hello\nWorld\n").unwrap();
-        let st = EditorState::new(buf);
-        assert_eq!(st.viewport_first_line, 0, "expected default first line 0");
-        let mut st2 = st; // mutable copy
-        st2.viewport_first_line = 5;
-        assert_eq!(st2.viewport_first_line, 5, "field should be mutable");
-    }
-
-    #[test]
-    fn auto_scroll_down_and_up() {
-        let buf = Buffer::from_str("t", "0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n").unwrap();
-        let mut st = EditorState::new(buf);
-        // Simulate text height = 5 lines.
-        let height = 5usize;
-        // Move cursor to line 0 (already) -> no scroll.
-        assert!(!st.auto_scroll(height));
-        // Jump cursor to line 4 -> still visible (0..5)
-        st.position.line = 4;
-        assert!(!st.auto_scroll(height));
-        // Jump to line 5 -> should scroll so first line becomes 1
-        st.position.line = 5;
-        assert!(st.auto_scroll(height));
-        assert_eq!(st.viewport_first_line, 1);
-        // Jump far down line 9 -> first line should be 9 + 1 - height = 5
-        st.position.line = 9;
-        assert!(st.auto_scroll(height));
-        assert_eq!(st.viewport_first_line, 5);
-        // Move cursor back to line 3 -> above first line -> should clamp to 3
-        st.position.line = 3;
-        assert!(st.auto_scroll(height));
-        assert_eq!(st.viewport_first_line, 3);
-    }
-
-    #[test]
-    fn auto_scroll_with_zero_margin_matches_baseline() {
-        let buf = Buffer::from_str("t", "0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n").unwrap();
-        let mut st = EditorState::new(buf);
-        st.config_vertical_margin = 0;
-        let h = 5usize;
-        st.position.line = 5;
-        st.auto_scroll(h);
-        assert_eq!(st.viewport_first_line, 1, "baseline scroll without margin");
-    }
-
-    #[test]
-    fn auto_scroll_with_margin_scrolls_earlier() {
-        let buf = Buffer::from_str("t", "0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n").unwrap();
-        let mut st = EditorState::new(buf);
-        st.config_vertical_margin = 2; // request margin
-        let h = 6usize; // viewport 6 lines
-        // Move cursor down gradually; expect earlier upward scroll trigger due to margin.
-        // Without margin, first_line remains 0 until cursor hits line 6 (0..6 visible)
-        // With margin=2 we need at least two lines of space below the cursor. At cursor line 4
-        // the space below inside the viewport (lines 5) is only 1 line, so we scroll early.
-        st.position.line = 4;
-        st.auto_scroll(h);
-        assert_eq!(
-            st.viewport_first_line, 1,
-            "expected early scroll to supply bottom margin"
-        );
-        // Advancing to line 5 should scroll again: new_first = 5 + 2 + 1 - 6 = 2.
-        st.position.line = 5;
-        st.auto_scroll(h);
-        assert_eq!(
-            st.viewport_first_line, 2,
-            "expected subsequent scroll maintaining margin"
-        );
-    }
-
-    #[test]
-    fn auto_scroll_margin_bottom_boundary() {
-        let buf = Buffer::from_str("t", "0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n").unwrap();
-        let mut st = EditorState::new(buf);
-        st.config_vertical_margin = 2;
-        let h = 5usize;
-        st.position.line = 9; // last line
-        st.auto_scroll(h);
-        // With margin we expect first_line = cursor + margin + 1 - h; margin is clamped internally at h/2 (2)
-        // Computation: 9 + 2 + 1 - 5 = 7
-        assert_eq!(st.viewport_first_line, 7);
-    }
-
-    #[test]
-    fn auto_scroll_margin_small_viewport_disables_margin() {
-        let buf = Buffer::from_str("t", "0\n1\n2\n3\n4\n").unwrap();
-        let mut st = EditorState::new(buf);
-        st.config_vertical_margin = 10; // excessive
-        let h = 3usize; // small viewport -> internal clamp path (text_height /2 =1) but algorithm early exit may still behave
-        st.position.line = 2;
-        st.auto_scroll(h);
-        // For small height=3 with cursor at 2 we expect first line = cursor + m + 1 - h.
-        // m = min(req, h/2)=1 => 2 +1 +1 -3 =1
-        assert_eq!(st.viewport_first_line, 1);
     }
 
     #[test]

@@ -4,6 +4,7 @@
 
 use crate::{CellFlags, Frame, Renderer};
 use anyhow::Result;
+use core_model::View;
 use core_state::EditorState;
 use core_text::grapheme;
 
@@ -34,45 +35,57 @@ impl RenderEngine {
     }
 
     /// Build + render a full frame (current behavior; breadth-first guarantee).
-    pub fn render_full(&mut self, state: &EditorState, w: u16, h: u16) -> Result<()> {
-        let mut frame = build_content_frame(state, w, h);
-        self.apply_cursor_overlay(state, &mut frame, w, h);
-        apply_status_line(state, &mut frame, w, h);
+    pub fn render_full(&mut self, state: &EditorState, view: &View, w: u16, h: u16) -> Result<()> {
+        let mut frame = build_content_frame(state, view, w, h);
+        self.apply_cursor_overlay(state, view, &mut frame, w, h);
+        apply_status_line(state, view, &mut frame, w, h);
         Renderer::render(&frame)
     }
 
     /// Placeholder for future partial rendering path (Phase 3).
-    pub fn render_partial(&mut self, state: &EditorState, w: u16, h: u16) -> Result<()> {
-        self.render_full(state, w, h)
+    pub fn render_partial(
+        &mut self,
+        state: &EditorState,
+        view: &View,
+        w: u16,
+        h: u16,
+    ) -> Result<()> {
+        self.render_full(state, view, w, h)
     }
 
-    fn apply_cursor_overlay(&mut self, state: &EditorState, frame: &mut Frame, w: u16, h: u16) {
+    fn apply_cursor_overlay(
+        &mut self,
+        state: &EditorState,
+        view: &View,
+        frame: &mut Frame,
+        w: u16,
+        h: u16,
+    ) {
         if h == 0 {
             return;
         }
         let text_height = h - 1;
         let buf = state.active_buffer();
-        let start = state.viewport_first_line;
+        let start = view.viewport_first_line;
         let text_rows = text_height as usize;
         let mut meta = CursorSpanMeta::default();
-        if state.position.line >= start
-            && state.position.line < buf.line_count()
-            && let Some(line_content) = buf.line(state.position.line)
+        if view.cursor.line >= start
+            && view.cursor.line < buf.line_count()
+            && let Some(line_content) = buf.line(view.cursor.line)
         {
             let visible_end = start + text_rows;
-            if state.position.line < visible_end {
+            if view.cursor.line < visible_end {
                 let content_trim: &str = if line_content.ends_with('\n') {
                     &line_content[..line_content.len() - 1]
                 } else {
                     &line_content
                 };
-                let vis_col = grapheme::visual_col(content_trim, state.position.byte);
-                let next_byte =
-                    core_text::grapheme::next_boundary(content_trim, state.position.byte);
-                let cluster = &content_trim[state.position.byte..next_byte];
+                let vis_col = grapheme::visual_col(content_trim, view.cursor.byte);
+                let next_byte = core_text::grapheme::next_boundary(content_trim, view.cursor.byte);
+                let cluster = &content_trim[view.cursor.byte..next_byte];
                 let width = grapheme::cluster_width(cluster).max(1) as u16;
-                let rel_line = (state.position.line - start) as u16;
-                meta.line = Some(state.position.line);
+                let rel_line = (view.cursor.line - start) as u16;
+                meta.line = Some(view.cursor.line);
                 meta.start_col = Some(vis_col as u16);
                 meta.width = Some(width);
                 if (vis_col as u16) < w {
@@ -105,20 +118,20 @@ impl RenderEngine {
 
 /// Test-only helper: build full frame (content + cursor + status) without emitting to terminal.
 #[cfg(test)]
-pub fn build_full_frame_for_test(state: &EditorState, w: u16, h: u16) -> Frame {
+pub fn build_full_frame_for_test(state: &EditorState, view: &View, w: u16, h: u16) -> Frame {
     let mut eng = RenderEngine::new();
-    let mut frame = build_content_frame(state, w, h);
-    eng.apply_cursor_overlay(state, &mut frame, w, h);
-    apply_status_line(state, &mut frame, w, h);
+    let mut frame = build_content_frame(state, view, w, h);
+    eng.apply_cursor_overlay(state, view, &mut frame, w, h);
+    apply_status_line(state, view, &mut frame, w, h);
     frame
 }
 
 /// Build only the content (text lines) portion of the frame; no cursor or status decorations.
-pub fn build_content_frame(state: &EditorState, w: u16, h: u16) -> Frame {
+pub fn build_content_frame(state: &EditorState, view: &View, w: u16, h: u16) -> Frame {
     let mut frame = Frame::new(w, h);
     let text_height = if h > 0 { h - 1 } else { 0 };
     let buf = state.active_buffer();
-    let start = state.viewport_first_line;
+    let start = view.viewport_first_line;
     let height = text_height as usize;
     let end = (start + height).min(buf.line_count());
     for (screen_y, line_idx) in (start..end).enumerate() {
@@ -156,13 +169,13 @@ pub fn build_content_frame(state: &EditorState, w: u16, h: u16) -> Frame {
     frame
 }
 
-fn apply_status_line(state: &EditorState, frame: &mut Frame, w: u16, h: u16) {
+fn apply_status_line(state: &EditorState, view: &View, frame: &mut Frame, w: u16, h: u16) {
     if h == 0 {
         return;
     }
     let y = h - 1;
     let buf = state.active_buffer();
-    let line_content = buf.line(state.position.line).unwrap_or_default();
+    let line_content = buf.line(view.cursor.line).unwrap_or_default();
     let content_trim: &str = if line_content.ends_with("\r\n") {
         &line_content[..line_content.len() - 2]
     } else if line_content.ends_with('\n') || line_content.ends_with('\r') {
@@ -170,10 +183,10 @@ fn apply_status_line(state: &EditorState, frame: &mut Frame, w: u16, h: u16) {
     } else {
         &line_content
     };
-    let col = grapheme::visual_col(content_trim, state.position.byte);
+    let col = grapheme::visual_col(content_trim, view.cursor.byte);
     let status = crate::status::build_status(&crate::status::StatusContext {
         mode: state.mode,
-        line: state.position.line,
+        line: view.cursor.line,
         col,
         command_active: state.command_line.is_active(),
         command_buffer: state.command_line.buffer(),
@@ -207,16 +220,23 @@ mod tests {
     use super::*;
     use core_text::Buffer;
 
-    fn mk_state(initial: &str) -> EditorState {
-        EditorState::new(Buffer::from_str("test", initial).unwrap())
+    fn mk_model(initial: &str) -> (EditorState, View) {
+        let st = EditorState::new(Buffer::from_str("test", initial).unwrap());
+        let view = core_model::View::new(
+            core_model::ViewId(0),
+            st.active,
+            core_text::Position::origin(),
+            0,
+        );
+        (st, view)
     }
 
     #[test]
     fn cursor_ascii_single_width() {
-        let mut state = mk_state("abc");
-        state.position.line = 0;
-        state.position.byte = 1; // 'b'
-        let frame = build_full_frame_for_test(&state, 20, 4);
+        let (state, mut view) = mk_model("abc");
+        view.cursor.line = 0;
+        view.cursor.byte = 1; // 'b'
+        let frame = build_full_frame_for_test(&state, &view, 20, 4);
         let idx = 1;
         let cell = frame.cells[idx];
         assert_eq!(cell.ch, 'b');

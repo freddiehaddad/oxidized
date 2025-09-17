@@ -140,7 +140,7 @@ async fn main() -> Result<()> {
     let mut render_engine = RenderEngine::new();
 
     // Initial render so the user sees content before pressing a key.
-    if let Err(e) = render(&mut render_engine, model.state()) {
+    if let Err(e) = render(&mut render_engine, model.state(), model.active_view()) {
         error!(?e, "initial render error");
     }
 
@@ -161,12 +161,12 @@ async fn main() -> Result<()> {
                 let snapshot_mode = model.state().mode; // minimize immutable borrows
                 let cmd_buf = model.state().command_line.buffer().to_string();
                 if let Some(act) = translate_key_wrapper(snapshot_mode, &cmd_buf, &k) {
-                    let before_line = model.state().position.line;
-                    let dr = dispatch(act, model.state_mut(), &mut sticky_visual_col, &observers);
+                    let before_line = model.active_view().cursor.line;
+                    let dr = dispatch(act, &mut model, &mut sticky_visual_col, &observers);
                     if dr.dirty {
                         // Heuristic mapping (Phase 2 Step 17): if line changed -> Lines(range of that line),
                         // if only cursor moved within same line -> CursorOnly, else fallback Full.
-                        let after_line = model.state().position.line;
+                        let after_line = model.active_view().cursor.line;
                         let insert_mode = matches!(model.state().mode, Mode::Insert);
                         if before_line != after_line || insert_mode {
                             scheduler.mark(RenderDelta::Lines(after_line..after_line + 1));
@@ -201,10 +201,17 @@ async fn main() -> Result<()> {
         // Auto-scroll (Phase 2 Step 8): keep cursor visible.
         if let Ok((_, h)) = crossterm::terminal::size() {
             let text_height = if h > 0 { (h - 1) as usize } else { 0 };
-            let before_first = model.state().viewport_first_line;
-            if model.state_mut().auto_scroll(text_height) {
-                let after_first = model.state().viewport_first_line;
-                // Refactor R2 Step 3: mark semantic scroll (effective still full render later).
+            // Split borrows: first record before_first using immutable view ref, then perform mutable operations in inner scope.
+            let before_first = model.active_view().viewport_first_line;
+            let scroll_changed = {
+                // Raw pointer trick similar to dispatcher to avoid overlapping mutable borrows.
+                let state_ptr: *mut core_state::EditorState = model.state_mut();
+                let view = model.active_view_mut();
+                let state: &mut core_state::EditorState = unsafe { &mut *state_ptr };
+                view.auto_scroll(state, text_height)
+            };
+            if scroll_changed {
+                let after_first = model.active_view().viewport_first_line;
                 scheduler.mark(RenderDelta::Scroll {
                     old_first: before_first,
                     new_first: after_first,
@@ -215,7 +222,7 @@ async fn main() -> Result<()> {
         if let Some(decision) = scheduler.consume() {
             // TODO(Phase 3): Switch on decision.semantic to attempt partial paints.
             // match decision.semantic { ... } retaining Full fallback.
-            if let Err(e) = render(&mut render_engine, model.state()) {
+            if let Err(e) = render(&mut render_engine, model.state(), model.active_view()) {
                 error!(?e, "render error");
             }
             // NOTE: decision.effective is ignored (Phase 2 always Full) but kept for future flexibility.
@@ -227,7 +234,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn render(engine: &mut RenderEngine, state: &EditorState) -> Result<()> {
+fn render(engine: &mut RenderEngine, state: &EditorState, view: &core_model::View) -> Result<()> {
     use core_render::timing::record_last_render_ns;
     use crossterm::terminal::size;
     use std::time::Instant;
@@ -237,7 +244,7 @@ fn render(engine: &mut RenderEngine, state: &EditorState) -> Result<()> {
     // Refactor R2 Step 2: stateful engine retains cursor span metadata (still full render).
     // Refactor R2 Step 11: capture render duration.
     let start = Instant::now();
-    let res = engine.render_full(state, w, h);
+    let res = engine.render_full(state, view, w, h);
     let elapsed = start.elapsed();
     record_last_render_ns(elapsed.as_nanos() as u64);
     res
@@ -274,53 +281,52 @@ mod tests {
         assert!(rx.recv().await.is_some());
     }
 
-    fn mk_state(initial: &str) -> EditorState {
+    fn mk_state_model(initial: &str) -> core_model::EditorModel {
         let buf = Buffer::from_str("test", initial).unwrap();
-        EditorState::new(buf)
+        let state = EditorState::new(buf);
+        core_model::EditorModel::new(state)
     }
 
     #[test]
     fn insert_newline_coalescing_boundary() {
-        let mut state = mk_state("");
+        let mut model = mk_state_model("");
         let mut sticky = None;
         // Enter insert
         let observers: Vec<Box<dyn ActionObserver>> = Vec::new();
         dispatch(
             Action::ModeChange(ModeChange::EnterInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &observers,
         );
         // Insert 'a'
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("a".to_string())),
-            &mut state,
+            &mut model,
             &mut sticky,
             &observers,
         );
-        assert_eq!(state.active_buffer().line(0).unwrap(), "a");
-        assert_eq!(state.undo_stack.len(), 1, "expected first snapshot");
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "a");
+        assert_eq!(model.state().undo_stack.len(), 1, "expected first snapshot");
         // Newline
         dispatch(
             Action::Edit(EditKind::InsertNewline),
-            &mut state,
+            &mut model,
             &mut sticky,
             &observers,
         );
-        assert_eq!(state.active_buffer().line_count(), 2);
-        assert_eq!(state.active_buffer().line(0).unwrap(), "a\n");
-        assert_eq!(state.position.line, 1);
-        assert_eq!(state.position.byte, 0);
+        assert_eq!(model.state().active_buffer().line_count(), 2);
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "a\n");
         // Insert 'b' (new run -> new snapshot)
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("b".to_string())),
-            &mut state,
+            &mut model,
             &mut sticky,
             &observers,
         );
-        assert_eq!(state.active_buffer().line(1).unwrap(), "b");
+        assert_eq!(model.state().active_buffer().line(1).unwrap(), "b");
         assert_eq!(
-            state.undo_stack.len(),
+            model.state().undo_stack.len(),
             2,
             "expected second snapshot after new run"
         );
@@ -328,112 +334,125 @@ mod tests {
 
     #[test]
     fn backspace_stays_within_run_dispatch() {
-        let mut state = mk_state("");
+        let mut model = mk_state_model("");
         let mut sticky = None;
         let observers: Vec<Box<dyn ActionObserver>> = Vec::new();
         dispatch(
             Action::ModeChange(ModeChange::EnterInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &observers,
         );
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("a".to_string())),
-            &mut state,
+            &mut model,
             &mut sticky,
             &observers,
         );
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("b".to_string())),
-            &mut state,
+            &mut model,
             &mut sticky,
             &observers,
         );
-        assert_eq!(state.active_buffer().line(0).unwrap(), "ab");
-        assert_eq!(state.undo_stack.len(), 1, "still single run snapshot");
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "ab");
+        assert_eq!(
+            model.state().undo_stack.len(),
+            1,
+            "still single run snapshot"
+        );
         // Backspace
         dispatch(
             Action::Edit(EditKind::Backspace),
-            &mut state,
+            &mut model,
             &mut sticky,
             &observers,
         );
-        assert_eq!(state.active_buffer().line(0).unwrap(), "a");
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "a");
         assert_eq!(
-            state.undo_stack.len(),
+            model.state().undo_stack.len(),
             1,
             "backspace should not create new snapshot"
         );
         // Leave insert -> ends run
         dispatch(
             Action::ModeChange(ModeChange::LeaveInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &observers,
         );
         // Undo should revert entire sequence (buffer empty)
-        assert!(dispatch(Action::Undo, &mut state, &mut sticky, &observers).dirty);
-        assert_eq!(state.active_buffer().line(0).unwrap(), "");
+        assert!(dispatch(Action::Undo, &mut model, &mut sticky, &observers).dirty);
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "");
     }
 
     #[test]
     fn normal_mode_delete_under_single() {
-        let mut state = mk_state("abc");
+        let mut model = mk_state_model("abc");
         let mut sticky = None;
         // Delete 'a'
         let observers: Vec<Box<dyn ActionObserver>> = Vec::new();
         dispatch(
             Action::Edit(EditKind::DeleteUnder),
-            &mut state,
+            &mut model,
             &mut sticky,
             &observers,
         );
-        assert_eq!(state.active_buffer().line(0).unwrap(), "bc");
-        assert_eq!(state.undo_stack.len(), 1, "snapshot pushed for delete");
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "bc");
+        assert_eq!(
+            model.state().undo_stack.len(),
+            1,
+            "snapshot pushed for delete"
+        );
         // Undo
-        assert!(dispatch(Action::Undo, &mut state, &mut sticky, &observers).dirty);
-        assert_eq!(state.active_buffer().line(0).unwrap(), "abc");
+        assert!(dispatch(Action::Undo, &mut model, &mut sticky, &observers).dirty);
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "abc");
     }
 
     #[test]
     fn normal_mode_delete_under_multiple_and_undo() {
-        let mut state = mk_state("abcd");
+        let mut model = mk_state_model("abcd");
         let mut sticky = None;
         // Delete 'a'
         let observers: Vec<Box<dyn ActionObserver>> = Vec::new();
         dispatch(
             Action::Edit(EditKind::DeleteUnder),
-            &mut state,
+            &mut model,
             &mut sticky,
             &observers,
         );
         // Delete 'b' (originally 'c', now at index 0 after first delete)
         dispatch(
             Action::Edit(EditKind::DeleteUnder),
-            &mut state,
+            &mut model,
             &mut sticky,
             &observers,
         );
-        assert_eq!(state.active_buffer().line(0).unwrap(), "cd");
-        assert_eq!(state.undo_stack.len(), 2, "two discrete snapshots");
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "cd");
+        assert_eq!(model.state().undo_stack.len(), 2, "two discrete snapshots");
         // Undo last -> should restore to "bcd" (?) Actually sequence: start abcd -> after first delete bcd -> after second delete cd. Undo should return to bcd.
-        assert!(dispatch(Action::Undo, &mut state, &mut sticky, &observers).dirty);
-        assert_eq!(state.active_buffer().line(0).unwrap(), "bcd");
+        assert!(dispatch(Action::Undo, &mut model, &mut sticky, &observers).dirty);
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "bcd");
         // Undo again -> original
-        assert!(dispatch(Action::Undo, &mut state, &mut sticky, &observers).dirty);
-        assert_eq!(state.active_buffer().line(0).unwrap(), "abcd");
+        assert!(dispatch(Action::Undo, &mut model, &mut sticky, &observers).dirty);
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "abcd");
     }
 
     // --- Software cursor tests (Phase 2 Step 12) ---
     #[test]
     fn cursor_ascii_single_width() {
-        let mut state = mk_state("abc");
-        state.position.line = 0;
-        state.position.byte = 1; // 'b'
-        // Use engine to get full frame (includes cursor overlay) for assertions
+        let state = EditorState::new(Buffer::from_str("test", "abc").unwrap());
+        let mut view = core_model::View::new(
+            core_model::ViewId(0),
+            state.active,
+            core_text::Position::origin(),
+            0,
+        );
+        view.cursor.line = 0;
+        view.cursor.byte = 1; // 'b'
         let mut eng = RenderEngine::new();
-        let _ = eng.render_full(&state, 20, 4); // renders to terminal; for tests we instead rebuild content
-        let frame = build_content_frame(&state, 20, 4); // cursor overlay no longer part of content-only frame
+        let _ = eng.render_full(&state, &view, 20, 4);
+        let frame = build_content_frame(&state, &view, 20, 4);
         let idx = 1; // (y * width) + x
         let cell = frame.cells[idx];
         assert_eq!(cell.ch, 'b');
@@ -441,13 +460,18 @@ mod tests {
 
     #[test]
     fn cursor_wide_emoji() {
-        let mut state = mk_state("a😀\n"); // trailing newline for consistency
-        // Position cursor at start of emoji cluster
+        let state = EditorState::new(Buffer::from_str("test", "a😀\n").unwrap());
+        let mut view = core_model::View::new(
+            core_model::ViewId(0),
+            state.active,
+            core_text::Position::origin(),
+            0,
+        );
         let line = state.active_buffer().line(0).unwrap();
         let emoji_byte = line.char_indices().find(|(_, c)| *c == '😀').unwrap().0;
-        state.position.line = 0;
-        state.position.byte = emoji_byte;
-        let frame = build_content_frame(&state, 20, 4);
+        view.cursor.line = 0;
+        view.cursor.byte = emoji_byte;
+        let frame = build_content_frame(&state, &view, 20, 4);
         // Visual column after 'a' is 1
         let base_col = 1usize; // leading cell of wide emoji
         let idx_first = base_col; // row 0 so direct index
@@ -461,11 +485,16 @@ mod tests {
 
     #[test]
     fn cursor_combining_sequence() {
-        // e + combining acute accent (width 1 cluster)
-        let mut state = mk_state("\u{0065}\u{0301}x\n");
-        state.position.line = 0;
-        state.position.byte = 0; // start of cluster
-        let frame = build_content_frame(&state, 20, 4);
+        let state = EditorState::new(Buffer::from_str("test", "\u{0065}\u{0301}x\n").unwrap());
+        let mut view = core_model::View::new(
+            core_model::ViewId(0),
+            state.active,
+            core_text::Position::origin(),
+            0,
+        );
+        view.cursor.line = 0;
+        view.cursor.byte = 0;
+        let frame = build_content_frame(&state, &view, 20, 4);
         let idx = 0;
         let cell = frame.cells[idx];
         assert_eq!(cell.ch, 'e'); // first scalar of cluster
@@ -478,16 +507,21 @@ mod tests {
 
     #[test]
     fn cursor_end_of_line_blank_cell() {
-        let mut state = mk_state("abc\n");
-        state.position.line = 0;
-        // Move to end (after 'c')
-        state.position.byte = state
+        let state = EditorState::new(Buffer::from_str("test", "abc\n").unwrap());
+        let mut view = core_model::View::new(
+            core_model::ViewId(0),
+            state.active,
+            core_text::Position::origin(),
+            0,
+        );
+        view.cursor.line = 0;
+        view.cursor.byte = state
             .active_buffer()
             .line(0)
             .unwrap()
             .trim_end_matches(['\n', '\r'])
             .len();
-        let frame = build_content_frame(&state, 20, 4);
+        let frame = build_content_frame(&state, &view, 20, 4);
         // Visual column == 3
         let idx = 3;
         let cell = frame.cells[idx];

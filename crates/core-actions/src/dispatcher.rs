@@ -15,6 +15,7 @@
 
 use crate::io_ops::{OpenFileResult, WriteFileResult, open_file, write_file};
 use crate::{Action, ActionObserver, EditKind, ModeChange, MotionKind};
+use core_model::EditorModel;
 use core_state::{EditorState, Mode};
 use core_text::{Buffer, Position, motion};
 
@@ -50,14 +51,17 @@ impl DispatchResult {
 /// a render is needed (`dirty`) or the editor should exit (`quit`).
 pub fn dispatch(
     action: Action,
-    state: &mut EditorState,
+    model: &mut EditorModel,
     sticky_visual_col: &mut Option<usize>,
     observers: &[Box<dyn ActionObserver>],
 ) -> DispatchResult {
-    // Phase 3 Step 1 NOTE: DirtyLinesTracker integration will occur in subsequent
-    // commits where dispatcher will receive a mutable tracker reference and mark
-    // affected lines on edit operations. This placeholder comment documents the
-    // intended injection point to avoid refactoring surprise in Step 2.
+    // Borrow mutable state and view separately without overlapping mutable borrows of model.
+    let state_ptr: *mut EditorState = model.state_mut();
+    // SAFETY: We only use `state_ptr` for field/method access that does not move `state`.
+    // We then take another mutable borrow for the active view. These do not alias because
+    // `active_view_mut` only touches the views vector while state fields are accessed via raw pointer.
+    let view = model.active_view_mut();
+    let state: &mut EditorState = unsafe { &mut *state_ptr };
     // Notify observers (pre-dispatch). Failures inside observers should not crash the editor;
     // we rely on them being lightweight & infallible. Any panics propagate (deliberate) to avoid
     // silently masking logic errors in early development.
@@ -66,77 +70,100 @@ pub fn dispatch(
     }
     match action {
         Action::Motion(kind) => {
-            let span = tracing::trace_span!("motion", kind = ?kind, line = state.position.line, byte = state.position.byte);
+            let span = tracing::trace_span!("motion", kind = ?kind, line = view.cursor.line, byte = view.cursor.byte);
             let _e = span.enter();
-            let before = state.position;
+            let before = view.cursor;
             match kind {
                 MotionKind::Left => {
-                    apply_horizontal_motion(state, motion::left);
+                    apply_horizontal_motion(state, &mut view.cursor, motion::left);
                     *sticky_visual_col = None;
                 }
                 MotionKind::Right => {
-                    apply_horizontal_motion(state, motion::right);
+                    apply_horizontal_motion(state, &mut view.cursor, motion::right);
                     *sticky_visual_col = None;
                 }
                 MotionKind::LineStart => {
-                    apply_horizontal_motion(state, motion::line_start);
+                    apply_horizontal_motion(state, &mut view.cursor, motion::line_start);
                     *sticky_visual_col = None;
                 }
                 MotionKind::LineEnd => {
-                    apply_horizontal_motion(state, motion::line_end);
+                    apply_horizontal_motion(state, &mut view.cursor, motion::line_end);
                     *sticky_visual_col = None;
                 }
                 MotionKind::Up => {
-                    *sticky_visual_col =
-                        apply_vertical_motion(state, *sticky_visual_col, motion::up);
+                    *sticky_visual_col = apply_vertical_motion(
+                        state,
+                        &mut view.cursor,
+                        *sticky_visual_col,
+                        motion::up,
+                    );
                 }
                 MotionKind::Down => {
-                    *sticky_visual_col =
-                        apply_vertical_motion(state, *sticky_visual_col, motion::down);
+                    *sticky_visual_col = apply_vertical_motion(
+                        state,
+                        &mut view.cursor,
+                        *sticky_visual_col,
+                        motion::down,
+                    );
                 }
                 MotionKind::WordForward => {
-                    apply_horizontal_motion(state, motion::word_forward);
+                    apply_horizontal_motion(state, &mut view.cursor, motion::word_forward);
                     *sticky_visual_col = None;
                 }
                 MotionKind::WordBackward => {
-                    apply_horizontal_motion(state, motion::word_backward);
+                    apply_horizontal_motion(state, &mut view.cursor, motion::word_backward);
                     *sticky_visual_col = None;
                 }
                 MotionKind::PageHalfDown => {
                     // Half page = max(1, last_text_height / 2). Fallback to 1 if unknown.
                     let h = state.last_text_height.max(1);
                     let jump = (h / 2).max(1);
-                    let target = (state.position.line + jump)
+                    let target = (view.cursor.line + jump)
                         .min(state.active_buffer().line_count().saturating_sub(1));
                     let mut moved = false;
-                    while state.position.line < target {
-                        *sticky_visual_col =
-                            apply_vertical_motion(state, *sticky_visual_col, motion::down);
+                    while view.cursor.line < target {
+                        *sticky_visual_col = apply_vertical_motion(
+                            state,
+                            &mut view.cursor,
+                            *sticky_visual_col,
+                            motion::down,
+                        );
                         moved = true;
                     }
                     if !moved {
-                        // Attempt single down if at end to allow clamp behavior test expectations
-                        *sticky_visual_col =
-                            apply_vertical_motion(state, *sticky_visual_col, motion::down);
+                        *sticky_visual_col = apply_vertical_motion(
+                            state,
+                            &mut view.cursor,
+                            *sticky_visual_col,
+                            motion::down,
+                        );
                     }
                 }
                 MotionKind::PageHalfUp => {
                     let h = state.last_text_height.max(1);
                     let jump = (h / 2).max(1);
-                    let target = state.position.line.saturating_sub(jump);
+                    let target = view.cursor.line.saturating_sub(jump);
                     let mut moved = false;
-                    while state.position.line > target {
-                        *sticky_visual_col =
-                            apply_vertical_motion(state, *sticky_visual_col, motion::up);
+                    while view.cursor.line > target {
+                        *sticky_visual_col = apply_vertical_motion(
+                            state,
+                            &mut view.cursor,
+                            *sticky_visual_col,
+                            motion::up,
+                        );
                         moved = true;
                     }
                     if !moved {
-                        *sticky_visual_col =
-                            apply_vertical_motion(state, *sticky_visual_col, motion::up);
+                        *sticky_visual_col = apply_vertical_motion(
+                            state,
+                            &mut view.cursor,
+                            *sticky_visual_col,
+                            motion::up,
+                        );
                     }
                 }
             }
-            if before != state.position {
+            if before != view.cursor {
                 DispatchResult::dirty()
             } else {
                 DispatchResult::clean()
@@ -183,7 +210,8 @@ pub fn dispatch(
                     match open_file(&path) {
                         OpenFileResult::Success(s) => {
                             state.buffers[state.active] = s.buffer;
-                            state.position = Position::origin();
+                            // Reset view cursor to origin (cursor now owned by View in Phase 3 Step 3.2).
+                            view.cursor = Position::origin();
                             state.file_name = Some(s.file_name);
                             state.dirty = false;
                             state.original_line_ending = s.original_line_ending;
@@ -226,11 +254,11 @@ pub fn dispatch(
                 if matches!(state.mode, Mode::Insert) {
                     let span = tracing::trace_span!("edit_insert", grapheme = %g);
                     let _e = span.enter();
-                    state.begin_insert_coalescing();
+                    state.begin_insert_coalescing(view.cursor);
                     state.note_insert_edit();
-                    let mut pos = state.position;
+                    let mut pos = view.cursor;
                     state.active_buffer_mut().insert_grapheme(&mut pos, &g);
-                    state.position = pos;
+                    view.cursor = pos;
                     if !state.dirty {
                         state.dirty = true;
                     }
@@ -243,11 +271,11 @@ pub fn dispatch(
                 if matches!(state.mode, Mode::Insert) {
                     let span = tracing::trace_span!("edit_newline");
                     let _e = span.enter();
-                    state.begin_insert_coalescing();
+                    state.begin_insert_coalescing(view.cursor);
                     state.note_insert_edit();
-                    let mut pos = state.position;
+                    let mut pos = view.cursor;
                     state.active_buffer_mut().insert_newline(&mut pos);
-                    state.position = pos;
+                    view.cursor = pos;
                     state.end_insert_coalescing();
                     if !state.dirty {
                         state.dirty = true;
@@ -261,11 +289,11 @@ pub fn dispatch(
                 if matches!(state.mode, Mode::Insert) {
                     let span = tracing::trace_span!("edit_backspace");
                     let _e = span.enter();
-                    state.begin_insert_coalescing(); // ensure pre-edit snapshot captured once per run
+                    state.begin_insert_coalescing(view.cursor); // ensure pre-edit snapshot captured once per run
                     state.note_insert_edit();
-                    let mut pos = state.position;
+                    let mut pos = view.cursor;
                     state.active_buffer_mut().delete_grapheme_before(&mut pos);
-                    state.position = pos;
+                    view.cursor = pos;
                     if !state.dirty {
                         state.dirty = true;
                     }
@@ -278,10 +306,10 @@ pub fn dispatch(
                 if matches!(state.mode, Mode::Normal) {
                     let span = tracing::trace_span!("edit_delete_under");
                     let _e = span.enter();
-                    state.push_discrete_edit_snapshot();
-                    let mut pos = state.position;
+                    state.push_discrete_edit_snapshot(view.cursor);
+                    let mut pos = view.cursor;
                     state.active_buffer_mut().delete_grapheme_at(&mut pos);
-                    state.position = pos;
+                    view.cursor = pos;
                     if !state.dirty {
                         state.dirty = true;
                     }
@@ -294,7 +322,7 @@ pub fn dispatch(
         Action::Undo => {
             let span = tracing::trace_span!("undo");
             let _e = span.enter();
-            if state.undo() {
+            if state.undo(&mut view.cursor) {
                 DispatchResult::dirty()
             } else {
                 DispatchResult::clean()
@@ -303,7 +331,7 @@ pub fn dispatch(
         Action::Redo => {
             let span = tracing::trace_span!("redo");
             let _e = span.enter();
-            if state.redo() {
+            if state.redo(&mut view.cursor) {
                 DispatchResult::dirty()
             } else {
                 DispatchResult::clean()
@@ -314,23 +342,21 @@ pub fn dispatch(
 }
 
 // --- Local safe motion helpers (mirroring those in main until further extraction) ---
-fn apply_horizontal_motion(state: &mut EditorState, f: fn(&Buffer, &mut Position)) {
-    let buf = state.active_buffer();
-    let mut pos = state.position;
-    f(buf, &mut pos);
-    state.position = pos;
+fn apply_horizontal_motion(
+    state: &EditorState,
+    cursor: &mut Position,
+    f: fn(&Buffer, &mut Position),
+) {
+    f(state.active_buffer(), cursor);
 }
 
 fn apply_vertical_motion(
-    state: &mut EditorState,
+    state: &EditorState,
+    cursor: &mut Position,
     sticky: Option<usize>,
     f: fn(&Buffer, &mut Position, Option<usize>) -> Option<usize>,
 ) -> Option<usize> {
-    let buf = state.active_buffer();
-    let mut pos = state.position;
-    let new_sticky = f(buf, &mut pos, sticky);
-    state.position = pos;
-    new_sticky
+    f(state.active_buffer(), cursor, sticky)
 }
 
 #[cfg(test)]
@@ -343,43 +369,45 @@ mod tests {
     #[test]
     fn motion_left_right_dirty() {
         let buffer = Buffer::from_str("t", "ab\ncd").unwrap();
-        let mut state = EditorState::new(buffer);
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
         let mut sticky = None;
         // Move right
         let act = translate_key(
-            state.mode,
-            state.command_line.buffer(),
+            model.state().mode,
+            model.state().command_line.buffer(),
             &KeyEvent {
                 code: KeyCode::Char('l'),
                 mods: KeyModifiers::empty(),
             },
         )
         .unwrap();
-        assert!(dispatch(act, &mut state, &mut sticky, &[]).dirty);
+        assert!(dispatch(act, &mut model, &mut sticky, &[]).dirty);
         // Moving left should also be dirty (position changed)
         let act = translate_key(
-            state.mode,
-            state.command_line.buffer(),
+            model.state().mode,
+            model.state().command_line.buffer(),
             &KeyEvent {
                 code: KeyCode::Char('h'),
                 mods: KeyModifiers::empty(),
             },
         )
         .unwrap();
-        assert!(dispatch(act, &mut state, &mut sticky, &[]).dirty);
+        assert!(dispatch(act, &mut model, &mut sticky, &[]).dirty);
     }
 
     #[test]
     fn quit_command_execute() {
         let buffer = Buffer::from_str("t", "abc").unwrap();
-        let mut state = EditorState::new(buffer);
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
         let mut sticky = None;
         // Simulate entering :q
-        dispatch(Action::CommandStart, &mut state, &mut sticky, &[]);
-        dispatch(Action::CommandChar('q'), &mut state, &mut sticky, &[]);
+        dispatch(Action::CommandStart, &mut model, &mut sticky, &[]);
+        dispatch(Action::CommandChar('q'), &mut model, &mut sticky, &[]);
         let res = dispatch(
             Action::CommandExecute(":q".into()),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
@@ -396,30 +424,39 @@ mod tests {
             writeln!(f, "Hello Edit Command").unwrap();
         }
         let buffer = Buffer::from_str("t", "initial").unwrap();
-        let mut state = EditorState::new(buffer);
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
         let mut sticky = None;
         // Simulate entering :e <path>
-        dispatch(Action::CommandStart, &mut state, &mut sticky, &[]);
+        dispatch(Action::CommandStart, &mut model, &mut sticky, &[]);
         for ch in format!("e {}", file_path.display()).chars() {
-            dispatch(Action::CommandChar(ch), &mut state, &mut sticky, &[]);
+            dispatch(Action::CommandChar(ch), &mut model, &mut sticky, &[]);
         }
         let res = dispatch(
             Action::CommandExecute(format!(":e {}", file_path.display())),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         assert!(res.dirty);
-        assert!(state.file_name.as_ref().is_some());
+        assert!(model.state().file_name.as_ref().is_some());
         assert!(
-            state
+            model
+                .state()
                 .active_buffer()
                 .line(0)
                 .unwrap()
                 .starts_with("Hello Edit Command")
         );
-        assert!(!state.dirty, "buffer must be clean after load");
-        assert!(state.ephemeral_status.as_ref().map(|m| m.text.as_str()) == Some("Opened"));
+        assert!(!model.state().dirty, "buffer must be clean after load");
+        assert!(
+            model
+                .state()
+                .ephemeral_status
+                .as_ref()
+                .map(|m| m.text.as_str())
+                == Some("Opened")
+        );
     }
 
     #[test]
@@ -429,22 +466,23 @@ mod tests {
         let file_path = dir.path().join("write_test.txt");
         // Start with named buffer by loading file via :e logic path to set file_name
         let initial = Buffer::from_str("t", "hello").unwrap();
-        let mut state = EditorState::new(initial);
+        let state = EditorState::new(initial);
+        let mut model = EditorModel::new(state);
         let mut sticky = None;
         // Assign file_name manually to simulate earlier open (simpler than invoking :e again here)
-        state.file_name = Some(file_path.clone());
-        state.dirty = true; // pretend modified
+        model.state_mut().file_name = Some(file_path.clone());
+        model.state_mut().dirty = true; // pretend modified
         // Execute :w
-        dispatch(Action::CommandStart, &mut state, &mut sticky, &[]);
-        dispatch(Action::CommandChar('w'), &mut state, &mut sticky, &[]);
+        dispatch(Action::CommandStart, &mut model, &mut sticky, &[]);
+        dispatch(Action::CommandChar('w'), &mut model, &mut sticky, &[]);
         let res = dispatch(
             Action::CommandExecute(":w".into()),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         assert!(res.dirty);
-        assert!(!state.dirty, "dirty flag should clear after write");
+        assert!(!model.state().dirty, "dirty flag should clear after write");
         // Confirm file content
         let mut f = std::fs::File::open(&file_path).unwrap();
         let mut s = String::new();
@@ -455,88 +493,112 @@ mod tests {
     #[test]
     fn write_command_without_filename_logs_and_keeps_dirty() {
         let buffer = Buffer::from_str("t", "scratch buffer").unwrap();
-        let mut state = EditorState::new(buffer);
-        state.dirty = true;
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        model.state_mut().dirty = true;
         let mut sticky = None;
-        dispatch(Action::CommandStart, &mut state, &mut sticky, &[]);
-        dispatch(Action::CommandChar('w'), &mut state, &mut sticky, &[]);
+        dispatch(Action::CommandStart, &mut model, &mut sticky, &[]);
+        dispatch(Action::CommandChar('w'), &mut model, &mut sticky, &[]);
         let res = dispatch(
             Action::CommandExecute(":w".into()),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         assert!(res.dirty);
-        assert!(state.dirty, "dirty flag should remain when no filename");
-        assert!(state.ephemeral_status.as_ref().map(|m| m.text.as_str()) == Some("No filename"));
+        assert!(
+            model.state().dirty,
+            "dirty flag should remain when no filename"
+        );
+        assert!(
+            model
+                .state()
+                .ephemeral_status
+                .as_ref()
+                .map(|m| m.text.as_str())
+                == Some("No filename")
+        );
     }
 
     #[test]
     fn edit_command_open_failure_sets_ephemeral() {
         let buffer = Buffer::from_str("t", "initial").unwrap();
-        let mut state = EditorState::new(buffer);
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
         let mut sticky = None;
-        dispatch(Action::CommandStart, &mut state, &mut sticky, &[]);
+        dispatch(Action::CommandStart, &mut model, &mut sticky, &[]);
         for ch in "e non_existent_file_12345".chars() {
-            dispatch(Action::CommandChar(ch), &mut state, &mut sticky, &[]);
+            dispatch(Action::CommandChar(ch), &mut model, &mut sticky, &[]);
         }
         dispatch(
             Action::CommandExecute(":e non_existent_file_12345".into()),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
-        assert!(state.ephemeral_status.as_ref().map(|m| m.text.as_str()) == Some("Open failed"));
+        assert!(
+            model
+                .state()
+                .ephemeral_status
+                .as_ref()
+                .map(|m| m.text.as_str())
+                == Some("Open failed")
+        );
     }
 
     #[test]
     fn dirty_flag_sets_on_first_insert() {
         let buffer = Buffer::from_str("t", "").unwrap();
-        let mut state = EditorState::new(buffer);
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
         let mut sticky = None;
-        assert!(!state.dirty, "initial dirty should be false");
+        assert!(!model.state().dirty, "initial dirty should be false");
         // Enter insert and type a grapheme
         dispatch(
             Action::ModeChange(ModeChange::EnterInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("a".into())),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
-        assert!(state.dirty, "dirty should be true after first mutation");
+        assert!(
+            model.state().dirty,
+            "dirty should be true after first mutation"
+        );
     }
 
     #[test]
     fn undo_does_not_clear_dirty() {
         let buffer = Buffer::from_str("t", "").unwrap();
-        let mut state = EditorState::new(buffer);
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
         let mut sticky = None;
         dispatch(
             Action::ModeChange(ModeChange::EnterInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("a".into())),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         dispatch(
             Action::ModeChange(ModeChange::LeaveInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
-        assert!(state.dirty);
-        dispatch(Action::Undo, &mut state, &mut sticky, &[]);
-        assert!(state.dirty, "dirty should remain true after undo");
+        assert!(model.state().dirty);
+        dispatch(Action::Undo, &mut model, &mut sticky, &[]);
+        assert!(model.state().dirty, "dirty should remain true after undo");
     }
 
     #[test]
@@ -545,85 +607,87 @@ mod tests {
         let file_path = dir.path().join("dirty_cycle.txt");
         // Start with named buffer
         let buffer = Buffer::from_str("t", "start").unwrap();
-        let mut state = EditorState::new(buffer);
-        state.file_name = Some(file_path.clone());
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        model.state_mut().file_name = Some(file_path.clone());
         let mut sticky = None;
         // Mutate
         dispatch(
             Action::ModeChange(ModeChange::EnterInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("x".into())),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         dispatch(
             Action::ModeChange(ModeChange::LeaveInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
-        assert!(state.dirty);
+        assert!(model.state().dirty);
         // Write
-        dispatch(Action::CommandStart, &mut state, &mut sticky, &[]);
-        dispatch(Action::CommandChar('w'), &mut state, &mut sticky, &[]);
+        dispatch(Action::CommandStart, &mut model, &mut sticky, &[]);
+        dispatch(Action::CommandChar('w'), &mut model, &mut sticky, &[]);
         dispatch(
             Action::CommandExecute(":w".into()),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
-        assert!(!state.dirty, "dirty should clear after write");
+        assert!(!model.state().dirty, "dirty should clear after write");
         // New edit sets it again
         dispatch(
             Action::ModeChange(ModeChange::EnterInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("y".into())),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
-        assert!(state.dirty, "dirty should set again after new edit");
+        assert!(model.state().dirty, "dirty should set again after new edit");
     }
 
     #[test]
     fn undo_redo_cycle() {
         let buffer = Buffer::from_str("t", "").unwrap();
-        let mut state = EditorState::new(buffer);
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
         let mut sticky = None;
         // Enter insert and insert a char
         dispatch(
             Action::ModeChange(ModeChange::EnterInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("a".into())),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         dispatch(
             Action::ModeChange(ModeChange::LeaveInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         // Undo
-        assert!(dispatch(Action::Undo, &mut state, &mut sticky, &[]).dirty);
-        assert_eq!(state.active_buffer().line(0).unwrap(), "");
+        assert!(dispatch(Action::Undo, &mut model, &mut sticky, &[]).dirty);
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "");
         // Redo
-        assert!(dispatch(Action::Redo, &mut state, &mut sticky, &[]).dirty);
-        assert_eq!(state.active_buffer().line(0).unwrap(), "a");
+        assert!(dispatch(Action::Redo, &mut model, &mut sticky, &[]).dirty);
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "a");
     }
 
     #[test]
@@ -639,23 +703,24 @@ mod tests {
         let obs = CountObs(counter.clone());
         let observers: Vec<Box<dyn ActionObserver>> = vec![Box::new(obs)];
         let buffer = Buffer::from_str("t", "").unwrap();
-        let mut state = EditorState::new(buffer);
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
         let mut sticky = None;
         dispatch(
             Action::ModeChange(ModeChange::EnterInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &observers,
         );
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("a".into())),
-            &mut state,
+            &mut model,
             &mut sticky,
             &observers,
         );
         dispatch(
             Action::ModeChange(ModeChange::LeaveInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &observers,
         );
@@ -669,19 +734,20 @@ mod tests {
     #[test]
     fn empty_buffer_backspace_noop() {
         let buffer = Buffer::from_str("t", "").unwrap();
-        let mut state = EditorState::new(buffer);
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
         let mut sticky = None;
         // Enter insert then hit backspace (should not panic or change)
         dispatch(
             Action::ModeChange(ModeChange::EnterInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
-        let before = state.position;
+        let before = model.active_view().cursor;
         let res = dispatch(
             Action::Edit(EditKind::Backspace),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
@@ -689,34 +755,41 @@ mod tests {
             res.dirty,
             "still considered edit path (render) even if no change"
         );
-        assert_eq!(state.position, before, "position unchanged");
-        assert_eq!(state.active_buffer().line(0).unwrap(), "");
+        assert_eq!(model.active_view().cursor, before, "cursor unchanged");
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "");
     }
 
     #[test]
     fn end_of_line_motion_clamp() {
         let buffer = Buffer::from_str("t", "short\nlonger line here").unwrap();
-        let mut state = EditorState::new(buffer);
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
         let mut sticky = None;
         // Move to end of first line
         dispatch(
             Action::Motion(MotionKind::LineEnd),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
-        let end_byte = state.position.byte;
+        let end_byte = model.active_view().cursor.byte;
         // Move down; position.byte should clamp within second line (not exceed its len)
         dispatch(
             Action::Motion(MotionKind::Down),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
-        assert!(state.position.byte <= state.active_buffer().line_byte_len(state.position.line));
+        assert!(
+            model.active_view().cursor.byte
+                <= model
+                    .state()
+                    .active_buffer()
+                    .line_byte_len(model.active_view().cursor.line)
+        );
         // Move up; should restore original end byte of first line
-        dispatch(Action::Motion(MotionKind::Up), &mut state, &mut sticky, &[]);
-        assert_eq!(state.position.byte, end_byte);
+        dispatch(Action::Motion(MotionKind::Up), &mut model, &mut sticky, &[]);
+        assert_eq!(model.active_view().cursor.byte, end_byte);
     }
 
     #[test]
@@ -727,32 +800,35 @@ mod tests {
             content.push_str(&format!("line{idx}\n", idx = i));
         }
         let buffer = Buffer::from_str("t", &content).unwrap();
-        let mut state = EditorState::new(buffer);
-        state.set_last_text_height(20); // pretend viewport shows 20 lines
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        model.state_mut().set_last_text_height(20); // pretend viewport shows 20 lines
         let mut sticky = None;
-        let start_line = state.position.line;
+        let start_line = model.active_view().cursor.line;
         // Dispatch PageHalfDown (~10 lines)
         let res = dispatch(
             Action::Motion(MotionKind::PageHalfDown),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         assert!(res.dirty);
+        let cur_line = model.active_view().cursor.line;
         assert!(
-            state.position.line >= start_line + 9 && state.position.line <= start_line + 11,
+            cur_line >= start_line + 9 && cur_line <= start_line + 11,
             "expected roughly half page down"
         );
-        let after_down = state.position.line;
+        let after_down = cur_line;
         // Page up returns near original (clamped)
         let _ = dispatch(
             Action::Motion(MotionKind::PageHalfUp),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
+        let up_line = model.active_view().cursor.line;
         assert!(
-            state.position.line <= after_down && state.position.line <= start_line + 2,
+            up_line <= after_down && up_line <= start_line + 2,
             "expected upward half page"
         );
     }
@@ -761,41 +837,43 @@ mod tests {
     fn page_half_respects_buffer_end() {
         // Small buffer: ensure we clamp and do not move beyond last line
         let buffer = Buffer::from_str("t", "a\nb\nc\n").unwrap(); // 4 lines (last empty due to trailing newline)
-        let mut state = EditorState::new(buffer);
-        state.set_last_text_height(10); // large viewport
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        model.state_mut().set_last_text_height(10); // large viewport
         let mut sticky = None;
         // Two half-page downs should land on last non-empty or final empty line (clamped)
         for _ in 0..2 {
             let _ = dispatch(
                 Action::Motion(MotionKind::PageHalfDown),
-                &mut state,
+                &mut model,
                 &mut sticky,
                 &[],
             );
         }
-        let last_index = state.active_buffer().line_count() - 1;
+        let last_index = model.state().active_buffer().line_count() - 1;
         assert_eq!(
-            state.position.line, last_index,
+            model.active_view().cursor.line,
+            last_index,
             "expected clamp to last line"
         );
         // Further down should not move
-        let before = state.position.line;
+        let before = model.active_view().cursor.line;
         let _ = dispatch(
             Action::Motion(MotionKind::PageHalfDown),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
-        assert_eq!(state.position.line, before);
+        assert_eq!(model.active_view().cursor.line, before);
         // Page up returns toward top (line 0 or 1 depending on jump)
         let _ = dispatch(
             Action::Motion(MotionKind::PageHalfUp),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         assert!(
-            state.position.line < last_index,
+            model.active_view().cursor.line < last_index,
             "should have moved up from last line"
         );
     }
@@ -804,113 +882,131 @@ mod tests {
     fn ctrl_d_ctrl_u_translate() {
         use core_events::{KeyEvent, KeyModifiers};
         let buffer = Buffer::from_str("t", "x\n".repeat(50).as_str()).unwrap();
-        let mut state = EditorState::new(buffer);
-        state.set_last_text_height(24);
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        model.state_mut().set_last_text_height(24);
         let mut sticky = None;
         let ctrl_d = KeyEvent {
             code: KeyCode::Char('d'),
             mods: KeyModifiers::CTRL,
         };
-        let act = crate::translate_key(state.mode, state.command_line.buffer(), &ctrl_d);
+        let act = crate::translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &ctrl_d,
+        );
         assert!(matches!(
             act,
             Some(Action::Motion(MotionKind::PageHalfDown))
         ));
-        let _ = dispatch(act.unwrap(), &mut state, &mut sticky, &[]);
+        let _ = dispatch(act.unwrap(), &mut model, &mut sticky, &[]);
         let ctrl_u = KeyEvent {
             code: KeyCode::Char('u'),
             mods: KeyModifiers::CTRL,
         };
-        let act2 = crate::translate_key(state.mode, state.command_line.buffer(), &ctrl_u);
+        let act2 = crate::translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &ctrl_u,
+        );
         assert!(matches!(act2, Some(Action::Motion(MotionKind::PageHalfUp))));
     }
 
     #[test]
     fn delete_under_at_eof_safe() {
         let buffer = Buffer::from_str("t", "abc").unwrap();
-        let mut state = EditorState::new(buffer);
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
         let mut sticky = None;
         // Move to end and attempt delete_under (no-op)
         dispatch(
             Action::Motion(MotionKind::LineEnd),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
-        let end_byte = state.position.byte;
-        let line_before = state.active_buffer().line(0).unwrap().to_string();
+        let end_byte = model.active_view().cursor.byte;
+        let line_before = model.state().active_buffer().line(0).unwrap().to_string();
         let res = dispatch(
             Action::Edit(EditKind::DeleteUnder),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         assert!(!res.quit, "should not quit");
-        assert_eq!(state.position.byte, end_byte);
-        assert_eq!(state.active_buffer().line(0).unwrap(), line_before);
+        assert_eq!(model.active_view().cursor.byte, end_byte);
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), line_before);
     }
 
     #[test]
     fn newline_undo_redo_at_file_end() {
         let buffer = Buffer::from_str("t", "abc").unwrap();
-        let mut state = EditorState::new(buffer);
+        let state = EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
         let mut sticky = None;
         dispatch(
             Action::ModeChange(ModeChange::EnterInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         // Move to end and insert newline then a char
         dispatch(
             Action::Motion(MotionKind::LineEnd),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         dispatch(
             Action::Edit(EditKind::InsertNewline),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         dispatch(
             Action::Edit(EditKind::InsertGrapheme("x".into())),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         );
         dispatch(
             Action::ModeChange(ModeChange::LeaveInsert),
-            &mut state,
+            &mut model,
             &mut sticky,
             &[],
         ); // boundary
         // Collect buffer content lines for verification (single buffer)
         let mut collected = String::new();
-        for i in 0..state.active_buffer().line_count() {
-            if let Some(l) = state.active_buffer().line(i) {
+        for i in 0..model.state().active_buffer().line_count() {
+            if let Some(l) = model.state().active_buffer().line(i) {
                 collected.push_str(&l);
             }
         }
         let after_insert = collected.clone();
         assert!(after_insert.starts_with("abc"));
         // Undo should remove entire run (newline + x)
-        dispatch(Action::Undo, &mut state, &mut sticky, &[]);
+        dispatch(Action::Undo, &mut model, &mut sticky, &[]);
         // After undo the buffer should match original single-line content (may or may not retain trailing newline; ensure content prefix matches and no second non-empty line)
-        assert!(state.active_buffer().line(0).unwrap().starts_with("abc"));
-        if state.active_buffer().line_count() > 1 {
-            let l1 = state.active_buffer().line(1).unwrap();
+        assert!(
+            model
+                .state()
+                .active_buffer()
+                .line(0)
+                .unwrap()
+                .starts_with("abc")
+        );
+        if model.state().active_buffer().line_count() > 1 {
+            let l1 = model.state().active_buffer().line(1).unwrap();
             assert!(
                 l1.is_empty(),
                 "second line should be empty after undo if present"
             );
         }
         // Redo should restore
-        dispatch(Action::Redo, &mut state, &mut sticky, &[]);
+        dispatch(Action::Redo, &mut model, &mut sticky, &[]);
         let mut redo_collected = String::new();
-        for i in 0..state.active_buffer().line_count() {
-            if let Some(l) = state.active_buffer().line(i) {
+        for i in 0..model.state().active_buffer().line_count() {
+            if let Some(l) = model.state().active_buffer().line(i) {
                 redo_collected.push_str(&l);
             }
         }

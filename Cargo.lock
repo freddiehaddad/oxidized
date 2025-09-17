@@ -195,6 +195,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "core-events",
+ "core-model",
  "core-state",
  "core-text",
  "tempfile",
@@ -236,7 +237,6 @@ dependencies = [
 name = "core-model"
 version = "0.1.0"
 dependencies = [
- "core-actions",
  "core-state",
  "core-text",
 ]
@@ -248,6 +248,7 @@ dependencies = [
  "ahash",
  "anyhow",
  "bitflags",
+ "core-model",
  "core-state",
  "core-terminal",
  "core-text",
