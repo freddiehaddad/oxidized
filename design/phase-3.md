@@ -225,6 +225,30 @@ Timing:
 - No behavioral rendering changes yet; still full frame path only (breadth-first scaffolding).
 - Prepares for Steps 5–8 without churn in engine signatures.
 
+### Step 5 Details
+
+- Added `core-render::partial_diff` module with `classify_viewport_changes` performing
+    per-viewport line hash comparison against `PartialCache`.
+- Cold criteria: (a) cache empty, (b) viewport start changed, or (c) width changed.
+    Cold path resets cache and classifies all visible text rows as changed. Visible rows
+    = `height - 1` to reserve a status line; includes trailing empty line when the
+    buffer ends with a newline (ropey exposes it as a line) — test documents this.
+- Warm path recomputes `(len, hash)` after trimming trailing newline/CR and only
+    updates entries + records lines whose pair changed. Height-only viewport changes
+    that produce a cache length mismatch also trigger a conservative cold reset
+    (breadth-first correctness > premature complexity).
+- Metrics: increments `dirty_lines_marked` & `dirty_candidate_lines` by viewport
+    line count (candidate filtering deferred) and `dirty_lines_repainted` by number
+    of changed lines (all on cold start, possibly zero on warm unchanged frame).
+- Integration: invoked at start of `RenderEngine::render_full` (still full frame
+    emission) so hashing path is battle-tested before partial output activation
+    in Steps 7–8. No behavioral terminal change yet → flicker-free baseline intact.
+- Tests: cold population, unchanged warm frame, single-line edit (cluster insert),
+    newline insertion shifting lines. Adjusted initial test to account for trailing
+    empty line semantics; added explanatory comment to prevent future regressions.
+- Aligns doc terminology with code (`dirty_candidate_lines` instead of earlier
+    draft `dirty_lines_candidates`). Single source of truth principle upheld.
+
 ---
 (Each completed step updates this document; commit subjects follow template and reference Phase 3 step numbers.)
 
@@ -238,7 +262,7 @@ Timing:
 - [x] Step 3.2 – Migrate cursor & viewport_first_line into View + auto_scroll refactor (merged former 3.2/3.3)
 - [x] Step 3.3 – Cleanup & docs finalize migration (was 3.4)
 - [x] Step 4 – Cache last cursor line + metrics scaffold
-- [ ] Step 5 – Hash compare logic tests (still full fallback)
+- [x] Step 5 – Hash compare logic tests (still full fallback)
 - [ ] Step 6 – Terminal writer abstraction (prep partial)
 - [ ] Step 7 – Activate CursorOnly partial rendering
 - [ ] Step 8 – Extend partial to Lines semantic delta

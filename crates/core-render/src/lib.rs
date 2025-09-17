@@ -24,12 +24,7 @@
 
 use anyhow::Result;
 use bitflags::bitflags;
-use crossterm::{
-    cursor::MoveTo,
-    queue,
-    style::Print,
-    terminal::{Clear, ClearType},
-};
+use crossterm::{cursor::MoveTo, queue, style::Print};
 use std::io::{Write, stdout};
 
 bitflags! {
@@ -92,7 +87,6 @@ pub struct Renderer;
 impl Renderer {
     pub fn render(frame: &Frame) -> Result<()> {
         let mut out = stdout();
-        queue!(out, Clear(ClearType::All))?;
         queue!(out, MoveTo(0, 0))?;
         let mut x = 0u16;
         let mut y = 0u16;
@@ -118,6 +112,7 @@ impl Renderer {
 
 pub mod dirty; // Phase 3 Step 1: dirty line tracking (external to RenderDelta)
 pub mod partial_cache; // Phase 3 Step 2: line hash + cache skeleton
+pub mod partial_diff; // New module for partial differences
 pub mod partial_metrics; // Phase 3 Step 4: metrics scaffold
 pub mod render_engine;
 pub mod scheduler;

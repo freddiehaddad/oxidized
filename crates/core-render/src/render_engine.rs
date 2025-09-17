@@ -3,6 +3,7 @@
 //! cursor span metadata (no behavioral change yet).
 
 use crate::partial_cache::PartialCache;
+use crate::partial_diff::classify_viewport_changes;
 use crate::partial_metrics::{RenderPathMetrics, RenderPathMetricsSnapshot};
 use crate::{CellFlags, Frame, Renderer};
 use anyhow::Result;
@@ -43,14 +44,16 @@ impl RenderEngine {
     /// Build + render a full frame (current behavior; breadth-first guarantee).
     pub fn render_full(&mut self, state: &EditorState, view: &View, w: u16, h: u16) -> Result<()> {
         let start = std::time::Instant::now();
+        // Step 5: classify hash differences (still full frame output). We run this
+        // before building the frame so the hashing path always executes each frame.
+        classify_viewport_changes(state, view, w, h, &mut self.cache, &self.metrics, None);
+
         let mut frame = build_content_frame(state, view, w, h);
         self.apply_cursor_overlay(state, view, &mut frame, w, h);
         apply_status_line(state, view, &mut frame, w, h);
         let res = Renderer::render(&frame);
-        // Update metrics + last cursor line cache (Phase 3 Step 4 scaffolding)
-        if let Some(line) = self.last_cursor.line {
-            self.cache.last_cursor_line = Some(line);
-        }
+        // Update last cursor line in cache.
+        self.cache.last_cursor_line = Some(view.cursor.line);
         let dur = start.elapsed().as_nanos() as u64;
         self.metrics
             .full_frames
