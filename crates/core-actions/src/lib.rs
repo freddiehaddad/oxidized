@@ -89,11 +89,8 @@ pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Optio
         {
             Some(Action::Motion(MotionKind::PageHalfUp))
         }
-        // Command start only if not already active. Runtime input thread currently emits
-        // `KeyCode::Colon` (distinct variant) while some tests previously constructed
-        // `KeyCode::Char(':')`. Support BOTH to avoid a silent divergence like the regression
-        // where ':' stopped opening the command line. Treat them identically.
-        KeyCode::Char(':') | KeyCode::Colon => {
+        // Command start only if not already active (Refactor R2 Step 8 normalization: Colon variant removed)
+        KeyCode::Char(':') => {
             if pending_command.is_empty() {
                 Some(Action::CommandStart)
             } else if pending_command.starts_with(':') {
@@ -259,17 +256,5 @@ mod tests {
         assert!(translate_key(Mode::Normal, "", &plain).is_none());
     }
 
-    #[test]
-    fn colon_variant_translation() {
-        // Explicitly construct a KeyEvent using the Colon variant (emitted by input thread)
-        let colon_event = KeyEvent {
-            code: KeyCode::Colon,
-            mods: KeyModifiers::empty(),
-        };
-        let start = translate_key(Mode::Normal, "", &colon_event);
-        assert!(
-            matches!(start, Some(Action::CommandStart)),
-            "Colon variant should start command mode"
-        );
-    }
+    // Removed: colon_variant_translation test (Refactor R2 Step 8) – KeyCode::Colon eliminated; ':' represented solely via KeyCode::Char(':').
 }

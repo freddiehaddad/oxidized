@@ -4,7 +4,7 @@
 
 use core_events::{
     CHANNEL_BLOCKING_SENDS, CHANNEL_SEND_FAILURES, Event, InputEvent, KeyCode, KeyEvent,
-    KeyModifiers,
+    KeyModifiers, normalize_keycode,
 };
 use crossterm::event::{
     self, Event as CEvent, KeyCode as CKeyCode, KeyEventKind as CKind, KeyModifiers as CMods,
@@ -26,7 +26,6 @@ pub fn spawn_input_thread(sender: tokio::sync::mpsc::Sender<Event>) -> thread::J
                     }
                     let mods = map_mods(k.modifiers);
                     let code = match k.code {
-                        CKeyCode::Char(':') => KeyCode::Colon,
                         CKeyCode::Char(c) => KeyCode::Char(c),
                         CKeyCode::Enter => KeyCode::Enter,
                         CKeyCode::Esc => KeyCode::Esc,
@@ -50,7 +49,10 @@ pub fn spawn_input_thread(sender: tokio::sync::mpsc::Sender<Event>) -> thread::J
                         CHANNEL_BLOCKING_SENDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         continue;
                     }
-                    let evt = Event::Input(InputEvent::Key(KeyEvent { code, mods }));
+                    let evt = Event::Input(InputEvent::Key(KeyEvent {
+                        code: normalize_keycode(code),
+                        mods,
+                    }));
                     if sender.blocking_send(evt).is_err() {
                         CHANNEL_SEND_FAILURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         break;

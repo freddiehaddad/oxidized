@@ -68,13 +68,21 @@ pub enum KeyCode {
     Char(char),
     Enter,
     Esc,
-    Colon,
     Backspace,
     Tab,
     Up,
     Down,
     Left,
     Right,
+}
+
+/// Normalize a raw KeyCode that may have historically used dedicated printable variants
+/// (Refactor R2 Step 8). After this step, callers should construct only standard forms
+/// (e.g., ':' becomes `KeyCode::Char(':')`). Retained as a future extension point if
+/// additional raw platform translations are introduced.
+pub fn normalize_keycode(code: KeyCode) -> KeyCode {
+    // Currently identity; future raw variants can map here.
+    code
 }
 
 bitflags::bitflags! {

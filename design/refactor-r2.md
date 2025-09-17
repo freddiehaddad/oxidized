@@ -117,7 +117,7 @@ Out of Scope (Deferred to Phase 3 or later):
 - [x] Step 5 – IO helper extraction
 - [x] Step 6 – EditorModel wrapper
 - [x] Step 7 – Config re-clamp on resize
-- [ ] Step 8 – Key normalization removal Colon
+- [x] Step 8 – Key normalization removal Colon
 - [ ] Step 9 – Metrics grouping struct
 - [ ] Step 10 – Semantic delta scenarios tests
 - [ ] Step 11 – Render perf timing hook
