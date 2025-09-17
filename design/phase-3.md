@@ -212,7 +212,7 @@ Timing:
 (Will be updated as steps complete.)
 
 - [x] Step 1 – DirtyLinesTracker integration (dispatcher markings)
-- [ ] Step 2 – Line hash structs + PartialCache skeleton (ahash dep)
+- [x] Step 2 – Line hash structs + PartialCache skeleton (ahash dep)
 - [ ] Step 3 – View struct introduction & cursor/viewport migration
 - [ ] Step 4 – Cache last cursor line + metrics scaffold
 - [ ] Step 5 – Hash compare logic tests (still full fallback)

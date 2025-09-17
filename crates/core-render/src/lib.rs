@@ -113,6 +113,7 @@ impl Renderer {
 }
 
 pub mod dirty; // Phase 3 Step 1: dirty line tracking (external to RenderDelta)
+pub mod partial_cache; // Phase 3 Step 2: line hash + cache skeleton
 pub mod render_engine;
 pub mod scheduler;
 pub mod status;
