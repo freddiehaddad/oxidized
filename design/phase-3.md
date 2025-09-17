@@ -213,7 +213,10 @@ Timing:
 
 - [x] Step 1 – DirtyLinesTracker integration (dispatcher markings)
 - [x] Step 2 – Line hash structs + PartialCache skeleton (ahash dep)
-- [ ] Step 3 – View struct introduction & cursor/viewport migration
+- [x] Step 3.1 – Add View struct & single-view storage
+- [ ] Step 3.2 – Migrate cursor from state to View
+- [ ] Step 3.3 – Migrate viewport_first_line + auto_scroll refactor
+- [ ] Step 3.4 – Cleanup & docs finalize migration
 - [ ] Step 4 – Cache last cursor line + metrics scaffold
 - [ ] Step 5 – Hash compare logic tests (still full fallback)
 - [ ] Step 6 – Terminal writer abstraction (prep partial)
