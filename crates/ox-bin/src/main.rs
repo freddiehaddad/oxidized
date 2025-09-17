@@ -179,7 +179,13 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            Event::Input(InputEvent::Resize(_, _)) => { /* trigger redraw below */ }
+            Event::Input(InputEvent::Resize(_, h)) => {
+                // Recompute effective vertical margin (Refactor R2 Step 7)
+                if let Some(new_margin) = config.recompute_after_resize(h.saturating_sub(1)) {
+                    model.state_mut().config_vertical_margin = new_margin as usize;
+                    scheduler.mark(RenderDelta::StatusLine);
+                }
+            }
             Event::RenderRequested => {}
             Event::Command(CommandEvent::Quit) => {
                 break;

@@ -91,6 +91,18 @@ impl Config {
         self.effective_vertical_margin = clamped;
         clamped
     }
+
+    /// Recompute effective vertical margin on a viewport height change (Refactor R2 Step 7).
+    /// Returns `Some(new_margin)` if the effective value changed, else `None`.
+    pub fn recompute_after_resize(&mut self, new_viewport_height: u16) -> Option<u16> {
+        let prev = self.effective_vertical_margin;
+        let _ = self.apply_viewport_height(new_viewport_height); // reuse clamp logic
+        if self.effective_vertical_margin != prev {
+            Some(self.effective_vertical_margin)
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -122,5 +134,21 @@ mod tests {
         let eff = cfg.apply_viewport_height(20);
         assert_eq!(eff, 9);
         assert_eq!(cfg.effective_vertical_margin, 9);
+    }
+
+    #[test]
+    fn recompute_after_resize_changes_when_height_shrinks() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), "[scroll.margin]\nvertical = 10\n").unwrap();
+        let mut cfg = load_from(Some(tmp.path().to_path_buf())).unwrap();
+        cfg.apply_viewport_height(50); // plenty of room, margin=10
+        assert_eq!(cfg.effective_vertical_margin, 10);
+        // Shrink height so max decreases below 10: height=10 -> max=(10-2)/2=4
+        let changed = cfg.recompute_after_resize(10);
+        assert_eq!(changed, Some(4));
+        assert_eq!(cfg.effective_vertical_margin, 4);
+        // Another resize to slightly larger but same cap should keep value stable
+        let changed2 = cfg.recompute_after_resize(11); // max=(11-2)/2=4
+        assert_eq!(changed2, None);
     }
 }
