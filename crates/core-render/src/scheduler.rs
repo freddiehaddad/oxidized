@@ -40,6 +40,8 @@ pub enum RenderDelta {
 pub struct RenderScheduler {
     /// Queue of deltas recorded since last `consume`.
     pending: Vec<RenderDelta>,
+    /// Metrics accumulator (Refactor R2 Step 9).
+    metrics: RenderDeltaMetrics,
 }
 
 /// Result of a consume operation.
@@ -54,32 +56,75 @@ pub struct RenderDecision {
 }
 
 /// Simple atomic metrics for delta kind frequency (Phase 2 / Refactor R2 instrumentation).
-pub mod metrics {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    pub static DELTA_FULL: AtomicU64 = AtomicU64::new(0);
-    pub static DELTA_LINES: AtomicU64 = AtomicU64::new(0);
-    pub static DELTA_SCROLL: AtomicU64 = AtomicU64::new(0);
-    pub static DELTA_STATUS: AtomicU64 = AtomicU64::new(0);
-    pub static DELTA_CURSOR: AtomicU64 = AtomicU64::new(0);
+#[derive(Debug, Default)]
+pub struct RenderDeltaMetrics {
+    full: std::sync::atomic::AtomicU64,
+    lines: std::sync::atomic::AtomicU64,
+    scroll: std::sync::atomic::AtomicU64,
+    status_line: std::sync::atomic::AtomicU64,
+    cursor_only: std::sync::atomic::AtomicU64,
+    collapsed_scroll: std::sync::atomic::AtomicU64,
+    suppressed_scroll: std::sync::atomic::AtomicU64,
+    frames_rendered: std::sync::atomic::AtomicU64,
+}
 
-    pub fn incr(delta: &crate::scheduler::RenderDelta) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderDeltaMetricsSnapshot {
+    pub full: u64,
+    pub lines: u64,
+    pub scroll: u64,
+    pub status_line: u64,
+    pub cursor_only: u64,
+    pub collapsed_scroll: u64,
+    pub suppressed_scroll: u64,
+    pub frames_rendered: u64,
+}
+
+impl RenderDeltaMetrics {
+    pub fn snapshot(&self) -> RenderDeltaMetricsSnapshot {
+        use std::sync::atomic::Ordering::Relaxed;
+        RenderDeltaMetricsSnapshot {
+            full: self.full.load(Relaxed),
+            lines: self.lines.load(Relaxed),
+            scroll: self.scroll.load(Relaxed),
+            status_line: self.status_line.load(Relaxed),
+            cursor_only: self.cursor_only.load(Relaxed),
+            collapsed_scroll: self.collapsed_scroll.load(Relaxed),
+            suppressed_scroll: self.suppressed_scroll.load(Relaxed),
+            frames_rendered: self.frames_rendered.load(Relaxed),
+        }
+    }
+    fn incr_semantic(&self, delta: &RenderDelta) {
+        use std::sync::atomic::Ordering::Relaxed;
         match delta {
-            crate::scheduler::RenderDelta::Full => {
-                DELTA_FULL.fetch_add(1, Ordering::Relaxed);
+            RenderDelta::Full => {
+                self.full.fetch_add(1, Relaxed);
             }
-            crate::scheduler::RenderDelta::Lines(_) => {
-                DELTA_LINES.fetch_add(1, Ordering::Relaxed);
+            RenderDelta::Lines(_) => {
+                self.lines.fetch_add(1, Relaxed);
             }
-            crate::scheduler::RenderDelta::Scroll { .. } => {
-                DELTA_SCROLL.fetch_add(1, Ordering::Relaxed);
+            RenderDelta::Scroll { .. } => {
+                self.scroll.fetch_add(1, Relaxed);
             }
-            crate::scheduler::RenderDelta::StatusLine => {
-                DELTA_STATUS.fetch_add(1, Ordering::Relaxed);
+            RenderDelta::StatusLine => {
+                self.status_line.fetch_add(1, Relaxed);
             }
-            crate::scheduler::RenderDelta::CursorOnly => {
-                DELTA_CURSOR.fetch_add(1, Ordering::Relaxed);
+            RenderDelta::CursorOnly => {
+                self.cursor_only.fetch_add(1, Relaxed);
             }
         }
+    }
+    fn incr_collapsed_scroll(&self) {
+        self.collapsed_scroll
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    fn incr_suppressed_scroll(&self) {
+        self.suppressed_scroll
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    fn incr_frame(&self) {
+        self.frames_rendered
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -87,7 +132,13 @@ impl RenderScheduler {
     pub fn new() -> Self {
         Self {
             pending: Vec::new(),
+            metrics: RenderDeltaMetrics::default(),
         }
+    }
+
+    /// Obtain a snapshot of current metrics (Refactor R2 Step 9).
+    pub fn metrics_snapshot(&self) -> RenderDeltaMetricsSnapshot {
+        self.metrics.snapshot()
     }
 
     /// Record a new delta. Multiple calls accumulate until `consume()`.
@@ -107,7 +158,8 @@ impl RenderScheduler {
         let merged = self.collapse();
         tracing::trace!(?merged, "render_delta_collapse");
         self.pending.clear();
-        metrics::incr(&merged);
+        self.metrics.incr_semantic(&merged);
+        self.metrics.incr_frame();
         Some(RenderDecision {
             semantic: merged,
             effective: RenderDelta::Full,
@@ -124,6 +176,7 @@ impl RenderScheduler {
         let mut line_range: Option<std::ops::Range<usize>> = None;
         let mut scroll_old_first: Option<usize> = None;
         let mut scroll_new_first: Option<usize> = None;
+        let mut scroll_events = 0usize;
         for d in &self.pending {
             match d {
                 RenderDelta::Full => return RenderDelta::Full, // already handled above
@@ -142,6 +195,7 @@ impl RenderScheduler {
                     old_first,
                     new_first,
                 } => {
+                    scroll_events += 1;
                     if scroll_old_first.is_none() {
                         scroll_old_first = Some(*old_first);
                     }
@@ -151,10 +205,18 @@ impl RenderScheduler {
         }
         // Precedence: Lines outrank all other semantic kinds.
         if let Some(r) = line_range {
+            if scroll_events > 0 {
+                self.metrics.incr_suppressed_scroll();
+            }
             return RenderDelta::Lines(r);
         }
         // Next: Scroll (if any recorded and not superseded by Lines).
         if let (Some(of), Some(nf)) = (scroll_old_first, scroll_new_first) {
+            if scroll_events > 1 {
+                for _ in 1..scroll_events {
+                    self.metrics.incr_collapsed_scroll();
+                }
+            }
             return RenderDelta::Scroll {
                 old_first: of,
                 new_first: nf,
@@ -285,5 +347,53 @@ mod tests {
         assert_eq!(decision.semantic, RenderDelta::CursorOnly);
         assert_eq!(decision.effective, RenderDelta::Full);
         assert!(s.consume().is_none(), "second consume empty");
+    }
+
+    #[test]
+    fn metrics_scroll_collapsed_and_suppressed() {
+        let mut s = RenderScheduler::new();
+        // Three scroll events before consume -> 2 collapsed increments
+        s.mark(RenderDelta::Scroll {
+            old_first: 0,
+            new_first: 1,
+        });
+        s.mark(RenderDelta::Scroll {
+            old_first: 1,
+            new_first: 2,
+        });
+        s.mark(RenderDelta::Scroll {
+            old_first: 2,
+            new_first: 3,
+        });
+        let d = s.consume().unwrap();
+        assert!(matches!(
+            d.semantic,
+            RenderDelta::Scroll {
+                old_first: 0,
+                new_first: 3
+            }
+        ));
+        let snap = s.metrics_snapshot();
+        assert_eq!(snap.scroll, 1);
+        assert_eq!(
+            snap.collapsed_scroll, 2,
+            "expected two collapsed increments (three events -> two collapses)"
+        );
+        // Now add a scroll then a lines edit suppressing scroll semantics.
+        s.mark(RenderDelta::Scroll {
+            old_first: 3,
+            new_first: 4,
+        });
+        s.mark(RenderDelta::Lines(10..11));
+        let d2 = s.consume().unwrap();
+        assert!(matches!(d2.semantic, RenderDelta::Lines(_)));
+        let snap2 = s.metrics_snapshot();
+        assert_eq!(snap2.lines, 1);
+        assert_eq!(
+            snap2.suppressed_scroll, 1,
+            "one scroll sequence suppressed by lines"
+        );
+        // Frames rendered should equal number of consume decisions (2 here)
+        assert_eq!(snap2.frames_rendered, 2);
     }
 }

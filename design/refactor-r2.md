@@ -118,7 +118,7 @@ Out of Scope (Deferred to Phase 3 or later):
 - [x] Step 6 – EditorModel wrapper
 - [x] Step 7 – Config re-clamp on resize
 - [x] Step 8 – Key normalization removal Colon
-- [ ] Step 9 – Metrics grouping struct
+- [x] Step 9 – Metrics grouping struct
 - [ ] Step 10 – Semantic delta scenarios tests
 - [ ] Step 11 – Render perf timing hook
 - [ ] Step 12 – Documentation sweep
