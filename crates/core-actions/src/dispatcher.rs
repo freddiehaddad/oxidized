@@ -54,6 +54,10 @@ pub fn dispatch(
     sticky_visual_col: &mut Option<usize>,
     observers: &[Box<dyn ActionObserver>],
 ) -> DispatchResult {
+    // Phase 3 Step 1 NOTE: DirtyLinesTracker integration will occur in subsequent
+    // commits where dispatcher will receive a mutable tracker reference and mark
+    // affected lines on edit operations. This placeholder comment documents the
+    // intended injection point to avoid refactoring surprise in Step 2.
     // Notify observers (pre-dispatch). Failures inside observers should not crash the editor;
     // we rely on them being lightweight & infallible. Any panics propagate (deliberate) to avoid
     // silently masking logic errors in early development.
