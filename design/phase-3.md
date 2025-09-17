@@ -285,6 +285,37 @@ Timing:
 - Future Optimization (Deferred): Batch contiguous non-styled single-width glyph runs into one `Print` string to reduce queue calls. Not required for correctness; postpone until after partial rendering stabilization.
 - Testing Gap Noted: Current tests do not simulate terminal wrap mechanics. Follow-up (later Step 13 parity tests) should include constructing frames with exact-width lines to assert no status line contamination in command emission transcript.
 
+### Step 7 Details – Activate CursorOnly Partial Rendering
+
+- Goal: When the merged semantic delta is `CursorOnly`, avoid a full frame rebuild and repaint only:
+  - The previous cursor line (erase old reverse-video overlay) if still in viewport and different.
+  - The new cursor line with fresh overlay.
+  - Leave status line untouched (unless a future semantic status change arrives) preserving flicker-free baseline.
+- Conditions:
+  - `RenderDecision.semantic == CursorOnly` AND `RenderDecision.effective == CursorOnly`.
+  - Viewport (start/width/height) unchanged since last full frame (scroll/resize always forces Full elsewhere).
+- Scheduler Update: `consume()` sets `effective = CursorOnly` when semantic == CursorOnly; otherwise remains Full (Lines path comes in Step 8).
+- Rendering Path:
+  - Add `RenderEngine::render_cursor_only`.
+  - Skip `classify_viewport_changes` (no content mutation expected).
+  - Emit per-line via Writer:
+    - For each candidate line: `MoveTo(0,row)` → `ClearLine` → re-render textual content.
+    - After line paint, overlay cursor cells on new cursor line.
+  - Update `PartialCache.last_cursor_line`.
+- Writer Enhancement: Implement `ClearLine` using `crossterm::terminal::Clear(ClearType::CurrentLine)`.
+- Metrics:
+  - Increment `partial_frames` and `cursor_only_frames`.
+  - Store duration in `last_partial_render_ns`.
+  - Do not touch dirty line counters (introduced for lines path in Step 8).
+- Invariants & Safety:
+  - Cursor movement alone never invalidates line hashes; cache remains valid.
+  - Scroll semantic would supersede CursorOnly preventing incorrect partial choice.
+- Testing (Step 7):
+  - Full → cursor-only sequence updates metrics (`full_frames == 1`, `partial_frames == 1`, `cursor_only_frames == 1`).
+  - Moving cursor between lines repaints old + new cursor lines (observable via injecting a temporary test writer harness – minimal unit assertion on cache last_cursor_line suffices now).
+- Deferred (Step 8): hash-driven arbitrary line repaints & candidate escalation.
+- Failure Handling: Bubble errors; future improvement may auto-escalate to full.
+
 ## 16. Progress Log
 
 (Will be updated as steps complete.)
@@ -298,7 +329,7 @@ Timing:
 - [x] Step 5 – Hash compare logic tests (still full fallback)
 - [x] Step 6 – Terminal writer abstraction (prep partial)
 - [x] Step 6.1 – Writer row alignment hotfix
-- [ ] Step 7 – Activate CursorOnly partial rendering
+- [x] Step 7 – Activate CursorOnly partial rendering
 - [ ] Step 8 – Extend partial to Lines semantic delta
 - [ ] Step 9 – Resize invalidation (force full + clear cache)
 - [ ] Step 10 – Large candidate escalation heuristic

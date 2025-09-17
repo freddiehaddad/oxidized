@@ -1,10 +1,8 @@
 //! Oxidized entrypoint – Phase 0 skeleton.
-
 use anyhow::Result;
 use clap::Parser;
-use core_actions::Action;
-use core_actions::ActionObserver; // trait (currently unused in main but stored for future use)
 use core_actions::dispatcher::dispatch;
+use core_actions::{Action, ActionObserver}; // trait (currently unused in main but stored for future use)
 use core_config::load_from;
 use core_events::{CommandEvent, EVENT_CHANNEL_CAP, Event, InputEvent, KeyEvent};
 use core_render::scheduler::{RenderDelta, RenderScheduler};
@@ -140,7 +138,16 @@ async fn main() -> Result<()> {
     let mut render_engine = RenderEngine::new();
 
     // Initial render so the user sees content before pressing a key.
-    if let Err(e) = render(&mut render_engine, model.state(), model.active_view()) {
+    let initial_decision = core_render::scheduler::RenderDecision {
+        semantic: RenderDelta::Full,
+        effective: RenderDelta::Full,
+    };
+    if let Err(e) = render(
+        &mut render_engine,
+        model.state(),
+        model.active_view(),
+        &initial_decision,
+    ) {
         error!(?e, "initial render error");
     }
 
@@ -219,14 +226,15 @@ async fn main() -> Result<()> {
             }
         }
         // Ask scheduler if a redraw is needed this cycle.
-        if let Some(decision) = scheduler.consume() {
-            // TODO(Phase 3): Switch on decision.semantic to attempt partial paints.
-            // match decision.semantic { ... } retaining Full fallback.
-            if let Err(e) = render(&mut render_engine, model.state(), model.active_view()) {
-                error!(?e, "render error");
-            }
-            // NOTE: decision.effective is ignored (Phase 2 always Full) but kept for future flexibility.
-            let _ = decision; // suppress unused warning until Phase 3.
+        if let Some(decision) = scheduler.consume()
+            && let Err(e) = render(
+                &mut render_engine,
+                model.state(),
+                model.active_view(),
+                &decision,
+            )
+        {
+            error!(?e, "render error");
         }
     }
     // Guard drop will restore terminal.
@@ -234,7 +242,12 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn render(engine: &mut RenderEngine, state: &EditorState, view: &core_model::View) -> Result<()> {
+fn render(
+    engine: &mut RenderEngine,
+    state: &EditorState,
+    view: &core_model::View,
+    decision: &core_render::scheduler::RenderDecision,
+) -> Result<()> {
     use core_render::timing::record_last_render_ns;
     use crossterm::terminal::size;
     use std::time::Instant;
@@ -244,7 +257,12 @@ fn render(engine: &mut RenderEngine, state: &EditorState, view: &core_model::Vie
     // Refactor R2 Step 2: stateful engine retains cursor span metadata (still full render).
     // Refactor R2 Step 11: capture render duration.
     let start = Instant::now();
-    let res = engine.render_full(state, view, w, h);
+    let res = match &decision.effective {
+        core_render::scheduler::RenderDelta::CursorOnly => {
+            engine.render_cursor_only(state, view, w, h)
+        }
+        _ => engine.render_full(state, view, w, h),
+    };
     let elapsed = start.elapsed();
     record_last_render_ns(elapsed.as_nanos() as u64);
     res

@@ -161,9 +161,14 @@ impl RenderScheduler {
         self.pending.clear();
         self.metrics.incr_semantic(&merged);
         self.metrics.incr_frame();
+        // Phase 3 Step 7: allow CursorOnly semantic to execute as a partial effective path.
+        let effective = match &merged {
+            RenderDelta::CursorOnly => RenderDelta::CursorOnly,
+            _ => RenderDelta::Full, // All other kinds still force full repaint (Step 8+ will expand)
+        };
         Some(RenderDecision {
-            semantic: merged,
-            effective: RenderDelta::Full,
+            semantic: merged.clone(),
+            effective,
         })
     }
 
@@ -346,7 +351,8 @@ mod tests {
         let out = s.consume();
         let decision = out.expect("decision");
         assert_eq!(decision.semantic, RenderDelta::CursorOnly);
-        assert_eq!(decision.effective, RenderDelta::Full);
+        // Phase 3 Step 7: CursorOnly now executes as a partial effective path.
+        assert_eq!(decision.effective, RenderDelta::CursorOnly);
         assert!(s.consume().is_none(), "second consume empty");
     }
 

@@ -18,13 +18,18 @@
 //! Public API kept intentionally tiny until partial path activates.
 
 use anyhow::Result;
-use crossterm::{cursor::MoveTo, queue, style::Print};
+use crossterm::{
+    cursor::MoveTo,
+    queue,
+    style::Print,
+    terminal::{Clear, ClearType},
+};
 use std::io::{Write, stdout};
 
 #[derive(Debug)]
 pub enum Command {
     MoveTo(u16, u16),
-    ClearLine(u16, u16), // (x,y) start; clears full line logically (we just rewrite content)
+    ClearLine(u16, u16), // (x,y) start; clears full line before selective repaint (Step 7)
     Print(String),
 }
 
@@ -57,8 +62,10 @@ impl Writer {
                     queue!(out, MoveTo(x, y))?;
                 }
                 Command::ClearLine(_, _) => {
-                    // For now we rely on rewriting full content; explicit clear deferred.
-                    // Could emit ClearLine crossterm command later when partial path active.
+                    // Phase 3 Step 7: now emit an actual terminal clear for the current line.
+                    // Caller guarantees a preceding MoveTo(0, y) so ClearType::CurrentLine
+                    // wipes prior contents (including leftovers from longer previous text).
+                    queue!(out, Clear(ClearType::CurrentLine))?;
                 }
                 Command::Print(s) => {
                     queue!(out, Print(s))?;

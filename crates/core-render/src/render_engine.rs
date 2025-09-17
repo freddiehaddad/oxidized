@@ -74,7 +74,133 @@ impl RenderEngine {
         w: u16,
         h: u16,
     ) -> Result<()> {
+        // Step 7 currently only activates for CursorOnly effective decisions.
+        // Fallback to full for any other future kinds until Step 8 extends logic.
         self.render_full(state, view, w, h)
+    }
+
+    /// Phase 3 Step 7: cursor-only partial repaint. Repaints just the previous cursor line
+    /// (if still visible and different) plus the new cursor line. Status line unchanged.
+    pub fn render_cursor_only(
+        &mut self,
+        state: &EditorState,
+        view: &View,
+        w: u16,
+        h: u16,
+    ) -> Result<()> {
+        let start_time = std::time::Instant::now();
+        if h == 0 {
+            return Ok(());
+        }
+        let text_height = h - 1; // reserve status line
+        let buf = state.active_buffer();
+        let viewport_first = view.viewport_first_line;
+        let viewport_last_excl = viewport_first + text_height as usize;
+        let mut writer = Writer::new();
+
+        // Determine previous & current cursor lines.
+        let prev_line_opt = self.cache.last_cursor_line;
+        let curr_line = view.cursor.line;
+
+        // Helper to paint a single buffer line at given buffer index if in viewport.
+        let mut paint_line = |buf_line: usize| {
+            if buf_line < viewport_first || buf_line >= viewport_last_excl {
+                return; // not visible
+            }
+            let rel_y = (buf_line - viewport_first) as u16;
+            writer.move_to(0, rel_y);
+            writer.clear_line(0, rel_y);
+            if let Some(raw_line) = buf.line(buf_line) {
+                let content_trim: &str = if raw_line.ends_with(['\n', '\r']) {
+                    &raw_line[..raw_line.len() - 1]
+                } else {
+                    raw_line.as_str()
+                };
+                // Walk grapheme clusters identical to build_content_frame (duplication acceptable for now; Step 8 may refactor).
+                let mut byte = 0;
+                let mut vis_col = 0u16;
+                while byte < content_trim.len() && vis_col < w {
+                    let next = grapheme::next_boundary(content_trim, byte);
+                    let cluster = &content_trim[byte..next];
+                    let width = grapheme::cluster_width(cluster) as u16;
+                    let mut chars = cluster.chars();
+                    if let Some(first) = chars.next() {
+                        writer.print(first.to_string());
+                    }
+                    if width > 1 {
+                        for _ in 1..width {
+                            if vis_col + 1 >= w {
+                                break;
+                            }
+                            writer.print(" ");
+                            vis_col = vis_col.saturating_add(1);
+                        }
+                    }
+                    vis_col = vis_col.saturating_add(width.max(1));
+                    byte = next;
+                }
+            }
+        };
+
+        // Repaint previous cursor line first if distinct.
+        if let Some(prev) = prev_line_opt
+            && prev != curr_line
+        {
+            paint_line(prev);
+        }
+        paint_line(curr_line);
+
+        // After printing lines, we must overlay cursor cluster (reverse video) on current line.
+        // Reuse overlay logic by building a temporary mini Frame row representing current line
+        // then emitting styled cells. Simpler: recompute cluster & append ANSI styled sequence.
+        // Approach: MoveTo cursor visual start again and write styled cluster.
+        if curr_line >= viewport_first
+            && curr_line < viewport_last_excl
+            && let Some(line_content) = buf.line(curr_line)
+        {
+            let content_trim: &str = if line_content.ends_with(['\n', '\r']) {
+                &line_content[..line_content.len() - 1]
+            } else {
+                line_content.as_str()
+            };
+            let vis_col = grapheme::visual_col(content_trim, view.cursor.byte) as u16;
+            if vis_col < w {
+                let next_byte = grapheme::next_boundary(content_trim, view.cursor.byte);
+                let cluster = &content_trim[view.cursor.byte..next_byte];
+                let width = grapheme::cluster_width(cluster).max(1) as u16;
+                writer.move_to(vis_col, (curr_line - viewport_first) as u16);
+                // Styled first cell
+                let mut chars = cluster.chars();
+                if let Some(first) = chars.next() {
+                    let mut s = String::from("\x1b[7m");
+                    s.push(first);
+                    s.push_str("\x1b[0m");
+                    writer.print(s);
+                } else {
+                    let s = String::from("\x1b[7m \x1b[0m");
+                    writer.print(s);
+                }
+                // Fill remainder cells (wide cluster) with reversed spaces
+                for dx in 1..width {
+                    if vis_col + dx >= w {
+                        break;
+                    }
+                    writer.move_to(vis_col + dx, (curr_line - viewport_first) as u16);
+                    writer.print("\x1b[7m \x1b[0m");
+                }
+            }
+        }
+
+        writer.flush()?;
+        // Update metrics
+        let dur = start_time.elapsed().as_nanos() as u64;
+        use std::sync::atomic::Ordering::Relaxed;
+        self.metrics.partial_frames.fetch_add(1, Relaxed);
+        self.metrics.cursor_only_frames.fetch_add(1, Relaxed);
+        self.metrics.last_partial_render_ns.store(dur, Relaxed);
+        // Update last cursor line cache for next cursor-only diff.
+        self.cache.last_cursor_line = Some(curr_line);
+        Ok(())
     }
 
     /// Access a snapshot of current metrics (for tests and future status integration).
@@ -292,12 +418,13 @@ mod tests {
         let mut model = mk_state("a\nb\nc\n");
         let mut eng = RenderEngine::new();
         let view = model.active_view().clone();
-        // First frame: cursor at line 0
         eng.render_full(model.state(), &view, 80, 10).unwrap();
         assert_eq!(eng.last_cursor_line(), Some(0));
         // Move cursor
-        let view_mut = model.active_view_mut();
-        view_mut.cursor.line = 2;
+        {
+            let view_mut = model.active_view_mut();
+            view_mut.cursor.line = 2;
+        }
         let view_after = model.active_view().clone();
         eng.render_full(model.state(), &view_after, 80, 10).unwrap();
         assert_eq!(eng.last_cursor_line(), Some(2));
@@ -313,5 +440,25 @@ mod tests {
         let snap = eng.metrics_snapshot();
         assert_eq!(snap.full_frames, 2);
         assert!(snap.last_full_render_ns > 0);
+    }
+
+    #[test]
+    fn cursor_only_partial_metrics_and_cache() {
+        let model = mk_state("a\nb\nc\n");
+        let mut eng = RenderEngine::new();
+        let view0 = model.active_view().clone();
+        eng.render_full(model.state(), &view0, 80, 6).unwrap();
+        assert_eq!(eng.last_cursor_line(), Some(0));
+        // Move cursor to line 2 and perform cursor-only partial render.
+        let mut view_move = view0.clone();
+        view_move.cursor.line = 2;
+        eng.render_cursor_only(model.state(), &view_move, 80, 6)
+            .unwrap();
+        let snap = eng.metrics_snapshot();
+        assert_eq!(snap.full_frames, 1, "only initial full frame counted");
+        assert_eq!(snap.partial_frames, 1, "one partial frame executed");
+        assert_eq!(snap.cursor_only_frames, 1, "cursor-only frame counted");
+        assert!(snap.last_partial_render_ns > 0);
+        assert_eq!(eng.last_cursor_line(), Some(2));
     }
 }
