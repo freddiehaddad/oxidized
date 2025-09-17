@@ -1,12 +1,11 @@
-//! Render scheduler (Phase 2 Steps 17–18, Refactor R2 Step 3 update).
+//! Render scheduler (Refactor R2 Step 3).
 //!
 //! Breadth-first foundation for future partial rendering. Producers report
-//! fine-grained invalidation intents (`RenderDelta`) via `mark`; on `consume`
-//! we merge queued deltas into a single semantic shape and (for Phase 2 /
-//! Refactor R2) always request a full-frame redraw. The semantic result is
-//! retained in the returned `RenderDecision` and counted via lightweight
-//! atomic metrics so we can later quantify optimization headroom before
-//! enabling partial paints.
+//! fine-grained invalidation intents (`RenderDelta`) via `mark`. On `consume`
+//! we merge queued deltas into a single semantic shape while (during Refactor
+//! R2) still requesting a full-frame redraw. The semantic decision and its
+//! metrics provide empirical guidance for when partial strategies will pay
+//! off without guessing.
 //!
 //! Merge semantics:
 //! * Any `Full` present => `Full`.
@@ -15,9 +14,9 @@
 //! * Precedence when heterogeneous: `Lines` > `Scroll` > `StatusLine` > `CursorOnly`.
 //! * `CursorOnly` + `StatusLine` collapses to `StatusLine` (unless `Lines`/`Scroll` present).
 //!
-//! Refactor R2 policy: renderer still performs a full redraw (flicker-free,
-//! simple) while instrumentation accumulates real semantic patterns. Phase 3+
-//! may branch on `decision.semantic` to drive incremental paint strategies.
+//! Refactor R2 policy: renderer still performs a full redraw (flicker-free
+//! and simple) while instrumentation accumulates real semantic patterns.
+//! Phase 3 will branch on `decision.semantic` to drive incremental paints.
 
 /// Granular render invalidation intents produced by editor state changes.
 #[derive(Debug, Clone, PartialEq, Eq)]

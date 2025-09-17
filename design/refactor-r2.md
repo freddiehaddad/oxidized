@@ -121,7 +121,7 @@ Out of Scope (Deferred to Phase 3 or later):
 - [x] Step 9 – Metrics grouping struct
 - [x] Step 10 – Semantic delta scenarios tests
 - [x] Step 11 – Render perf timing hook (atomic capture + getter + smoke test)
-- [ ] Step 12 – Documentation sweep
+- [x] Step 12 – Documentation sweep (module doc updates: scheduler, render core, events key normalization, input thread note)
 - [ ] Step 13 – Final gate & closure
 
 ---

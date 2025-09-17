@@ -1,4 +1,22 @@
-//! Rendering primitives: Cell, Frame, and a naive full-screen renderer.
+//! Rendering primitives + frame assembly foundations.
+//!
+//! This crate currently exposes:
+//! * Low-level `Cell` and `Frame` structures used to build a full terminal frame.
+//! * A naive full-frame `Renderer` (breadth-first: always paints the entire surface).
+//! * `render_engine` module (Refactor R2 Step 1) which constructs frames from editor state.
+//! * `scheduler` (Refactor R2 Step 3) collecting fine‑grained semantic invalidation deltas
+//!   (`RenderDelta`) while still always producing a full effective redraw.
+//! * `status` segment model (Refactor R2 Step 4) enabling future dynamic status components.
+//! * `timing` (Refactor R2 Step 11) minimal atomic storing the last full render duration
+//!   in nanoseconds for early performance telemetry.
+//!
+//! Design Notes (Refactor R2):
+//! - Partial rendering is intentionally deferred; semantic deltas + metrics allow us to
+//!   validate optimization headroom before introducing diff complexity.
+//! - The timing hook lives outside the engine for now to keep `RenderEngine` pure; it may
+//!   migrate inward when incremental strategies require per-phase timings.
+//! - The entire frame API favors simple `Vec<Cell>` storage; future phases may introduce
+//!   line arenas or gap buffers for selective diff emission.
 
 use anyhow::Result;
 use bitflags::bitflags;
@@ -98,4 +116,4 @@ pub mod render_engine;
 pub mod scheduler;
 pub mod status;
 pub mod timing;
-pub mod viewport; // Refactor R2 Step 11: render timing hook
+pub mod viewport; // (placeholder for future viewport helpers)

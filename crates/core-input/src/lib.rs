@@ -49,6 +49,8 @@ pub fn spawn_input_thread(sender: tokio::sync::mpsc::Sender<Event>) -> thread::J
                         CHANNEL_BLOCKING_SENDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         continue;
                     }
+                    // Normalize historical printable variants (Refactor R2 Step 8) before
+                    // constructing the logical key event.
                     let evt = Event::Input(InputEvent::Key(KeyEvent {
                         code: normalize_keycode(code),
                         mods,
