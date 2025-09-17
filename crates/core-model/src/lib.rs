@@ -1,14 +1,33 @@
-//! High-level editor model wrapper (Refactor R2 Step 6 -> Phase 3 multi-view scaffolding).
+//! High-level editor model (Phase 3 multi-view scaffolding).
 //!
-//! Breadth-first: this is a thin newtype over `EditorState` providing a
-//! stable surface to hang multi-view/split abstractions in Phase 3 without
-//! rewriting existing call sites again. It intentionally exposes only the
-//! minimal API currently exercised by `ox-bin`.
+//! This crate introduces `View` as the owner of *presentation* state that used to
+//! live inside `EditorState` (cursor position & `viewport_first_line`). Moving
+//! these fields decouples buffer / editing semantics from per-view concerns and
+//! lays the groundwork for split windows without retrofitting core state again.
 //!
-//! Invariants:
-//! * No behavioral changes vs direct `EditorState` usage.
-//! * Methods are simple passthroughs; zero additional allocations.
-//! * Future: manage a collection of views, active buffer routing, focus.
+//! Breadth-first design guarantees:
+//! * Single active view (index 0) – future steps will add APIs to create / focus
+//!   additional views; existing callers remain source compatible.
+//! * `EditorModel` is a light wrapper around `EditorState` plus a `Vec<View>`.
+//! * No additional allocations or behavioral changes relative to pre-migration
+//!   semantics besides owning the cursor + viewport here.
+//! * Auto-scroll logic now lives on `View::auto_scroll` keeping scroll policies
+//!   local to presentation state (simplifies future per-view customization).
+//!
+//! Multi-view roadmap (deferred):
+//! * Multiple simultaneously rendered views (split layout) feeding the renderer.
+//! * Per-view buffer mapping (different buffers in different splits).
+//! * Focus change actions producing semantic render deltas.
+//! * View lifecycle events (open, close) integrated with undo/redo isolation.
+//!
+//! Invariants (Phase 3):
+//! * `views` is never empty.
+//! * `active_view_index` always points to a valid element.
+//! * Each `View.buffer_index` references a valid buffer in `EditorState`.
+//! * Undo / redo operate on the active buffer; cursor threading is explicit.
+//!
+//! Future refactors will expand rustdoc here rather than scattering comments
+//! across unrelated crates (central single source of truth principle).
 
 use core_state::EditorState;
 use core_text::Position;

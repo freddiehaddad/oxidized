@@ -226,7 +226,7 @@ Timing:
 - [x] Step 2 – Line hash structs + PartialCache skeleton (ahash dep)
 - [x] Step 3.1 – Add View struct & single-view storage
 - [x] Step 3.2 – Migrate cursor & viewport_first_line into View + auto_scroll refactor (merged former 3.2/3.3)
-- [ ] Step 3.3 – Cleanup & docs finalize migration (was 3.4)
+- [x] Step 3.3 – Cleanup & docs finalize migration (was 3.4)
 - [ ] Step 4 – Cache last cursor line + metrics scaffold
 - [ ] Step 5 – Hash compare logic tests (still full fallback)
 - [ ] Step 6 – Terminal writer abstraction (prep partial)
