@@ -122,7 +122,7 @@ Out of Scope (Deferred to Phase 3 or later):
 - [x] Step 10 – Semantic delta scenarios tests
 - [x] Step 11 – Render perf timing hook (atomic capture + getter + smoke test)
 - [x] Step 12 – Documentation sweep (module doc updates: scheduler, render core, events key normalization, input thread note)
-- [ ] Step 13 – Final gate & closure
+- [x] Step 13 – Final gate & closure (fmt/clippy/tests green; all steps committed)
 
 ---
 (Plan will be updated incrementally; each completed step commits with the defined template and updates this file.)
