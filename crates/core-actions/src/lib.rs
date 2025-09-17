@@ -170,6 +170,7 @@ pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Optio
 }
 
 pub mod dispatcher;
+pub mod io_ops; // Refactor R2 Step 5: file IO helpers
 
 #[cfg(test)]
 mod tests {

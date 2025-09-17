@@ -13,8 +13,9 @@
 //!   Snapshot lifecycle trace events (`push_snapshot`, `undo_pop`, `redo_pop`, stack trims)
 //!   originate in `core-state`.
 
+use crate::io_ops::{OpenFileResult, WriteFileResult, open_file, write_file};
 use crate::{Action, ActionObserver, EditKind, ModeChange, MotionKind};
-use core_state::{EditorState, Mode, normalize_line_endings};
+use core_state::{EditorState, Mode};
 use core_text::{Buffer, Position, motion};
 
 /// Result of dispatching a single `Action`.
@@ -175,36 +176,20 @@ pub fn dispatch(
                 let path_str = rest.trim();
                 if !path_str.is_empty() {
                     let path = std::path::PathBuf::from(path_str);
-                    match std::fs::read_to_string(&path) {
-                        Ok(content) => {
-                            let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("file");
-                            // Normalize line endings (Phase 2 Step 9)
-                            let norm = normalize_line_endings(&content);
-                            match Buffer::from_str(name, &norm.normalized) {
-                                Ok(new_buf) => {
-                                    state.buffers[state.active] = new_buf;
-                                    state.position = Position::origin();
-                                    state.file_name = Some(path);
-                                    state.dirty = false; // clean after load
-                                    state.original_line_ending = norm.original;
-                                    state.had_trailing_newline = norm.had_trailing_newline;
-                                    state
-                                        .set_ephemeral("Opened", std::time::Duration::from_secs(3));
-                                    if norm.mixed {
-                                        tracing::warn!("mixed_line_endings_detected");
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::error!(?e, "buffer_create_failed");
-                                    state.set_ephemeral(
-                                        "Open failed",
-                                        std::time::Duration::from_secs(3),
-                                    );
-                                }
+                    match open_file(&path) {
+                        OpenFileResult::Success(s) => {
+                            state.buffers[state.active] = s.buffer;
+                            state.position = Position::origin();
+                            state.file_name = Some(s.file_name);
+                            state.dirty = false;
+                            state.original_line_ending = s.original_line_ending;
+                            state.had_trailing_newline = s.had_trailing_newline;
+                            state.set_ephemeral("Opened", std::time::Duration::from_secs(3));
+                            if s.mixed_line_endings {
+                                tracing::warn!("mixed_line_endings_detected");
                             }
                         }
-                        Err(e) => {
-                            tracing::error!(?e, "file_open_error");
+                        OpenFileResult::Error => {
                             state.set_ephemeral("Open failed", std::time::Duration::from_secs(3));
                         }
                     }
@@ -214,41 +199,17 @@ pub fn dispatch(
             }
             // Write file: :w (Phase 2 Step 4 - only writes if file_name is Some; else logs)
             if cmd == ":w" {
-                if let Some(path) = state.file_name.clone() {
-                    // clone small PathBuf
-                    // Re-expand line endings based on original metadata (Phase 2 Step 9)
-                    let mut content = String::new();
-                    let line_ending = state.original_line_ending.as_str();
-                    let last_index = state.active_buffer().line_count();
-                    for i in 0..last_index {
-                        if let Some(mut l) = state.active_buffer().line(i) {
-                            // Each buffer line currently includes a trailing \n except maybe last (internal LF-only).
-                            let ends_nl = l.ends_with('\n');
-                            if ends_nl {
-                                l.pop();
-                            }
-                            content.push_str(&l);
-                            // Add original line ending if (a) not last line, or (b) last line and original had final newline
-                            if (i + 1 < last_index)
-                                || (state.had_trailing_newline && i + 1 == last_index)
-                            {
-                                content.push_str(line_ending);
-                            }
-                        }
+                match write_file(state) {
+                    WriteFileResult::Success => {
+                        state.set_ephemeral("Wrote", std::time::Duration::from_secs(3));
                     }
-                    match std::fs::write(&path, content.as_bytes()) {
-                        Ok(_) => {
-                            state.dirty = false;
-                            state.set_ephemeral("Wrote", std::time::Duration::from_secs(3));
-                        }
-                        Err(e) => {
-                            tracing::error!(?e, "file_write_error");
-                            state.set_ephemeral("Write failed", std::time::Duration::from_secs(3));
-                        }
+                    WriteFileResult::NoFilename => {
+                        tracing::error!("write_no_filename");
+                        state.set_ephemeral("No filename", std::time::Duration::from_secs(3));
                     }
-                } else {
-                    tracing::error!("write_no_filename");
-                    state.set_ephemeral("No filename", std::time::Duration::from_secs(3));
+                    WriteFileResult::Error => {
+                        state.set_ephemeral("Write failed", std::time::Duration::from_secs(3));
+                    }
                 }
                 state.command_line.clear();
                 return DispatchResult::dirty();
