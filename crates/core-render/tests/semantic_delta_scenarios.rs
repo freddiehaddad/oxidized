@@ -162,5 +162,5 @@ fn multi_frame_sequence_churn() {
     assert_eq!(snap.scroll, 1);
     assert_eq!(snap.status_line, 1);
     assert_eq!(snap.cursor_only, 2);
-    assert_eq!(snap.frames_rendered, 5);
+    assert_eq!(snap.semantic_frames, 5);
 }

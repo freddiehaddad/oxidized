@@ -17,6 +17,10 @@
 //!   migrate inward when incremental strategies require per-phase timings.
 //! - The entire frame API favors simple `Vec<Cell>` storage; future phases may introduce
 //!   line arenas or gap buffers for selective diff emission.
+//! * Metrics separation: `RenderDeltaMetrics` (semantic intent frequency) lives in
+//!   `scheduler.rs`, while `RenderPathMetrics` (execution strategy + repaint counters)
+//!   lives in `partial_metrics.rs`. They intentionally diverge once partial
+//!   rendering activates, enabling diagnostics ("asked for cursor-only, executed full").
 
 use anyhow::Result;
 use bitflags::bitflags;
@@ -114,6 +118,7 @@ impl Renderer {
 
 pub mod dirty; // Phase 3 Step 1: dirty line tracking (external to RenderDelta)
 pub mod partial_cache; // Phase 3 Step 2: line hash + cache skeleton
+pub mod partial_metrics; // Phase 3 Step 4: metrics scaffold
 pub mod render_engine;
 pub mod scheduler;
 pub mod status;

@@ -64,7 +64,9 @@ pub struct RenderDeltaMetrics {
     cursor_only: std::sync::atomic::AtomicU64,
     collapsed_scroll: std::sync::atomic::AtomicU64,
     suppressed_scroll: std::sync::atomic::AtomicU64,
-    frames_rendered: std::sync::atomic::AtomicU64,
+    /// Number of semantic collapse cycles processed (may diverge from
+    /// executed frame strategy counts in `RenderPathMetrics`).
+    semantic_frames: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,7 +78,7 @@ pub struct RenderDeltaMetricsSnapshot {
     pub cursor_only: u64,
     pub collapsed_scroll: u64,
     pub suppressed_scroll: u64,
-    pub frames_rendered: u64,
+    pub semantic_frames: u64,
 }
 
 impl RenderDeltaMetrics {
@@ -90,7 +92,7 @@ impl RenderDeltaMetrics {
             cursor_only: self.cursor_only.load(Relaxed),
             collapsed_scroll: self.collapsed_scroll.load(Relaxed),
             suppressed_scroll: self.suppressed_scroll.load(Relaxed),
-            frames_rendered: self.frames_rendered.load(Relaxed),
+            semantic_frames: self.semantic_frames.load(Relaxed),
         }
     }
     fn incr_semantic(&self, delta: &RenderDelta) {
@@ -122,7 +124,7 @@ impl RenderDeltaMetrics {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
     fn incr_frame(&self) {
-        self.frames_rendered
+        self.semantic_frames
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
@@ -393,6 +395,6 @@ mod tests {
             "one scroll sequence suppressed by lines"
         );
         // Frames rendered should equal number of consume decisions (2 here)
-        assert_eq!(snap2.frames_rendered, 2);
+        assert_eq!(snap2.semantic_frames, 2);
     }
 }

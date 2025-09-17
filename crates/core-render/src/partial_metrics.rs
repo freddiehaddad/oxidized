@@ -1,0 +1,58 @@
+//! Render path metrics scaffold (Phase 3 Step 4).
+//!
+//! Distinct from `RenderDeltaMetrics` (scheduler) which counts *semantic*
+//! invalidation requests (what the editor asked for). This struct records
+//! *execution* strategy outcomes and internal partial rendering pipeline
+//! counters (what we actually did / will do once partial path activates).
+//! Keeping them separate preserves diagnostic ability to correlate semantic
+//! intent vs chosen render strategy.
+
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[derive(Debug, Default)]
+pub struct RenderPathMetrics {
+    pub full_frames: AtomicU64,
+    pub partial_frames: AtomicU64,
+    pub cursor_only_frames: AtomicU64,
+    pub lines_frames: AtomicU64,
+    pub escalated_large_set: AtomicU64,
+    pub resize_invalidations: AtomicU64,
+    pub dirty_lines_marked: AtomicU64,
+    pub dirty_candidate_lines: AtomicU64,
+    pub dirty_lines_repainted: AtomicU64,
+    pub last_full_render_ns: AtomicU64,
+    pub last_partial_render_ns: AtomicU64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderPathMetricsSnapshot {
+    pub full_frames: u64,
+    pub partial_frames: u64,
+    pub cursor_only_frames: u64,
+    pub lines_frames: u64,
+    pub escalated_large_set: u64,
+    pub resize_invalidations: u64,
+    pub dirty_lines_marked: u64,
+    pub dirty_candidate_lines: u64,
+    pub dirty_lines_repainted: u64,
+    pub last_full_render_ns: u64,
+    pub last_partial_render_ns: u64,
+}
+
+impl RenderPathMetrics {
+    pub fn snapshot(&self) -> RenderPathMetricsSnapshot {
+        RenderPathMetricsSnapshot {
+            full_frames: self.full_frames.load(Ordering::Relaxed),
+            partial_frames: self.partial_frames.load(Ordering::Relaxed),
+            cursor_only_frames: self.cursor_only_frames.load(Ordering::Relaxed),
+            lines_frames: self.lines_frames.load(Ordering::Relaxed),
+            escalated_large_set: self.escalated_large_set.load(Ordering::Relaxed),
+            resize_invalidations: self.resize_invalidations.load(Ordering::Relaxed),
+            dirty_lines_marked: self.dirty_lines_marked.load(Ordering::Relaxed),
+            dirty_candidate_lines: self.dirty_candidate_lines.load(Ordering::Relaxed),
+            dirty_lines_repainted: self.dirty_lines_repainted.load(Ordering::Relaxed),
+            last_full_render_ns: self.last_full_render_ns.load(Ordering::Relaxed),
+            last_partial_render_ns: self.last_partial_render_ns.load(Ordering::Relaxed),
+        }
+    }
+}

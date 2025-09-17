@@ -204,7 +204,7 @@ Timing:
 - Aggressive simplicity: Scroll & resize full fallbacks keep correctness obvious while gathering telemetry for optimization ROI.
 - Metrics-first approach ensures data-driven refinement in later phases (Phase 4+).
 
-### Step 3.2 Migration Details (moved from Progress Log)
+### Step 3.2 Migration Details
 
 - Result: Cursor and viewport ownership fully transferred from `EditorState` to `core-model::View`; `EditorState` no longer contains `position` or `viewport_first_line` and has no `auto_scroll` logic.
 - Highlights:
@@ -214,6 +214,16 @@ Timing:
   - Removed legacy auto-scroll + viewport tests from `core-state` (they now live where the logic resides).
   - Verified via `cargo test` across all crates (green) and formatting checks; no lingering references to deprecated fields.
 - Rationale: Enforces architectural separation (model/view own presentation-related cursor+viewport state) preparing for multi-view expansion and enabling per-view scrolling semantics in later steps.
+
+### Step 4 Details
+
+- Added `last_cursor_line` field to `PartialCache` persisting prior frame cursor line for future selective repaint (old cursor overlay removal).
+- Introduced `RenderPathMetrics` (renamed from initial `PartialMetrics`) with atomic counters + timing fields (`full_frames`, `partial_frames`, cursor/lines frame counters, dirty line statistics, escalation, resize invalidations, `last_full_render_ns`, `last_partial_render_ns`).
+- Clarified metric layering: `RenderDeltaMetrics` (semantic intent frequency) vs `RenderPathMetrics` (executed strategy + repaint internals).
+- Integrated metrics & cache updates into `RenderEngine::render_full` (record duration + last cursor line after each frame).
+- Added snapshot API (`metrics_snapshot`) and tests covering cursor line persistence and full frame count increment.
+- No behavioral rendering changes yet; still full frame path only (breadth-first scaffolding).
+- Prepares for Steps 5–8 without churn in engine signatures.
 
 ---
 (Each completed step updates this document; commit subjects follow template and reference Phase 3 step numbers.)
@@ -227,7 +237,7 @@ Timing:
 - [x] Step 3.1 – Add View struct & single-view storage
 - [x] Step 3.2 – Migrate cursor & viewport_first_line into View + auto_scroll refactor (merged former 3.2/3.3)
 - [x] Step 3.3 – Cleanup & docs finalize migration (was 3.4)
-- [ ] Step 4 – Cache last cursor line + metrics scaffold
+- [x] Step 4 – Cache last cursor line + metrics scaffold
 - [ ] Step 5 – Hash compare logic tests (still full fallback)
 - [ ] Step 6 – Terminal writer abstraction (prep partial)
 - [ ] Step 7 – Activate CursorOnly partial rendering

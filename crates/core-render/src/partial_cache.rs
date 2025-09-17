@@ -34,6 +34,8 @@ pub struct PartialCache {
     pub width: u16,
     /// Hash entries per visible buffer line (excluding status line).
     pub line_hashes: Vec<ViewportLineHash>,
+    /// Previous frame's cursor line (for repaint of old cursor span). None if unknown or no prior frame.
+    pub last_cursor_line: Option<usize>,
 }
 
 impl PartialCache {
@@ -46,6 +48,7 @@ impl PartialCache {
         self.viewport_start = viewport_start;
         self.width = width;
         self.line_hashes.clear();
+        // Preserve last_cursor_line across resets; it is invalidated only explicitly (resize clears in later step).
         if self.line_hashes.capacity() < expected_lines {
             self.line_hashes
                 .reserve(expected_lines - self.line_hashes.capacity());

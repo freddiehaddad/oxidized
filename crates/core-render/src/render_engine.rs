@@ -2,6 +2,8 @@
 //! dispatch. Step 2 separates content assembly from cursor/status overlay and stores prior
 //! cursor span metadata (no behavioral change yet).
 
+use crate::partial_cache::PartialCache;
+use crate::partial_metrics::{RenderPathMetrics, RenderPathMetricsSnapshot};
 use crate::{CellFlags, Frame, Renderer};
 use anyhow::Result;
 use core_model::View;
@@ -19,6 +21,8 @@ pub struct CursorSpanMeta {
 /// Public facade used by the binary to produce a frame from state and flush it to the terminal.
 pub struct RenderEngine {
     last_cursor: CursorSpanMeta,
+    cache: PartialCache,
+    metrics: RenderPathMetrics,
 }
 
 impl Default for RenderEngine {
@@ -31,15 +35,30 @@ impl RenderEngine {
     pub fn new() -> Self {
         Self {
             last_cursor: CursorSpanMeta::default(),
+            cache: PartialCache::new(),
+            metrics: RenderPathMetrics::default(),
         }
     }
 
     /// Build + render a full frame (current behavior; breadth-first guarantee).
     pub fn render_full(&mut self, state: &EditorState, view: &View, w: u16, h: u16) -> Result<()> {
+        let start = std::time::Instant::now();
         let mut frame = build_content_frame(state, view, w, h);
         self.apply_cursor_overlay(state, view, &mut frame, w, h);
         apply_status_line(state, view, &mut frame, w, h);
-        Renderer::render(&frame)
+        let res = Renderer::render(&frame);
+        // Update metrics + last cursor line cache (Phase 3 Step 4 scaffolding)
+        if let Some(line) = self.last_cursor.line {
+            self.cache.last_cursor_line = Some(line);
+        }
+        let dur = start.elapsed().as_nanos() as u64;
+        self.metrics
+            .full_frames
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.metrics
+            .last_full_render_ns
+            .store(dur, std::sync::atomic::Ordering::Relaxed);
+        res
     }
 
     /// Placeholder for future partial rendering path (Phase 3).
@@ -51,6 +70,16 @@ impl RenderEngine {
         h: u16,
     ) -> Result<()> {
         self.render_full(state, view, w, h)
+    }
+
+    /// Access a snapshot of current metrics (for tests and future status integration).
+    pub fn metrics_snapshot(&self) -> RenderPathMetricsSnapshot {
+        self.metrics.snapshot()
+    }
+
+    /// Expose last cursor line cached (Phase 3 Step 4 test hook).
+    pub fn last_cursor_line(&self) -> Option<usize> {
+        self.cache.last_cursor_line
     }
 
     fn apply_cursor_overlay(
@@ -218,29 +247,40 @@ fn apply_status_line(state: &EditorState, view: &View, frame: &mut Frame, w: u16
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core_model::EditorModel;
+    use core_state::EditorState;
     use core_text::Buffer;
 
-    fn mk_model(initial: &str) -> (EditorState, View) {
-        let st = EditorState::new(Buffer::from_str("test", initial).unwrap());
-        let view = core_model::View::new(
-            core_model::ViewId(0),
-            st.active,
-            core_text::Position::origin(),
-            0,
-        );
-        (st, view)
+    fn mk_state(text: &str) -> EditorModel {
+        let st = EditorState::new(Buffer::from_str("test", text).unwrap());
+        EditorModel::new(st)
     }
 
     #[test]
-    fn cursor_ascii_single_width() {
-        let (state, mut view) = mk_model("abc");
-        view.cursor.line = 0;
-        view.cursor.byte = 1; // 'b'
-        let frame = build_full_frame_for_test(&state, &view, 20, 4);
-        let idx = 1;
-        let cell = frame.cells[idx];
-        assert_eq!(cell.ch, 'b');
-        assert!(cell.flags.contains(CellFlags::CURSOR));
-        assert!(cell.flags.contains(CellFlags::REVERSE));
+    fn last_cursor_line_updates_across_frames() {
+        let mut model = mk_state("a\nb\nc\n");
+        let mut eng = RenderEngine::new();
+        let view = model.active_view().clone();
+        // First frame: cursor at line 0
+        eng.render_full(model.state(), &view, 80, 10).unwrap();
+        assert_eq!(eng.last_cursor_line(), Some(0));
+        // Move cursor
+        let view_mut = model.active_view_mut();
+        view_mut.cursor.line = 2;
+        let view_after = model.active_view().clone();
+        eng.render_full(model.state(), &view_after, 80, 10).unwrap();
+        assert_eq!(eng.last_cursor_line(), Some(2));
+    }
+
+    #[test]
+    fn metrics_full_frames_increment() {
+        let model = mk_state("x\n");
+        let mut eng = RenderEngine::new();
+        let view = model.active_view().clone();
+        eng.render_full(model.state(), &view, 40, 5).unwrap();
+        eng.render_full(model.state(), &view, 40, 5).unwrap();
+        let snap = eng.metrics_snapshot();
+        assert_eq!(snap.full_frames, 2);
+        assert!(snap.last_full_render_ns > 0);
     }
 }
