@@ -97,4 +97,5 @@ impl Renderer {
 pub mod render_engine;
 pub mod scheduler;
 pub mod status;
-pub mod viewport;
+pub mod timing;
+pub mod viewport; // Refactor R2 Step 11: render timing hook

@@ -120,7 +120,7 @@ Out of Scope (Deferred to Phase 3 or later):
 - [x] Step 8 – Key normalization removal Colon
 - [x] Step 9 – Metrics grouping struct
 - [x] Step 10 – Semantic delta scenarios tests
-- [ ] Step 11 – Render perf timing hook
+- [x] Step 11 – Render perf timing hook (atomic capture + getter + smoke test)
 - [ ] Step 12 – Documentation sweep
 - [ ] Step 13 – Final gate & closure
 

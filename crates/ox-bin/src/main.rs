@@ -228,12 +228,19 @@ async fn main() -> Result<()> {
 }
 
 fn render(engine: &mut RenderEngine, state: &EditorState) -> Result<()> {
+    use core_render::timing::record_last_render_ns;
     use crossterm::terminal::size;
+    use std::time::Instant;
     let (w, h) = size()?;
     let span = tracing::info_span!("render_cycle");
     let _e = span.enter();
     // Refactor R2 Step 2: stateful engine retains cursor span metadata (still full render).
-    engine.render_full(state, w, h)
+    // Refactor R2 Step 11: capture render duration.
+    let start = Instant::now();
+    let res = engine.render_full(state, w, h);
+    let elapsed = start.elapsed();
+    record_last_render_ns(elapsed.as_nanos() as u64);
+    res
 }
 
 fn translate_key_wrapper(mode: Mode, pending_command: &str, key: &KeyEvent) -> Option<Action> {
