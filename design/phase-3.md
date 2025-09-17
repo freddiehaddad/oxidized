@@ -252,6 +252,23 @@ Timing:
 ---
 (Each completed step updates this document; commit subjects follow template and reference Phase 3 step numbers.)
 
+### Step 6 Details
+
+- Added `core-render::writer` module providing a minimal `Writer` abstraction with a queued `commands: Vec<Command>`.
+- `Command` enum variants: `MoveTo(x, y)`, `ClearLine(x, y)` (placeholder no-op for now), and `Print(String)` (owns its text to sidestep lifetime issues and allow future pooling/segmentation).
+- Integrated into `RenderEngine::render_full` via new helper `render_via_writer(&Frame)` that performs a full traversal of the `Frame` (unchanged ordering) translating each cell into writer commands. Behavior intentionally matches legacy `Renderer::render` (full repaint every frame) — still breadth-first.
+- Legacy `Renderer` struct retained temporarily (transition aid / potential parity tests) but no longer invoked by the engine. Removal deferred until after partial activation (ensures rapid rollback path if subtle escape sequencing differences surface during Steps 7–8 tests).
+- Cursor highlighting (reverse video) preserved using the same ANSI wrapper `\x1b[7m` ... `\x1b[0m` with identical per-cell wrapping semantics as the old renderer.
+- Metrics unaffected this step (all frames still counted as full); partial counters remain dormant until Step 7.
+- Design Decision: Keep writer internal to `core-render` instead of new `core-terminal` crate (Option A) to minimize crate churn and accelerate experimentation; can be extracted later if multi-backend support emerges.
+- Invariants:
+  - Flush order preserves stable top-left to bottom-right painting ensuring deterministic cursor positioning.
+  - Exactly one initial `MoveTo(0,0)` emitted; subsequent `MoveTo` only when cell iteration detects a coordinate jump (same logic as legacy renderer ensuring minimal cursor reposition commands for full-frame path).
+  - No partial clearing yet; `ClearLine` retained as semantic placeholder for upcoming selective line repaints (Steps 7–8) where it will precede printing changed line content.
+  - No allocation amplification beyond per-cell small `String` creations (acceptable for MVP; later optimization may batch contiguous plain cells into a single `Print`).
+- Risk Mitigation: By inserting writer before enabling partial output, any escape sequencing or buffering bugs surface while still using the simpler full repaint comparison baseline; simplifies debugging.
+- Next Steps Dependency: Steps 7–8 will reuse writer to emit only changed lines (adding `ClearLine` usage and selective `MoveTo` calls) while preserving existing frame-building code for status line composition until a dedicated partial line composer is carved out.
+
 ## 16. Progress Log
 
 (Will be updated as steps complete.)
@@ -263,7 +280,7 @@ Timing:
 - [x] Step 3.3 – Cleanup & docs finalize migration (was 3.4)
 - [x] Step 4 – Cache last cursor line + metrics scaffold
 - [x] Step 5 – Hash compare logic tests (still full fallback)
-- [ ] Step 6 – Terminal writer abstraction (prep partial)
+- [x] Step 6 – Terminal writer abstraction (prep partial)
 - [ ] Step 7 – Activate CursorOnly partial rendering
 - [ ] Step 8 – Extend partial to Lines semantic delta
 - [ ] Step 9 – Resize invalidation (force full + clear cache)

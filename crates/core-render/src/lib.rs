@@ -119,3 +119,4 @@ pub mod scheduler;
 pub mod status;
 pub mod timing;
 pub mod viewport; // (placeholder for future viewport helpers)
+pub mod writer; // Phase 3 Step 6: terminal writer abstraction

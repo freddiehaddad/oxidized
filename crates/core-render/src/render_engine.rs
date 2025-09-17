@@ -5,7 +5,8 @@
 use crate::partial_cache::PartialCache;
 use crate::partial_diff::classify_viewport_changes;
 use crate::partial_metrics::{RenderPathMetrics, RenderPathMetricsSnapshot};
-use crate::{CellFlags, Frame, Renderer};
+use crate::writer::Writer;
+use crate::{CellFlags, Frame};
 use anyhow::Result;
 use core_model::View;
 use core_state::EditorState;
@@ -51,7 +52,8 @@ impl RenderEngine {
         let mut frame = build_content_frame(state, view, w, h);
         self.apply_cursor_overlay(state, view, &mut frame, w, h);
         apply_status_line(state, view, &mut frame, w, h);
-        let res = Renderer::render(&frame);
+        // Phase 3 Step 6: translate Frame into writer commands (still full repaint)
+        let res = self.render_via_writer(&frame);
         // Update last cursor line in cache.
         self.cache.last_cursor_line = Some(view.cursor.line);
         let dur = start.elapsed().as_nanos() as u64;
@@ -145,6 +147,40 @@ impl RenderEngine {
             }
         }
         self.last_cursor = meta;
+    }
+
+    /// Temporary full-frame translation using Writer (Step 6). Keeps behavior identical
+    /// to legacy Renderer::render while establishing the abstraction for later partial path.
+    fn render_via_writer(&self, frame: &Frame) -> Result<()> {
+        let mut w = Writer::new();
+        w.move_to(0, 0);
+        let mut current_y = 0u16;
+        let mut current_x = 0u16;
+        for (i, cell) in frame.cells.iter().enumerate() {
+            let y = i as u16 / frame.width;
+            let x = i as u16 % frame.width;
+            if y != current_y || x != current_x {
+                w.move_to(x, y);
+                current_x = x;
+                current_y = y;
+            }
+            if cell.flags.contains(CellFlags::REVERSE) {
+                let mut s = String::from("\x1b[7m");
+                s.push(cell.ch);
+                s.push_str("\x1b[0m");
+                w.print(s);
+            } else {
+                w.print(cell.ch.to_string());
+            }
+            // Advance logical cursor
+            if current_x + 1 == frame.width {
+                current_x = 0;
+                current_y += 1;
+            } else {
+                current_x += 1;
+            }
+        }
+        w.flush()
     }
 }
 
