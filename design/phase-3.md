@@ -547,6 +547,57 @@ structural flag per affected view to escalate only those viewports.
 
 Status: Implemented (Phase 3 Step 9.1).
 
+### Step 10 Details – Large Candidate Escalation Heuristic
+
+Goal:
+Avoid inefficient partial repaint cycles when a large fraction of the viewport
+would be repainted. If the candidate repaint set for a Lines semantic delta
+meets or exceeds a threshold proportion of visible text rows, escalate to a
+full frame render rather than issuing many discrete line clears/prints.
+
+Threshold:
+`LINES_ESCALATION_THRESHOLD_PCT = 0.60` (60%). For `visible_rows = h - 1`,
+escalate when `candidates.len() >= 0.60 * visible_rows`.
+
+Implementation:
+
+1. Promote inline constant to `pub const LINES_ESCALATION_THRESHOLD_PCT` in
+  `render_engine.rs` (documented for tests & future tuning).
+2. After candidate collection + dedupe in `render_lines_partial`, compare
+  candidate count against threshold; early return with a call to `render_full`
+  when exceeded.
+3. Increment `escalated_large_set` metric only on escalation; do not increment
+  `lines_frames` (partial path abandoned). `full_frames` increments via the
+  delegated full render.
+4. Leave existing cold-cache / resize / scroll full fallbacks unchanged.
+
+Rationale:
+When most of the viewport changes (bulk paste, re-indent, large deletion), a
+full render is simpler and often faster than many partial operations. This
+keeps partial rendering targeted at its high-value narrow edits and cursor
+motions.
+
+Testing:
+
+- New test file `large_candidate_escalation.rs`:
+  - `large_candidate_set_escalates_to_full_and_increments_metric` (>= 60% lines):
+    asserts `full_frames` and `escalated_large_set` increment; `lines_frames` unchanged.
+  - `candidate_set_below_threshold_stays_partial` (< 60% lines): asserts
+    `lines_frames` increments and no escalation metric change.
+
+Alternatives Considered:
+
+- Adaptive threshold (based on moving averages) – deferred to Phase 4.
+- Byte-output estimation instead of line count – premature; revisit after
+  styling & gutters introduce wider variance.
+
+Future Work:
+
+- Adaptive or per-buffer threshold tuning driven by metrics.
+- Run-length grouping prior to threshold evaluation (optimize borderline cases).
+
+Status: Implemented (Phase 3 Step 10).
+
 ## 16. Progress Log
 
 (Will be updated as steps complete.)
@@ -566,7 +617,7 @@ Status: Implemented (Phase 3 Step 9.1).
 - [x] Step 8.2 – Hotfix: Unicode status column correctness (visual vs byte)
 - [x] Step 9 – Resize invalidation (force full + clear cache)
 - [x] Step 9.1 – Buffer replacement invalidation (Full escalation on :e)
-- [ ] Step 10 – Large candidate escalation heuristic
+- [x] Step 10 – Large candidate escalation heuristic
 - [ ] Step 11 – Undo snapshot dedupe + metric
 - [ ] Step 12 – Multi-view rustdoc & cleanup
 - [ ] Step 13 – Integration tests (partial vs full parity)

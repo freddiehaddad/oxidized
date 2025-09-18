@@ -27,6 +27,12 @@ pub struct RenderEngine {
     metrics: RenderPathMetrics,
 }
 
+/// Phase 3 Step 10: proportion of visible text rows whose inclusion in the
+/// candidate repaint set (Lines partial path) triggers escalation to a full
+/// frame repaint. Chosen conservatively to preserve most partial wins while
+/// avoiding many discrete line clears when the majority changed.
+pub const LINES_ESCALATION_THRESHOLD_PCT: f32 = 0.60; // 60%
+
 impl Default for RenderEngine {
     fn default() -> Self {
         Self::new()
@@ -288,8 +294,6 @@ impl RenderEngine {
         candidates.sort_unstable();
         candidates.dedup();
 
-        // Escalation threshold (documented constant). 60% of visible rows.
-        const LINES_ESCALATION_THRESHOLD_PCT: f32 = 0.60;
         if candidates.len() as f32 >= (visible_rows as f32 * LINES_ESCALATION_THRESHOLD_PCT) {
             // Escalate defensively.
             self.metrics.escalated_large_set.fetch_add(1, Relaxed);
