@@ -19,6 +19,7 @@
 //! * Error surfacing improvements (detailed messages, echo area reuse).
 
 use super::DispatchResult;
+use super::command_parser::{CommandParser, ParsedCommand};
 use crate::Action;
 use crate::io_ops::{OpenFileResult, WriteFileResult, open_file, write_file};
 use core_model::View;
@@ -52,49 +53,49 @@ pub(crate) fn handle_command_action(
     }
 }
 
-fn execute_command(cmd: String, state: &mut EditorState, view: &mut View) -> DispatchResult {
-    if cmd == ":q" {
-        return DispatchResult::quit();
-    }
-    if let Some(rest) = cmd.strip_prefix(":e ") {
-        return handle_edit_command(rest, state, view);
-    }
-    if cmd == ":w" {
-        return handle_write_command(state);
-    }
+fn execute_command(raw: String, state: &mut EditorState, view: &mut View) -> DispatchResult {
+    let parsed = CommandParser::parse(&raw);
+    let result = match parsed {
+        ParsedCommand::Quit => DispatchResult::quit(),
+        ParsedCommand::Write => handle_write(state),
+        ParsedCommand::Edit(path) => handle_edit(path, state, view),
+        ParsedCommand::Metrics => {
+            state.set_ephemeral("Metrics OK", std::time::Duration::from_secs(2));
+            DispatchResult::dirty()
+        }
+        ParsedCommand::Unknown(_) => DispatchResult::dirty(),
+    };
     state.command_line.clear();
-    DispatchResult::dirty()
+    result
 }
 
-fn handle_edit_command(rest: &str, state: &mut EditorState, view: &mut View) -> DispatchResult {
-    let path_str = rest.trim();
-    if !path_str.is_empty() {
-        let path = std::path::PathBuf::from(path_str);
-        match open_file(&path) {
-            OpenFileResult::Success(s) => {
-                state.buffers[state.active] = s.buffer;
-                view.cursor = Position::origin();
-                state.file_name = Some(s.file_name);
-                state.dirty = false;
-                state.original_line_ending = s.original_line_ending;
-                state.had_trailing_newline = s.had_trailing_newline;
-                state.set_ephemeral("Opened", std::time::Duration::from_secs(3));
-                if s.mixed_line_endings {
-                    tracing::warn!("mixed_line_endings_detected");
-                }
-                state.command_line.clear();
-                return DispatchResult::buffer_replaced();
+fn handle_edit(
+    path: std::path::PathBuf,
+    state: &mut EditorState,
+    view: &mut View,
+) -> DispatchResult {
+    match open_file(&path) {
+        OpenFileResult::Success(s) => {
+            state.buffers[state.active] = s.buffer;
+            view.cursor = Position::origin();
+            state.file_name = Some(s.file_name);
+            state.dirty = false;
+            state.original_line_ending = s.original_line_ending;
+            state.had_trailing_newline = s.had_trailing_newline;
+            state.set_ephemeral("Opened", std::time::Duration::from_secs(3));
+            if s.mixed_line_endings {
+                tracing::warn!("mixed_line_endings_detected");
             }
-            OpenFileResult::Error => {
-                state.set_ephemeral("Open failed", std::time::Duration::from_secs(3));
-            }
+            DispatchResult::buffer_replaced()
+        }
+        OpenFileResult::Error => {
+            state.set_ephemeral("Open failed", std::time::Duration::from_secs(3));
+            DispatchResult::dirty()
         }
     }
-    state.command_line.clear();
-    DispatchResult::dirty()
 }
 
-fn handle_write_command(state: &mut EditorState) -> DispatchResult {
+fn handle_write(state: &mut EditorState) -> DispatchResult {
     match write_file(state) {
         WriteFileResult::Success => {
             state.set_ephemeral("Wrote", std::time::Duration::from_secs(3));
@@ -107,6 +108,5 @@ fn handle_write_command(state: &mut EditorState) -> DispatchResult {
             state.set_ephemeral("Write failed", std::time::Duration::from_secs(3));
         }
     }
-    state.command_line.clear();
     DispatchResult::dirty()
 }

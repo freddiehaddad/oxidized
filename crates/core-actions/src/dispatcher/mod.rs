@@ -24,6 +24,7 @@ use core_model::EditorModel;
 use core_state::EditorState;
 
 mod command;
+mod command_parser;
 mod edit;
 mod mode;
 mod motion;

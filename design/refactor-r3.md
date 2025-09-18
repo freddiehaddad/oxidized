@@ -170,7 +170,7 @@ Proceeding with R3 reduces complexity for all Phase 4 tracks, confines structura
 (Will be updated as steps complete)
 
 - [x] Step 1 – Dispatcher split (2025-09-18)
-- [ ] Step 2 – Command parser extraction
+- [x] Step 2 – Command parser extraction (2025-09-18)
 - [ ] Step 3 – KeyTranslator struct
 - [ ] Step 4 – Action operator pre-variants
 - [ ] Step 5 – StatusLine delta
