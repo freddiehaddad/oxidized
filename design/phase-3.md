@@ -690,6 +690,54 @@ Testing:
 
 Status: Implemented (Phase 3 Step 12).
 
+## 13. Integration Tests – Partial vs Full Parity
+
+Goal: Validate that partial rendering paths (CursorOnly, Lines, escalation
+fallback, resize invalidation, buffer replacement) yield a final visual
+frame identical to a full render of the resulting editor state while
+asserting minimal repaint scope via test-only instrumentation.
+
+Problem: Prior unit tests covered hashing, metrics increments, and isolated
+partial behaviors but did not assert holistic parity between a sequence of
+edits/motions rendered partially and the canonical full frame output. Lack
+of integration coverage risks regression (e.g., missed cursor overlay
+cleanup, stale status line) as future optimizations land.
+
+Approach (Step 13):
+
+1. Add lightweight always-on instrumentation to `RenderEngine` capturing
+  repainted buffer line indices and a simple tag describing partial path kind
+  (`cursor_only`, `lines`, `escalated_full`).
+2. Introduce `partial_full_parity.rs` integration tests exercising:
+   - Cursor-only motion parity.
+   - Single-line in-place edit parity (line + cursor overlay repaint).
+   - Multi-line contiguous edits below escalation threshold parity.
+   - Large candidate set escalation parity (verification of escalation tag).
+   - Resize invalidation followed by partial edit parity.
+   - Buffer replacement (:e) full repaint parity.
+3. Each test seeds cache via an initial full render, performs state mutation(s), invokes the appropriate partial path (or escalation), then builds a fresh full frame snapshot for equality comparison.
+4. Assert repaint scope minimality using captured `last_repaint_lines` where applicable (cursor-only = old + new; lines = old cursor + changed lines; escalation = empty set + escalated tag).
+
+Non-Goals:
+
+- Performance benchmarking (timings) – deferred to a later phase.
+- Capturing actual terminal escape sequences (validated indirectly via
+  frame equality and writer path unit coverage).
+- Multi-view parity (single view only at this stage).
+
+Instrumentation Justification:
+Always compiled (tiny Vec + Option) so integration tests (separate crate
+targets) can access it. Overhead is negligible (clears + few pushes only
+when partial paths execute) and avoids feature flags / cfg complexity.
+
+Outcome:
+
+- Increased confidence partial rendering is visually lossless relative to
+  full frames under covered scenarios.
+- Test scaffolding ready for future additions (Unicode stress, multi-view).
+
+Status: Implemented (Phase 3 Step 13).
+
 ## 16. Progress Log
 
 (Will be updated as steps complete.)
@@ -712,7 +760,7 @@ Status: Implemented (Phase 3 Step 12).
 - [x] Step 10 – Large candidate escalation heuristic
 - [x] Step 11 – Undo snapshot dedupe + metric
 - [x] Step 12 – Multi-view rustdoc & cleanup
-- [ ] Step 13 – Integration tests (partial vs full parity)
+- [x] Step 13 – Integration tests (partial vs full parity)
 - [ ] Step 14 – Documentation updates (partial pipeline & metrics)
 - [ ] Step 15 – Phase closure quality gate
 

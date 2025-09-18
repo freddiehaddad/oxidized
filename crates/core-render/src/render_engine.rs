@@ -25,6 +25,11 @@ pub struct RenderEngine {
     last_cursor: CursorSpanMeta,
     cache: PartialCache,
     metrics: RenderPathMetrics,
+    // Instrumentation (Phase 3 Step 13): always compiled (lightweight) so integration
+    // tests outside the crate (crate/tests) can assert repaint scope & path decisions.
+    // Overhead is negligible: small Vec cleared/pushed only for partial paths.
+    last_repaint_lines: Vec<usize>, // buffer line indices repainted in last partial frame
+    last_repaint_kind: Option<&'static str>,
 }
 
 /// Phase 3 Step 10: proportion of visible text rows whose inclusion in the
@@ -45,6 +50,8 @@ impl RenderEngine {
             last_cursor: CursorSpanMeta::default(),
             cache: PartialCache::new(),
             metrics: RenderPathMetrics::default(),
+            last_repaint_lines: Vec::new(),
+            last_repaint_kind: None,
         }
     }
 
@@ -109,6 +116,8 @@ impl RenderEngine {
         if h == 0 {
             return Ok(());
         }
+        self.last_repaint_lines.clear();
+        self.last_repaint_kind = Some("cursor_only");
         let text_height = h - 1; // reserve status line
         let buf = state.active_buffer();
         let viewport_first = view.viewport_first_line;
@@ -164,8 +173,12 @@ impl RenderEngine {
             && prev != curr_line
         {
             paint_line(prev);
+            self.last_repaint_lines.push(prev);
         }
         paint_line(curr_line);
+        if !self.last_repaint_lines.contains(&curr_line) {
+            self.last_repaint_lines.push(curr_line);
+        }
 
         // After printing lines, we must overlay cursor cluster (reverse video) on current line.
         // Reuse overlay logic by building a temporary mini Frame row representing current line
@@ -262,6 +275,8 @@ impl RenderEngine {
         if h == 0 {
             return Ok(());
         }
+        self.last_repaint_lines.clear();
+        self.last_repaint_kind = Some("lines");
         let text_height = h - 1; // reserve status line
         let viewport_first = view.viewport_first_line;
         let visible_rows = text_height as usize;
@@ -297,6 +312,8 @@ impl RenderEngine {
         if candidates.len() as f32 >= (visible_rows as f32 * LINES_ESCALATION_THRESHOLD_PCT) {
             // Escalate defensively.
             self.metrics.escalated_large_set.fetch_add(1, Relaxed);
+            self.last_repaint_kind = Some("escalated_full");
+            self.last_repaint_lines.clear();
             return self.render_full(state, view, w, h);
         }
 
@@ -367,6 +384,7 @@ impl RenderEngine {
                         raw.len = vh.len;
                     }
                     repainted += 1;
+                    self.last_repaint_lines.push(line_idx);
                 }
             }
         }
@@ -411,6 +429,13 @@ impl RenderEngine {
         self.metrics.last_partial_render_ns.store(dur, Relaxed);
         self.cache.last_cursor_line = Some(curr_cursor);
         Ok(())
+    }
+
+    pub fn test_last_repaint_lines(&self) -> &[usize] {
+        &self.last_repaint_lines
+    }
+    pub fn test_last_repaint_kind(&self) -> Option<&'static str> {
+        self.last_repaint_kind
     }
 
     /// Access a snapshot of current metrics (for tests and future status integration).
@@ -513,7 +538,7 @@ impl RenderEngine {
 }
 
 /// Test-only helper: build full frame (content + cursor + status) without emitting to terminal.
-#[cfg(test)]
+/// Build a full frame (content + cursor + status) for parity verification & tests.
 pub fn build_full_frame_for_test(state: &EditorState, view: &View, w: u16, h: u16) -> Frame {
     let mut eng = RenderEngine::new();
     let mut frame = build_content_frame(state, view, w, h);
