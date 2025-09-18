@@ -738,6 +738,77 @@ Outcome:
 
 Status: Implemented (Phase 3 Step 13).
 
+## 14. Documentation Updates – Partial Pipeline & Metrics
+
+Goal: Promote the partial rendering subsystem (cursor-only & lines paths,
+escalation heuristic, resize/buffer replacement invalidation, instrumentation)
+into authoritative documentation. Establish a stable reference for future
+optimization iterations (scroll region usage, batched printing, Unicode perf
+improvements) without changing behavior.
+
+Scope:
+
+- Crate-level rustdoc (core-render) summarizing pipeline & metrics.
+- Design plan section (this) capturing decision inputs, lifecycle, policies.
+- Explicit articulation of metrics intent & interpretation heuristics.
+- Catalog deferred optimizations with rationale for deferral.
+
+Pipeline (Current State):
+
+1. Scheduler merges semantic deltas into an effective delta per frame.
+2. Full / Scroll / cold / resize / buffer replacement => full frame build + emit.
+3. CursorOnly (warm) => repaint old/new cursor lines + status; skip hashing.
+4. Lines (warm) => collect dirty + cursor lines, threshold check, selective
+  hash compare + repaint, then cursor overlay.
+
+Decision Inputs:
+
+- Semantic delta expresses high-level intent (motion/edit/scroll).
+- Effective delta may escalate to Full (threshold, cold, structural change).
+
+Cache Lifecycle:
+
+- Full render always refreshes entire viewport hash snapshot.
+- Lines path updates hashes only for repainted lines (changed or cursor).
+- Resize or buffer replacement clears cache (cold start next frame).
+
+Metrics (RenderPathMetrics) Overview:
+
+- Frame Counts: full_frames, partial_frames, cursor_only_frames, lines_frames.
+- Dirty Line Funnel: dirty_lines_marked -> dirty_candidate_lines -> dirty_lines_repainted.
+- Escalation & Environment: escalated_large_set, resize_invalidations.
+- Timing: last_full_render_ns, last_partial_render_ns.
+
+Interpretation Heuristics:
+
+- High candidate vs repainted delta suggests hash/classification wins.
+- Rising escalated_large_set implies threshold tuning or need for scroll region.
+- Large partial frame times vs full may signal redundant hashing or excessive
+  ClearLine usage (future diff micro-optimizations).
+
+Invalidation & Escalation Policies:
+
+- Resize / buffer replacement: unconditional cache clear + forced Full.
+- Cold cache detection (viewport start or width mismatch) => Full.
+- Lines threshold (>=60% visible rows) => escalate to Full.
+- CursorOnly never hashes; relies on correctness of prior full frame.
+
+Deferred Optimizations:
+
+- Terminal scroll region usage for scroll deltas.
+- Prefix/suffix diff trimming for line repaint output minimization.
+- Command batching (merge adjacent plain cells into single Print writes).
+- Moving average / percentile latency instrumentation.
+- Unicode width caching keyed by (line revision, span) for visual_col.
+
+Non-Goals (Step 14):
+
+- Adding new metrics counters.
+- Altering existing heuristic constants.
+- Enabling multi-view simultaneous rendering.
+
+Status: Implemented (Phase 3 Step 14).
+
 ## 16. Progress Log
 
 (Will be updated as steps complete.)
@@ -761,7 +832,7 @@ Status: Implemented (Phase 3 Step 13).
 - [x] Step 11 – Undo snapshot dedupe + metric
 - [x] Step 12 – Multi-view rustdoc & cleanup
 - [x] Step 13 – Integration tests (partial vs full parity)
-- [ ] Step 14 – Documentation updates (partial pipeline & metrics)
+- [x] Step 14 – Documentation updates (partial pipeline & metrics)
 - [ ] Step 15 – Phase closure quality gate
 
 ---

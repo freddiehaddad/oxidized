@@ -11,16 +11,27 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Debug, Default)]
 pub struct RenderPathMetrics {
+    /// Count of full frame renders executed (includes escalations & scroll/resize).
     pub full_frames: AtomicU64,
+    /// Count of frames that executed any partial strategy (cursor-only or lines).
     pub partial_frames: AtomicU64,
+    /// Sub-count: cursor-only partial frames (old+new cursor lines + status repainted).
     pub cursor_only_frames: AtomicU64,
+    /// Sub-count: lines partial frames (hash-driven selective line repaints).
     pub lines_frames: AtomicU64,
+    /// Escalations from candidate threshold (large dirty set forced full path).
     pub escalated_large_set: AtomicU64,
+    /// Number of explicit cache invalidations due to resize (and buffer replacement reuse).
     pub resize_invalidations: AtomicU64,
+    /// Raw dirty lines marked prior to viewport intersection + cursor injection.
     pub dirty_lines_marked: AtomicU64,
+    /// Candidate lines after viewport filtering + cursor line additions.
     pub dirty_candidate_lines: AtomicU64,
+    /// Lines physically repainted (subset of candidates; includes forced cursor lines).
     pub dirty_lines_repainted: AtomicU64,
+    /// Duration (ns) of the most recent full frame render.
     pub last_full_render_ns: AtomicU64,
+    /// Duration (ns) of the most recent partial frame render (cursor-only or lines).
     pub last_partial_render_ns: AtomicU64,
 }
 
