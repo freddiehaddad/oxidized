@@ -598,6 +598,47 @@ Future Work:
 
 Status: Implemented (Phase 3 Step 10).
 
+## 11. Undo Snapshot Dedupe + Metric
+
+Goal: Avoid pushing redundant undo snapshots when successive calls observe an
+identical buffer state (no textual change) while counting how often this
+occurs to inform future upstream coalescing refinements.
+
+Problem: Certain edit paths can conservatively call `push_snapshot` even if
+the underlying text did not change (e.g. defensive calls around mode boundaries
+or future features). Re-cloning the full buffer wastes memory and inflates
+undo depth without semantic benefit.
+
+Approach (Phase 3 simplicity):
+
+1. Extend `EditSnapshot` with a `hash: u64` field representing the full buffer
+  content at capture time.
+2. Compute hash via a straightforward iteration over all lines feeding a
+  `DefaultHasher` (stable for the process; not persisted disk format).
+3. On `push_snapshot`, compare new hash to the last snapshot's hash; if equal
+  increment `undo_snapshots_skipped` metric and return early (do NOT clear
+  redo stack since no new edit was introduced).
+4. Record trace event `snapshot_dedupe_skip` with depths & hash for diagnostics.
+5. Provide getter `undo_snapshots_skipped()` on `EditorState` for future status
+  reporting / dashboards.
+
+Metric: `undo_snapshots_skipped` (monotonic counter on `EditorState`).
+
+Testing:
+
+- `snapshot_dedupe_skips_identical`: pushes snapshot twice without mutation;
+  asserts stack length unchanged and metric increments to 1.
+- `snapshot_dedupe_allows_changed`: mutates buffer between pushes; asserts two
+  snapshots present and metric remains 0.
+
+Future Work:
+
+- Adopt incremental / rolling hashes avoiding full traversal on large buffers.
+- Track per-snapshot byte length to support memory usage reporting.
+- Integrate with future differential snapshots (store deltas instead of full clones).
+
+Status: Implemented (Phase 3 Step 11).
+
 ## 16. Progress Log
 
 (Will be updated as steps complete.)
@@ -618,7 +659,7 @@ Status: Implemented (Phase 3 Step 10).
 - [x] Step 9 – Resize invalidation (force full + clear cache)
 - [x] Step 9.1 – Buffer replacement invalidation (Full escalation on :e)
 - [x] Step 10 – Large candidate escalation heuristic
-- [ ] Step 11 – Undo snapshot dedupe + metric
+- [x] Step 11 – Undo snapshot dedupe + metric
 - [ ] Step 12 – Multi-view rustdoc & cleanup
 - [ ] Step 13 – Integration tests (partial vs full parity)
 - [ ] Step 14 – Documentation updates (partial pipeline & metrics)

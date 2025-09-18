@@ -24,6 +24,9 @@
 //!   navigation (`motion`) live in the dispatcher; undo/redo spans wrap calls into this module.
 
 use core_text::{Buffer, Position};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::Hasher;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::trace;
 
 /// Maximum number of snapshots retained in undo history.
@@ -44,6 +47,8 @@ pub struct EditSnapshot {
     pub buffer: Buffer,
     pub position: Position,
     pub mode: Mode,
+    /// Content hash of the buffer at snapshot capture (Phase 3 Step 11).
+    pub hash: u64,
 }
 
 /// Current editor mode.
@@ -71,6 +76,8 @@ pub struct EditorState {
     pub original_line_ending: LineEnding,
     pub had_trailing_newline: bool,
     pub config_vertical_margin: usize,
+    /// Count of snapshots skipped due to identical successive state (Phase 3 Step 11).
+    pub undo_snapshots_skipped: AtomicU64,
 }
 
 /// Line ending style detected from source file (Phase 2 Step 9).
@@ -270,6 +277,7 @@ impl EditorState {
             original_line_ending: LineEnding::Lf,
             had_trailing_newline: false,
             config_vertical_margin: 0,
+            undo_snapshots_skipped: AtomicU64::new(0),
         }
     }
 
@@ -318,18 +326,34 @@ impl EditorState {
 
     /// Capture a snapshot of the current editable state (active single buffer only in Phase 1).
     pub fn push_snapshot(&mut self, kind: SnapshotKind, cursor: Position) {
+        let current_hash = buffer_hash(self.active_buffer());
+        if let Some(last) = self.undo_stack.last()
+            && last.hash == current_hash
+        {
+            // Identical successive snapshot -> skip push, increment metric.
+            self.undo_snapshots_skipped.fetch_add(1, Ordering::Relaxed);
+            trace!(
+                undo_depth = self.undo_stack.len(),
+                redo_depth = self.redo_stack.len(),
+                hash = current_hash,
+                "snapshot_dedupe_skip"
+            );
+            return;
+        }
         let snap = EditSnapshot {
             kind,
             buffer: self.active_buffer().clone(),
             position: cursor,
             mode: self.mode,
+            hash: current_hash,
         };
-        let rope_chars_before = self.active_buffer().line_count(); // coarse metric (lines)
+        let rope_lines_before = self.active_buffer().line_count(); // coarse metric (lines)
         self.undo_stack.push(snap);
         trace!(
             undo_depth = self.undo_stack.len(),
             redo_depth = self.redo_stack.len(),
-            lines = rope_chars_before,
+            lines = rope_lines_before,
+            hash = current_hash,
             "push_snapshot"
         );
         if self.undo_stack.len() > UNDO_HISTORY_MAX {
@@ -405,6 +429,7 @@ impl EditorState {
                 buffer: self.active_buffer().clone(),
                 position: *cursor,
                 mode: self.mode,
+                hash: buffer_hash(self.active_buffer()),
             };
             self.redo_stack.push(current);
             trace!(redo_depth = self.redo_stack.len(), "redo_push_from_undo");
@@ -433,6 +458,7 @@ impl EditorState {
                 buffer: self.active_buffer().clone(),
                 position: *cursor,
                 mode: self.mode,
+                hash: buffer_hash(self.active_buffer()),
             };
             self.undo_stack.push(current);
             trace!(undo_depth = self.undo_stack.len(), "undo_push_from_redo");
@@ -446,6 +472,26 @@ impl EditorState {
             false
         }
     }
+
+    /// Number of successive identical snapshots skipped (Phase 3 Step 11).
+    pub fn undo_snapshots_skipped(&self) -> u64 {
+        self.undo_snapshots_skipped.load(Ordering::Relaxed)
+    }
+}
+
+/// Compute a stable hash for the entire buffer content (Phase 3 Step 11).
+/// Simplicity-first implementation concatenates all lines (including newline characters)
+/// into the hasher. Future phases may adopt incremental diffing or rolling hashes.
+fn buffer_hash(buf: &Buffer) -> u64 {
+    let mut h = DefaultHasher::new();
+    let line_count = buf.line_count();
+    for i in 0..line_count {
+        if let Some(l) = buf.line(i) {
+            // includes trailing newline if present
+            h.write(l.as_bytes());
+        }
+    }
+    h.finish()
 }
 
 // NOTE (4.11 Deferred): Time-based coalescing for Insert runs is intentionally not implemented yet.
@@ -499,6 +545,51 @@ mod tests {
         assert!(st.undo(&mut cursor));
         // After undo we can redo
         assert!(st.redo(&mut cursor));
+    }
+
+    #[test]
+    fn snapshot_dedupe_skips_identical() {
+        let buf = Buffer::from_str("t", "abc").unwrap();
+        let mut st = EditorState::new(buf);
+        let cursor = Position { line: 0, byte: 0 };
+        st.push_snapshot(SnapshotKind::Edit, cursor);
+        let before = st.undo_stack.len();
+        st.push_snapshot(SnapshotKind::Edit, cursor); // identical state -> skip
+        assert_eq!(
+            st.undo_stack.len(),
+            before,
+            "duplicate snapshot was not skipped"
+        );
+        assert_eq!(
+            st.undo_snapshots_skipped(),
+            1,
+            "skip metric not incremented"
+        );
+    }
+
+    #[test]
+    fn snapshot_dedupe_allows_changed() {
+        let buf = Buffer::from_str("t", "a").unwrap();
+        let mut st = EditorState::new(buf);
+        let mut cursor = Position { line: 0, byte: 0 };
+        st.push_snapshot(SnapshotKind::Edit, cursor);
+        // mutate buffer
+        {
+            let mut modified = st.active_buffer().clone();
+            modified.insert_grapheme(&mut cursor, "b");
+            st.buffers[st.active] = modified;
+        }
+        st.push_snapshot(SnapshotKind::Edit, cursor); // should NOT skip
+        assert_eq!(
+            st.undo_stack.len(),
+            2,
+            "changed snapshot unexpectedly skipped"
+        );
+        assert_eq!(
+            st.undo_snapshots_skipped(),
+            0,
+            "skip metric incremented incorrectly"
+        );
     }
 
     #[test]
