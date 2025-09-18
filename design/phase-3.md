@@ -421,6 +421,71 @@ Risk Assessment:
 Result:
 Status line column now matches full render behavior for Unicode grapheme clusters in both full and cursor-only partial paths.
 
+### Step 9 Details – Resize Invalidation (Force Full + Clear Cache)
+
+Goal:
+Guarantee correctness after a terminal size change by invalidating the partial
+render cache so the next frame is a full rebuild with fresh line hashes sized
+for the new viewport (width & height). Prevents stale hash comparisons or
+truncated line artifacts when width shrinks, and ensures new lines entering
+view are hashed when height grows.
+
+Design:
+Introduce `RenderEngine::invalidate_for_resize()` which:
+
+1. Clears `PartialCache` (line hashes, width, viewport_start, last_cursor_line).
+2. Increments `resize_invalidations` metric.
+3. Defers actual rendering to the normal event-driven loop; caller (terminal
+   resize handler) sets a flag that results in an effective Full render next
+   tick (scheduler policy already specifies scroll/resize => Full).
+
+Implementation Notes:
+
+- Added `PartialCache::clear()` to centralize cache reset semantics.
+- Chose not to immediately render inside invalidation to preserve the
+  event-driven design (avoid synchronous side effects in size signal path).
+- `last_cursor_line` cleared to avoid repaint assumptions about prior cursor
+  overlay region across dimension changes.
+
+Testing:
+
+- New test `resize_invalidation_clears_cache_and_increments_metric` renders a
+  full frame, calls `invalidate_for_resize`, asserts metric increment, then
+  performs another full render at a different size (verifying no panic and two
+  full frame counts).
+
+Risks & Mitigations:
+
+- Risk: Missed invalidation leads to partial path using stale width; mitigated
+  by forcing caller contract: resize event must call invalidate.
+- Risk: Spurious extra full frames if resize fired rapidly; acceptable MVP –
+  future debounce optimization could coalesce consecutive resizes.
+
+Deferred Optimization:
+
+- Track last known (w,h) inside engine and auto-detect mismatch to self
+  invalidate once (belt & suspenders) – postponed to keep MVP minimal.
+- Potential future incremental cache shift when only height changes: treat
+  added rows as cold appended lines (Phase 4 candidate).
+
+Integration Update (Runtime Wiring Added):
+The initial Step 9 implementation covered engine APIs, metrics, and tests but
+did not wire the terminal resize event in the main event loop. The runtime is
+now updated so the resize handler:
+
+1. Calls `render_engine.invalidate_for_resize()`.
+2. Marks `RenderDelta::Full` to guarantee a complete repaint on the next
+  render cycle.
+3. Continues to recompute vertical margin and (if changed) marks a
+  `StatusLine` delta.
+
+This resolves transient stale content after a shrink before the first cursor
+motion. Design intent unchanged; this completes Step 9 integration scope.
+
+Outcome:
+Editor returns to a safe, cold state after resize ensuring partial rendering
+never reads invalid cache entries and maintaining flicker-free correctness.
+
 ## 16. Progress Log
 
 (Will be updated as steps complete.)
@@ -438,7 +503,7 @@ Status line column now matches full render behavior for Unicode grapheme cluster
 - [x] Step 8 – Extend partial to Lines semantic delta
 - [x] Step 8.1 – Hotfix: horizontal motions repaint status line
 - [x] Step 8.2 – Hotfix: Unicode status column correctness (visual vs byte)
-- [ ] Step 9 – Resize invalidation (force full + clear cache)
+- [x] Step 9 – Resize invalidation (force full + clear cache)
 - [ ] Step 10 – Large candidate escalation heuristic
 - [ ] Step 11 – Undo snapshot dedupe + metric
 - [ ] Step 12 – Multi-view rustdoc & cleanup

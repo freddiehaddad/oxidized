@@ -43,6 +43,16 @@ impl PartialCache {
         Self::default()
     }
 
+    /// Fully clear all cached metadata (used on resize invalidation). This resets
+    /// viewport origin/width to sentinel values and drops line hashes and last cursor
+    /// line so that the next render is forced to treat the cache as cold.
+    pub fn clear(&mut self) {
+        self.viewport_start = 0;
+        self.width = 0;
+        self.line_hashes.clear();
+        self.last_cursor_line = None;
+    }
+
     /// Reset cache to represent a new viewport slice (caller supplies vector capacity hint).
     pub fn reset(&mut self, viewport_start: usize, width: u16, expected_lines: usize) {
         self.viewport_start = viewport_start;

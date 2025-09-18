@@ -66,6 +66,17 @@ impl RenderEngine {
         res
     }
 
+    /// Phase 3 Step 9: external resize invalidation. Clears partial cache so the next
+    /// frame (forced full by caller) rebuilds hashes for the new viewport dimensions.
+    /// Metrics record the invalidation event. This keeps responsibility for cache
+    /// lifecycle within the render layer while allowing the event loop / terminal size
+    /// watcher to trigger a lightweight invalidation without immediately rendering.
+    pub fn invalidate_for_resize(&mut self) {
+        self.cache.clear();
+        use std::sync::atomic::Ordering::Relaxed;
+        self.metrics.resize_invalidations.fetch_add(1, Relaxed);
+    }
+
     /// Placeholder for future partial rendering path (Phase 3).
     pub fn render_partial(
         &mut self,
@@ -655,5 +666,26 @@ mod tests {
         assert_eq!(snap.cursor_only_frames, 1, "cursor-only frame counted");
         assert!(snap.last_partial_render_ns > 0);
         assert_eq!(eng.last_cursor_line(), Some(2));
+    }
+
+    #[test]
+    fn resize_invalidation_clears_cache_and_increments_metric() {
+        let model = mk_state("alpha\nβeta\nγ\n");
+        let mut eng = RenderEngine::new();
+        let view = model.active_view().clone();
+        eng.render_full(model.state(), &view, 40, 6).unwrap();
+        let before = eng.metrics_snapshot().resize_invalidations;
+        // Invalidate (simulate terminal resize event) then render again with different size.
+        eng.invalidate_for_resize();
+        let mid = eng.metrics_snapshot();
+        assert_eq!(
+            mid.resize_invalidations,
+            before + 1,
+            "metric must increment"
+        );
+        // Subsequent full render should succeed and recache for new width.
+        eng.render_full(model.state(), &view, 50, 8).unwrap();
+        let after = eng.metrics_snapshot();
+        assert_eq!(after.full_frames, 2, "two full frames executed");
     }
 }

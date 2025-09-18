@@ -187,7 +187,12 @@ async fn main() -> Result<()> {
                 }
             }
             Event::Input(InputEvent::Resize(_, h)) => {
-                // Recompute effective vertical margin (Refactor R2 Step 7)
+                // Phase 3 Step 9 (integration): on terminal resize, invalidate partial
+                // render cache so next frame performs a full rebuild. Mark a Full delta
+                // to guarantee a complete repaint rather than a partial path using stale
+                // geometry. Still recompute vertical margin and mark StatusLine if changed.
+                render_engine.invalidate_for_resize();
+                scheduler.mark(RenderDelta::Full);
                 if let Some(new_margin) = config.recompute_after_resize(h.saturating_sub(1)) {
                     model.state_mut().config_vertical_margin = new_margin as usize;
                     scheduler.mark(RenderDelta::StatusLine);
