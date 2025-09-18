@@ -170,7 +170,12 @@ async fn main() -> Result<()> {
                 if let Some(act) = translate_key_wrapper(snapshot_mode, &cmd_buf, &k) {
                     let before_line = model.active_view().cursor.line;
                     let dr = dispatch(act, &mut model, &mut sticky_visual_col, &observers);
-                    if dr.dirty {
+                    if dr.buffer_replaced {
+                        // Phase 3 Step 9.1: buffer replacement (e.g. :e <file>) is a structural
+                        // change – invalidate partial render cache and escalate to Full render.
+                        render_engine.invalidate_for_resize(); // reuse same cache clear semantics
+                        scheduler.mark(RenderDelta::Full);
+                    } else if dr.dirty {
                         // Heuristic mapping (Phase 2 Step 17): if line changed -> Lines(range of that line),
                         // if only cursor moved within same line -> CursorOnly, else fallback Full.
                         let after_line = model.active_view().cursor.line;

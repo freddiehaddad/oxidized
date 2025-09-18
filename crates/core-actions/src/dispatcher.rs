@@ -24,6 +24,11 @@ use core_text::{Buffer, Position, motion};
 pub struct DispatchResult {
     pub dirty: bool,
     pub quit: bool,
+    /// Indicates a structural buffer replacement occurred (e.g. :e loaded a new file)
+    /// and any partial render caches (line hashes, last cursor line) must be treated
+    /// as invalid. The runtime should escalate to a Full render regardless of the
+    /// semantic dirty heuristic chosen for ordinary edits/motions.
+    pub buffer_replaced: bool,
 }
 
 impl DispatchResult {
@@ -31,18 +36,28 @@ impl DispatchResult {
         Self {
             dirty: true,
             quit: false,
+            buffer_replaced: false,
         }
     }
     pub fn clean() -> Self {
         Self {
             dirty: false,
             quit: false,
+            buffer_replaced: false,
         }
     }
     pub fn quit() -> Self {
         Self {
             dirty: true,
             quit: true,
+            buffer_replaced: false,
+        }
+    }
+    pub fn buffer_replaced() -> Self {
+        Self {
+            dirty: true,
+            quit: false,
+            buffer_replaced: true,
         }
     }
 }
@@ -220,6 +235,11 @@ pub fn dispatch(
                             if s.mixed_line_endings {
                                 tracing::warn!("mixed_line_endings_detected");
                             }
+                            state.command_line.clear();
+                            // Structural change: new buffer content wholly replaces old.
+                            // Return a DispatchResult that signals runtime to invalidate
+                            // partial render cache and force Full frame (Phase 3 Step 9.1).
+                            return DispatchResult::buffer_replaced();
                         }
                         OpenFileResult::Error => {
                             state.set_ephemeral("Open failed", std::time::Duration::from_secs(3));

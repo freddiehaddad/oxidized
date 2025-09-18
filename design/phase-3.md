@@ -486,6 +486,67 @@ Outcome:
 Editor returns to a safe, cold state after resize ensuring partial rendering
 never reads invalid cache entries and maintaining flicker-free correctness.
 
+### Step 9.1 Details – Buffer Replacement Invalidation (`:e <path>` Full Escalation)
+
+Observed Issue:
+Opening a new file via `:e <path>` after enabling partial rendering (Steps 7–8)
+only repainted the cursor line (and status) until an additional motion/edit
+occurred. The previous buffer's remaining visible lines persisted on screen,
+creating a confusing mixed display (old content + new status).
+
+Root Cause:
+The `:e` command path completely replaces the active buffer's rope contents
+and resets the cursor, but the dispatcher only returned a generic `dirty`
+flag. The runtime heuristic (Phase 2 Step 17) mapped this to a narrow
+`Lines` or `CursorOnly` semantic delta depending on cursor movement, allowing
+the partial path to skip repainting untouched (but now invalid) lines. The
+partial line hash cache remained "warm" (viewport start & width unchanged)
+so no cold/full fallback occurred automatically.
+
+Design Decision:
+Introduce an explicit structural signal from dispatch: `DispatchResult { buffer_replaced: true }`.
+The event loop treats this as a mandatory Full render trigger and clears the
+partial cache (reuse existing `invalidate_for_resize()` semantics for cache reset).
+This keeps detection localized (single return site in dispatcher) and avoids
+fragile content-length or hash mismatch heuristics in the render layer.
+
+Implementation:
+
+1. Extend `DispatchResult` with `buffer_replaced: bool` and constructor `buffer_replaced()`.
+2. On successful `:e <path>` open, return `DispatchResult::buffer_replaced()` early.
+3. In the main event loop, branch before the generic `dirty` heuristic: if
+  `buffer_replaced` then call `render_engine.invalidate_for_resize()` (cache clear)
+  and `scheduler.mark(RenderDelta::Full)`.
+4. Leave existing resize invalidation path unchanged (shared cache clear logic).
+
+Metrics Impact:
+Counts as a normal Full frame (increments `full_frames`). No new metric added
+in this step; reuse existing instrumentation (rare operation vs frequent edits).
+
+Safety / Correctness:
+
+- Guarantees all visible lines repaint for new buffer content.
+- Avoids double invalidation by not separately marking `Lines` or `CursorOnly`.
+- Cache cleared so subsequent partial frames compute hashes against the new buffer.
+
+Alternatives Considered:
+
+- Detect buffer length mismatch vs cache population: rejected (indirect & brittle).
+- Force cold path by mutating viewport start: rejected (obscures intent).
+
+Testing Strategy (manual until Step 13 parity tests):
+
+1. Start editor, open file A (default).
+2. Execute `:e B` where file B has visibly different first few lines.
+3. Verify entire viewport updates immediately (no stale lines).
+4. Move cursor: subsequent motions use partial cursor-only path as expected.
+
+Future Extension:
+If future multi-view introduces per-view buffer switches, propagate a similar
+structural flag per affected view to escalate only those viewports.
+
+Status: Implemented (Phase 3 Step 9.1).
+
 ## 16. Progress Log
 
 (Will be updated as steps complete.)
@@ -504,6 +565,7 @@ never reads invalid cache entries and maintaining flicker-free correctness.
 - [x] Step 8.1 – Hotfix: horizontal motions repaint status line
 - [x] Step 8.2 – Hotfix: Unicode status column correctness (visual vs byte)
 - [x] Step 9 – Resize invalidation (force full + clear cache)
+- [x] Step 9.1 – Buffer replacement invalidation (Full escalation on :e)
 - [ ] Step 10 – Large candidate escalation heuristic
 - [ ] Step 11 – Undo snapshot dedupe + metric
 - [ ] Step 12 – Multi-view rustdoc & cleanup
