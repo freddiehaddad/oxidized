@@ -424,104 +424,67 @@ Status line column now matches full render behavior for Unicode grapheme cluster
 ### Step 9 Details – Resize Invalidation (Force Full + Clear Cache)
 
 Goal:
-Guarantee correctness after a terminal size change by invalidating the partial
-render cache so the next frame is a full rebuild with fresh line hashes sized
-for the new viewport (width & height). Prevents stale hash comparisons or
-truncated line artifacts when width shrinks, and ensures new lines entering
-view are hashed when height grows.
+Guarantee correctness after a terminal size change by invalidating the partial render cache so the next frame is a full rebuild with fresh line hashes sized for the new viewport (width & height). Prevents stale hash comparisons or truncated line artifacts when width shrinks, and ensures new lines entering view are hashed when height grows.
 
 Design:
 Introduce `RenderEngine::invalidate_for_resize()` which:
 
 1. Clears `PartialCache` (line hashes, width, viewport_start, last_cursor_line).
 2. Increments `resize_invalidations` metric.
-3. Defers actual rendering to the normal event-driven loop; caller (terminal
-   resize handler) sets a flag that results in an effective Full render next
-   tick (scheduler policy already specifies scroll/resize => Full).
+3. Defers actual rendering to the normal event-driven loop; caller (terminal resize handler) sets a flag that results in an effective Full render next tick (scheduler policy already specifies scroll/resize => Full).
 
 Implementation Notes:
 
 - Added `PartialCache::clear()` to centralize cache reset semantics.
-- Chose not to immediately render inside invalidation to preserve the
-  event-driven design (avoid synchronous side effects in size signal path).
-- `last_cursor_line` cleared to avoid repaint assumptions about prior cursor
-  overlay region across dimension changes.
+- Chose not to immediately render inside invalidation to preserve the event-driven design (avoid synchronous side effects in size signal path).
+- `last_cursor_line` cleared to avoid repaint assumptions about prior cursor overlay region across dimension changes.
 
 Testing:
 
-- New test `resize_invalidation_clears_cache_and_increments_metric` renders a
-  full frame, calls `invalidate_for_resize`, asserts metric increment, then
-  performs another full render at a different size (verifying no panic and two
-  full frame counts).
+- New test `resize_invalidation_clears_cache_and_increments_metric` renders a full frame, calls `invalidate_for_resize`, asserts metric increment, then performs another full render at a different size (verifying no panic and two full frame counts).
 
 Risks & Mitigations:
 
-- Risk: Missed invalidation leads to partial path using stale width; mitigated
-  by forcing caller contract: resize event must call invalidate.
-- Risk: Spurious extra full frames if resize fired rapidly; acceptable MVP –
-  future debounce optimization could coalesce consecutive resizes.
+- Risk: Missed invalidation leads to partial path using stale width; mitigated by forcing caller contract: resize event must call invalidate.
+- Risk: Spurious extra full frames if resize fired rapidly; acceptable MVP – future debounce optimization could coalesce consecutive resizes.
 
 Deferred Optimization:
 
-- Track last known (w,h) inside engine and auto-detect mismatch to self
-  invalidate once (belt & suspenders) – postponed to keep MVP minimal.
-- Potential future incremental cache shift when only height changes: treat
-  added rows as cold appended lines (Phase 4 candidate).
+- Track last known (w,h) inside engine and auto-detect mismatch to self invalidate once (belt & suspenders) – postponed to keep MVP minimal.
+- Potential future incremental cache shift when only height changes: treat added rows as cold appended lines (Phase 4 candidate).
 
 Integration Update (Runtime Wiring Added):
-The initial Step 9 implementation covered engine APIs, metrics, and tests but
-did not wire the terminal resize event in the main event loop. The runtime is
-now updated so the resize handler:
+The initial Step 9 implementation covered engine APIs, metrics, and tests but did not wire the terminal resize event in the main event loop. The runtime is now updated so the resize handler:
 
 1. Calls `render_engine.invalidate_for_resize()`.
-2. Marks `RenderDelta::Full` to guarantee a complete repaint on the next
-  render cycle.
-3. Continues to recompute vertical margin and (if changed) marks a
-  `StatusLine` delta.
+2. Marks `RenderDelta::Full` to guarantee a complete repaint on the next render cycle.
+3. Continues to recompute vertical margin and (if changed) marks a `StatusLine` delta.
 
-This resolves transient stale content after a shrink before the first cursor
-motion. Design intent unchanged; this completes Step 9 integration scope.
+This resolves transient stale content after a shrink before the first cursor motion. Design intent unchanged; this completes Step 9 integration scope.
 
 Outcome:
-Editor returns to a safe, cold state after resize ensuring partial rendering
-never reads invalid cache entries and maintaining flicker-free correctness.
+Editor returns to a safe, cold state after resize ensuring partial rendering never reads invalid cache entries and maintaining flicker-free correctness.
 
 ### Step 9.1 Details – Buffer Replacement Invalidation (`:e <path>` Full Escalation)
 
 Observed Issue:
-Opening a new file via `:e <path>` after enabling partial rendering (Steps 7–8)
-only repainted the cursor line (and status) until an additional motion/edit
-occurred. The previous buffer's remaining visible lines persisted on screen,
-creating a confusing mixed display (old content + new status).
+Opening a new file via `:e <path>` after enabling partial rendering (Steps 7–8) only repainted the cursor line (and status) until an additional motion/edit occurred. The previous buffer's remaining visible lines persisted on screen, creating a confusing mixed display (old content + new status).
 
 Root Cause:
-The `:e` command path completely replaces the active buffer's rope contents
-and resets the cursor, but the dispatcher only returned a generic `dirty`
-flag. The runtime heuristic (Phase 2 Step 17) mapped this to a narrow
-`Lines` or `CursorOnly` semantic delta depending on cursor movement, allowing
-the partial path to skip repainting untouched (but now invalid) lines. The
-partial line hash cache remained "warm" (viewport start & width unchanged)
-so no cold/full fallback occurred automatically.
+The `:e` command path completely replaces the active buffer's rope contents and resets the cursor, but the dispatcher only returned a generic `dirty` flag. The runtime heuristic (Phase 2 Step 17) mapped this to a narrow `Lines` or `CursorOnly` semantic delta depending on cursor movement, allowing the partial path to skip repainting untouched (but now invalid) lines. The partial line hash cache remained "warm" (viewport start & width unchanged) so no cold/full fallback occurred automatically.
 
 Design Decision:
-Introduce an explicit structural signal from dispatch: `DispatchResult { buffer_replaced: true }`.
-The event loop treats this as a mandatory Full render trigger and clears the
-partial cache (reuse existing `invalidate_for_resize()` semantics for cache reset).
-This keeps detection localized (single return site in dispatcher) and avoids
-fragile content-length or hash mismatch heuristics in the render layer.
+Introduce an explicit structural signal from dispatch: `DispatchResult { buffer_replaced: true }`.  The event loop treats this as a mandatory Full render trigger and clears the partial cache (reuse existing `invalidate_for_resize()` semantics for cache reset).  This keeps detection localized (single return site in dispatcher) and avoids fragile content-length or hash mismatch heuristics in the render layer.
 
 Implementation:
 
 1. Extend `DispatchResult` with `buffer_replaced: bool` and constructor `buffer_replaced()`.
 2. On successful `:e <path>` open, return `DispatchResult::buffer_replaced()` early.
-3. In the main event loop, branch before the generic `dirty` heuristic: if
-  `buffer_replaced` then call `render_engine.invalidate_for_resize()` (cache clear)
-  and `scheduler.mark(RenderDelta::Full)`.
+3. In the main event loop, branch before the generic `dirty` heuristic: if `buffer_replaced` then call `render_engine.invalidate_for_resize()` (cache clear) and `scheduler.mark(RenderDelta::Full)`.
 4. Leave existing resize invalidation path unchanged (shared cache clear logic).
 
 Metrics Impact:
-Counts as a normal Full frame (increments `full_frames`). No new metric added
-in this step; reuse existing instrumentation (rare operation vs frequent edits).
+Counts as a normal Full frame (increments `full_frames`). No new metric added in this step; reuse existing instrumentation (rare operation vs frequent edits).
 
 Safety / Correctness:
 
@@ -542,54 +505,38 @@ Testing Strategy (manual until Step 13 parity tests):
 4. Move cursor: subsequent motions use partial cursor-only path as expected.
 
 Future Extension:
-If future multi-view introduces per-view buffer switches, propagate a similar
-structural flag per affected view to escalate only those viewports.
+If future multi-view introduces per-view buffer switches, propagate a similar structural flag per affected view to escalate only those viewports.
 
 Status: Implemented (Phase 3 Step 9.1).
 
 ### Step 10 Details – Large Candidate Escalation Heuristic
 
 Goal:
-Avoid inefficient partial repaint cycles when a large fraction of the viewport
-would be repainted. If the candidate repaint set for a Lines semantic delta
-meets or exceeds a threshold proportion of visible text rows, escalate to a
-full frame render rather than issuing many discrete line clears/prints.
+Avoid inefficient partial repaint cycles when a large fraction of the viewport would be repainted. If the candidate repaint set for a Lines semantic delta meets or exceeds a threshold proportion of visible text rows, escalate to a full frame render rather than issuing many discrete line clears/prints.
 
 Threshold:
-`LINES_ESCALATION_THRESHOLD_PCT = 0.60` (60%). For `visible_rows = h - 1`,
-escalate when `candidates.len() >= 0.60 * visible_rows`.
+`LINES_ESCALATION_THRESHOLD_PCT = 0.60` (60%). For `visible_rows = h - 1`, escalate when `candidates.len() >= 0.60 * visible_rows`.
 
 Implementation:
 
-1. Promote inline constant to `pub const LINES_ESCALATION_THRESHOLD_PCT` in
-  `render_engine.rs` (documented for tests & future tuning).
-2. After candidate collection + dedupe in `render_lines_partial`, compare
-  candidate count against threshold; early return with a call to `render_full`
-  when exceeded.
-3. Increment `escalated_large_set` metric only on escalation; do not increment
-  `lines_frames` (partial path abandoned). `full_frames` increments via the
-  delegated full render.
+1. Promote inline constant to `pub const LINES_ESCALATION_THRESHOLD_PCT` in `render_engine.rs` (documented for tests & future tuning).
+2. After candidate collection + dedupe in `render_lines_partial`, compare candidate count against threshold; early return with a call to `render_full` when exceeded.
+3. Increment `escalated_large_set` metric only on escalation; do not increment `lines_frames` (partial path abandoned). `full_frames` increments via the delegated full render.
 4. Leave existing cold-cache / resize / scroll full fallbacks unchanged.
 
 Rationale:
-When most of the viewport changes (bulk paste, re-indent, large deletion), a
-full render is simpler and often faster than many partial operations. This
-keeps partial rendering targeted at its high-value narrow edits and cursor
-motions.
+When most of the viewport changes (bulk paste, re-indent, large deletion), a full render is simpler and often faster than many partial operations. This keeps partial rendering targeted at its high-value narrow edits and cursor motions.
 
 Testing:
 
 - New test file `large_candidate_escalation.rs`:
-  - `large_candidate_set_escalates_to_full_and_increments_metric` (>= 60% lines):
-    asserts `full_frames` and `escalated_large_set` increment; `lines_frames` unchanged.
-  - `candidate_set_below_threshold_stays_partial` (< 60% lines): asserts
-    `lines_frames` increments and no escalation metric change.
+  - `large_candidate_set_escalates_to_full_and_increments_metric` (>= 60% lines): asserts `full_frames` and `escalated_large_set` increment; `lines_frames` unchanged.
+  - `candidate_set_below_threshold_stays_partial` (< 60% lines): asserts `lines_frames` increments and no escalation metric change.
 
 Alternatives Considered:
 
 - Adaptive threshold (based on moving averages) – deferred to Phase 4.
-- Byte-output estimation instead of line count – premature; revisit after
-  styling & gutters introduce wider variance.
+- Byte-output estimation instead of line count – premature; revisit after styling & gutters introduce wider variance.
 
 Future Work:
 
@@ -600,36 +547,24 @@ Status: Implemented (Phase 3 Step 10).
 
 ## 11. Undo Snapshot Dedupe + Metric
 
-Goal: Avoid pushing redundant undo snapshots when successive calls observe an
-identical buffer state (no textual change) while counting how often this
-occurs to inform future upstream coalescing refinements.
+Goal: Avoid pushing redundant undo snapshots when successive calls observe an identical buffer state (no textual change) while counting how often this occurs to inform future upstream coalescing refinements.
 
-Problem: Certain edit paths can conservatively call `push_snapshot` even if
-the underlying text did not change (e.g. defensive calls around mode boundaries
-or future features). Re-cloning the full buffer wastes memory and inflates
-undo depth without semantic benefit.
+Problem: Certain edit paths can conservatively call `push_snapshot` even if the underlying text did not change (e.g. defensive calls around mode boundaries or future features). Re-cloning the full buffer wastes memory and inflates undo depth without semantic benefit.
 
 Approach (Phase 3 simplicity):
 
-1. Extend `EditSnapshot` with a `hash: u64` field representing the full buffer
-  content at capture time.
-2. Compute hash via a straightforward iteration over all lines feeding a
-  `DefaultHasher` (stable for the process; not persisted disk format).
-3. On `push_snapshot`, compare new hash to the last snapshot's hash; if equal
-  increment `undo_snapshots_skipped` metric and return early (do NOT clear
-  redo stack since no new edit was introduced).
+1. Extend `EditSnapshot` with a `hash: u64` field representing the full buffer content at capture time.
+2. Compute hash via a straightforward iteration over all lines feeding a `DefaultHasher` (stable for the process; not persisted disk format).
+3. On `push_snapshot`, compare new hash to the last snapshot's hash; if equal increment `undo_snapshots_skipped` metric and return early (do NOT clear redo stack since no new edit was introduced).
 4. Record trace event `snapshot_dedupe_skip` with depths & hash for diagnostics.
-5. Provide getter `undo_snapshots_skipped()` on `EditorState` for future status
-  reporting / dashboards.
+5. Provide getter `undo_snapshots_skipped()` on `EditorState` for future status reporting / dashboards.
 
 Metric: `undo_snapshots_skipped` (monotonic counter on `EditorState`).
 
 Testing:
 
-- `snapshot_dedupe_skips_identical`: pushes snapshot twice without mutation;
-  asserts stack length unchanged and metric increments to 1.
-- `snapshot_dedupe_allows_changed`: mutates buffer between pushes; asserts two
-  snapshots present and metric remains 0.
+- `snapshot_dedupe_skips_identical`: pushes snapshot twice without mutation; asserts stack length unchanged and metric increments to 1.
+- `snapshot_dedupe_allows_changed`: mutates buffer between pushes; asserts two snapshots present and metric remains 0.
 
 Future Work:
 
@@ -641,35 +576,21 @@ Status: Implemented (Phase 3 Step 11).
 
 ## 12. Multi-View Rustdoc & Cleanup
 
-Goal: Consolidate multi-view scaffolding intent, invariants, and future
-expansion points into authoritative rustdoc attached to the `core-model`
-crate while performing light internal cleanup (documentation-only) to
-prepare for upcoming split rendering work without altering runtime
-behavior.
+Goal: Consolidate multi-view scaffolding intent, invariants, and future expansion points into authoritative rustdoc attached to the `core-model` crate while performing light internal cleanup (documentation-only) to prepare for upcoming split rendering work without altering runtime behavior.
 
-Problem: Initial multi-view migration (Steps 3.1–3.3) moved cursor &
-viewport state into `View` but left only brief high-level comments. As we
-approach later steps introducing additional views and parity tests, lack of
-centralized invariants risks drift and accidental misuse (e.g., exposing
-mutable access to the internal `views` vector prematurely).
+Problem: Initial multi-view migration (Steps 3.1–3.3) moved cursor & viewport state into `View` but left only brief high-level comments. As we approach later steps introducing additional views and parity tests, lack of centralized invariants risks drift and accidental misuse (e.g., exposing mutable access to the internal `views` vector prematurely).
 
 Scope (Step 12 only):
 
 1. Expand crate-level rustdoc in `core-model/src/lib.rs` detailing:
 
 - Rationale for `View` extraction.
-- Active invariants (single active view, buffer index validity, cursor
-  range guarantees, auto-scroll safety).
-- Forward roadmap (split layout, per-view status, horizontal scroll,
-  generational IDs).
+- Active invariants (single active view, buffer index validity, cursor range guarantees, auto-scroll safety).
+- Forward roadmap (split layout, per-view status, horizontal scroll, generational IDs).
 - Safety & non-goals for Phase 3.
 
-1. Add documentation for `ViewId` newtype, noting potential generational
-  upgrade later.
-
-1. Leave all data structures and function signatures unchanged (breadth-first
-  stability; no new APIs yet).
-
+1. Add documentation for `ViewId` newtype, noting potential generational upgrade later.
+1. Leave all data structures and function signatures unchanged (breadth-first stability; no new APIs yet).
 1. Update design plan with this section & mark progress log entry for Step 12.
 
 Non-Goals:
@@ -681,8 +602,7 @@ Non-Goals:
 Outcome:
 
 - Centralized authoritative description reduces future design friction.
-- Clear checklist for future mutations: adding a field to `View` requires
-  updating the documented invariants.
+- Clear checklist for future mutations: adding a field to `View` requires updating the documented invariants.
 
 Testing:
 
@@ -692,16 +612,10 @@ Status: Implemented (Phase 3 Step 12).
 
 ## 13. Integration Tests – Partial vs Full Parity
 
-Goal: Validate that partial rendering paths (CursorOnly, Lines, escalation
-fallback, resize invalidation, buffer replacement) yield a final visual
-frame identical to a full render of the resulting editor state while
+Goal: Validate that partial rendering paths (CursorOnly, Lines, escalation fallback, resize invalidation, buffer replacement) yield a final visual frame identical to a full render of the resulting editor state while
 asserting minimal repaint scope via test-only instrumentation.
 
-Problem: Prior unit tests covered hashing, metrics increments, and isolated
-partial behaviors but did not assert holistic parity between a sequence of
-edits/motions rendered partially and the canonical full frame output. Lack
-of integration coverage risks regression (e.g., missed cursor overlay
-cleanup, stale status line) as future optimizations land.
+Problem: Prior unit tests covered hashing, metrics increments, and isolated partial behaviors but did not assert holistic parity between a sequence of edits/motions rendered partially and the canonical full frame output. Lack of integration coverage risks regression (e.g., missed cursor overlay cleanup, stale status line) as future optimizations land.
 
 Approach (Step 13):
 
@@ -721,30 +635,22 @@ Approach (Step 13):
 Non-Goals:
 
 - Performance benchmarking (timings) – deferred to a later phase.
-- Capturing actual terminal escape sequences (validated indirectly via
-  frame equality and writer path unit coverage).
+- Capturing actual terminal escape sequences (validated indirectly via frame equality and writer path unit coverage).
 - Multi-view parity (single view only at this stage).
 
 Instrumentation Justification:
-Always compiled (tiny Vec + Option) so integration tests (separate crate
-targets) can access it. Overhead is negligible (clears + few pushes only
-when partial paths execute) and avoids feature flags / cfg complexity.
+Always compiled (tiny Vec + Option) so integration tests (separate crate targets) can access it. Overhead is negligible (clears + few pushes only when partial paths execute) and avoids feature flags / cfg complexity.
 
 Outcome:
 
-- Increased confidence partial rendering is visually lossless relative to
-  full frames under covered scenarios.
+- Increased confidence partial rendering is visually lossless relative to full frames under covered scenarios.
 - Test scaffolding ready for future additions (Unicode stress, multi-view).
 
 Status: Implemented (Phase 3 Step 13).
 
 ## 14. Documentation Updates – Partial Pipeline & Metrics
 
-Goal: Promote the partial rendering subsystem (cursor-only & lines paths,
-escalation heuristic, resize/buffer replacement invalidation, instrumentation)
-into authoritative documentation. Establish a stable reference for future
-optimization iterations (scroll region usage, batched printing, Unicode perf
-improvements) without changing behavior.
+Goal: Promote the partial rendering subsystem (cursor-only & lines paths, escalation heuristic, resize/buffer replacement invalidation, instrumentation) into authoritative documentation. Establish a stable reference for future optimization iterations (scroll region usage, batched printing, Unicode perf improvements) without changing behavior.
 
 Scope:
 
@@ -809,6 +715,50 @@ Non-Goals (Step 14):
 
 Status: Implemented (Phase 3 Step 14).
 
+## 15. Phase Closure – Quality Gate
+
+Goal: Formally close Phase 3 by auditing quality gates (fmt, clippy, tests), verifying documentation parity (design plan vs crate rustdoc), enumerating deferred backlog items with rationales, and capturing a baseline metrics snapshot interpretation to guide Phase 4 optimization priorities.
+
+Quality Gate Results (at closure):
+
+- Formatting: `cargo fmt -- --check` passes (no diffs).
+- Linting: `cargo clippy --all-targets --all-features -D warnings` passes with zero warnings (aside from any upstream cargo metadata advisory not under source control scope).
+- Tests: All unit + integration tests green (hash diff, partial/full parity, resize/buffer replacement invalidation, undo dedupe, escalation).
+- Build Health: No deprecated symbols retained; legacy full `Renderer` kept only if still referenced by parity tests (removal deferred to Phase 4 start to avoid destabilizing newly landed partial pipeline). If not referenced at Phase 4 kickoff, remove immediately per deprecation policy.
+
+Documentation Parity Audit:
+
+- Design plan (this file) Step sections 1–14 align with crate-level rustdoc in `core-render` describing pipeline, cache lifecycle, metrics, escalation, and invalidation policies.
+- Metrics field rustdoc (`RenderPathMetrics`) mirrors taxonomy documented under Section 14; no divergent naming (e.g. `dirty_candidate_lines` used consistently).
+- Multi-view invariants documented in `core-model` crate rustdoc match design scope (single active view only; split rendering deferred).
+- Any future change to threshold constant or cache invalidation rules must update both: design plan (historical rationale) + crate rustdoc (operational reference).
+
+Deferred Backlog (carried forward):
+
+1. Scroll Region Optimization: Replace full redraw on scroll with terminal scroll commands + cache shift (highest performance ROI next phase).
+2. Prefix/Suffix Diff Trimming: Reduce bytes written for long but minimally changed lines.
+3. Command Batching: Merge adjacent `Print` commands for contiguous plain glyph runs to lower syscalls / I/O overhead.
+4. Unicode Width Caching: Cache grapheme width / visual column mapping per (line revision, span) to amortize repeated `visual_col` scans.
+5. Moving Averages & Percentiles: Add latency distribution metrics to detect tail latency regressions hidden by last-frame timings.
+6. Adaptive Escalation Threshold: Tune or auto-adjust 60% heuristic based on observed repaint efficiency metrics.
+7. StatusLine Semantic Delta: Introduce dedicated semantic variant to avoid repaints when only overlay lines changed (decouple from text lines).
+8. Remove Legacy Full Renderer: After confirming no remaining parity reliance (or convert into a test-only helper).
+9. Partial Path Error Resilience: Auto-escalate to full on writer errors / inconsistencies with a diagnostic metric counter.
+10. Performance Dashboard Command: Surface metrics snapshot inside editor.
+
+Baseline Metrics Interpretation (qualitative; numeric snapshot intentionally omitted to avoid staleness):
+
+- Partial Frame Ratio: Expect high during navigation & localized edits; sharp drops signal excessive escalations (investigate candidate threshold or missing dirty filtering).
+- Dirty Funnel Efficiency: Large gap between `dirty_candidate_lines` and `dirty_lines_repainted` indicates hashing successfully prevents redundant writes (desired). If nearly equal frequently, pursue prefix/suffix diff.
+- Escalation Frequency: Low single-digit percentage acceptable; sustained elevation implies either threshold too low or missing scroll optimization.
+- Resize Invalidations: Should correlate only with user terminal resizes; unexpected spikes may indicate indirect dimension detection issues.
+
+Exit Criteria Review (Section 11): All listed criteria satisfied; parity tests affirm selective repaint correctness and invariant maintenance (cursor overlay cleanup, status accuracy, cache rebuild on structural changes).
+
+Phase Health Summary: Partial rendering MVP stable, flicker-free, and instrumented. Architectural tenets upheld (event-driven path preserved; semantic deltas remain abstract; breadth-first incremental layering; Unicode correctness maintained for tested scenarios). Ready to advance to Phase 4 focused on scroll optimization and diff/throughput refinements.
+
+Status: Completed (Phase 3 Step 15).
+
 ## 16. Progress Log
 
 (Will be updated as steps complete.)
@@ -833,6 +783,6 @@ Status: Implemented (Phase 3 Step 14).
 - [x] Step 12 – Multi-view rustdoc & cleanup
 - [x] Step 13 – Integration tests (partial vs full parity)
 - [x] Step 14 – Documentation updates (partial pipeline & metrics)
-- [ ] Step 15 – Phase closure quality gate
+- [x] Step 15 – Phase closure quality gate
 
 ---

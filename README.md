@@ -6,26 +6,36 @@
 
 ## Status
 
-Still very early. Expect sharp edges, missing pieces, and occasional intentional breakage while the core shape settles. Not a daily driver yet -- perfect if you enjoy watching (and nudging) a clean architecture grow.
+Still early – but now with a real partial rendering MVP under the hood. Expect sharp edges, missing subsystems, and occasional intentional breakage while the core shape settles. Not a daily driver yet — perfect if you enjoy watching (and nudging) a clean architecture grow.
 
-What works today:
+What works today (Phase 3 complete):
 
-* Move around with classic hjkl, 0/$, naive w/b word hops.
-* Insert text (full Unicode grapheme clusters — emoji families, combining marks, CJK) without tearing them apart.
-* Backspace respects whole clusters (no half‑emoji horror).
-* Undo / Redo with sensible insert run coalescing (Esc or newline = boundary).
-* Command line stub: `:q` exits; everything else politely shrugs.
-* Grapheme‑aware hardware cursor placement (occasionally cheeky with the widest emoji, but trying its best).
-* Tracing spans for motions & edits so we can later profile without ripping things back open.
+* Classic movement: `h j k l 0 $` plus naive `w / b` word hops.
+* Insert text (full Unicode grapheme clusters — emoji families, combining marks, CJK) without shredding them.
+* Backspace removes whole clusters (no half‑emoji horror show).
+* Undo / Redo with sensible insert run coalescing (Esc or newline = boundary) + duplicate snapshot dedupe (skips redundant undo states).
+* Command line stub: `:q` exits; others smile and vanish (buffer replacement `:e <path>` triggers a full repaint correctly).
+* Grapheme‑aware cursor placement (still learning every wide glyph nuance, but earnest).
+* Partial rendering pipeline:
+  * Cursor‑only path repaints just old/new cursor lines + status line.
+  * Lines path selectively repaints changed lines via line hash diff + dirty tracking.
+  * Safe full redraw fallback for scroll, resize, buffer replace, or large dirty sets (>=60% of viewport).
+* Resize + buffer replacement invalidation (cache clears; next frame full + rebuild).
+* Metrics instrumentation (full vs partial frame counts, dirty line funnel, escalation, timings).
+* Multi‑view scaffolding (internal single active view; real splits later).
+* Tracing spans for motions & edits for future profiling.
 
-Not (yet) there:
+Still missing / deferred:
 
-* Diff/partial rendering (full frame redraw for now, but flicker‑free).
-* Fancy word boundary logic (currently a friendly, naive take).
-* Multiple buffers, search, syntax, plugins, or highlighting.
+* Scroll region optimization (scroll still triggers full redraw).
+* Multiple simultaneously visible splits / window layout.
+* Search, syntax highlighting, theming, plugins, LSP/DAP, completion, git integration.
+* Smarter word motions (current word logic intentionally naive).
 * Time‑based undo coalescing.
+* Status line semantics split (currently repainted on every cursor move).
+* Performance dashboard / metrics command.
 
-If that sounds fun rather than disappointing -- you get the vibe.
+If that sounds fun rather than disappointing — you get the vibe.
 
 ## Why remake a legend?
 
@@ -59,14 +69,16 @@ Right now the best help is feedback on architecture, clarity of crate boundaries
 
 ## FAQ
 
-1. **Is this a Neovim fork?** No -- completely fresh Rust code.
-2. **Does it do much yet?** Enough to move around, insert text, undo/redo, and quit. That’s the point: breadth first.
-3. **Will it embed Vimscript / Lua?** Likely not directly. A lean, capability‑scoped extension layer will arrive later.
-4. **Why rewrite instead of contribute to Neovim?** Different experiment: explore how far a fresh, aggressively modular Rust design can go without legacy ballast.
-5. **Should I daily‑drive it?** Not yet. Follow along, kick the tires, file issues.
-6. **Why is the cursor sometimes bashful with super wide emoji?** Terminal quirks + early rendering path. We’ll tighten it up when diff rendering lands.
-7. **Will performance tank with full redraws?** Not for the tiny files we test with. We’ll switch to dirty / diff updates before scale matters.
-8. **Why does a lonely `#` sometimes flash on a blank line when I move with `j`/`k`?** That’s an early rendering quirk: the naive full‑frame path still writes raw newline control characters into the buffer, so the terminal cursor hops unexpectedly and a nearby heading `#` can momentarily appear on the blank line. It’s harmless, will disappear once we strip control chars (or land the RenderDelta + smarter painter), and is intentionally left unfixed until we reach the planned render cleanup step.
+1. **Is this a Neovim fork?** No — completely fresh Rust code.
+2. **Does it do much yet?** Enough to move around, insert text, undo/redo, and now selectively repaint only what changed. Breadth first, polish later.
+3. **Will it embed Vimscript / Lua?** Probably not directly. Expect a lean capability‑scoped extension / plugin layer in a later phase.
+4. **Why rewrite instead of contribute to Neovim?** Different experiment: explore how far a clean, aggressively modular Rust design can go sans legacy ballast.
+5. **Should I daily‑drive it?** Not yet. Follow along, kick the tires, file crisp issues.
+6. **Why is the cursor sometimes bashful with super wide emoji?** Terminal quirks + early width handling. We’re Unicode‑correct logically; visual polish will keep improving.
+7. **Does it still redraw the whole screen every keypress?** No. Cursor moves repaint just the affected lines; small edits repaint only changed lines. Scroll/resize/large edit bursts still force a full frame (on purpose) until scroll region optimization lands.
+8. **What’s next?** Phase 4 will target scroll performance (scroll region commands), output batching, and early groundwork for splits & syntax.
+9. **How do I see performance metrics?** Internally tracked (frame counts, dirty funnel, timings) but not exposed yet — a dashboard command is on the backlog.
+10. **Will there be LSP / completion / git soon?** Yes, but only after core rendering + windowing are sturdier. Foundation first.
 
 ## Dual License
 
