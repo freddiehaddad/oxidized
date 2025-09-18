@@ -639,6 +639,57 @@ Future Work:
 
 Status: Implemented (Phase 3 Step 11).
 
+## 12. Multi-View Rustdoc & Cleanup
+
+Goal: Consolidate multi-view scaffolding intent, invariants, and future
+expansion points into authoritative rustdoc attached to the `core-model`
+crate while performing light internal cleanup (documentation-only) to
+prepare for upcoming split rendering work without altering runtime
+behavior.
+
+Problem: Initial multi-view migration (Steps 3.1–3.3) moved cursor &
+viewport state into `View` but left only brief high-level comments. As we
+approach later steps introducing additional views and parity tests, lack of
+centralized invariants risks drift and accidental misuse (e.g., exposing
+mutable access to the internal `views` vector prematurely).
+
+Scope (Step 12 only):
+
+1. Expand crate-level rustdoc in `core-model/src/lib.rs` detailing:
+
+- Rationale for `View` extraction.
+- Active invariants (single active view, buffer index validity, cursor
+  range guarantees, auto-scroll safety).
+- Forward roadmap (split layout, per-view status, horizontal scroll,
+  generational IDs).
+- Safety & non-goals for Phase 3.
+
+1. Add documentation for `ViewId` newtype, noting potential generational
+  upgrade later.
+
+1. Leave all data structures and function signatures unchanged (breadth-first
+  stability; no new APIs yet).
+
+1. Update design plan with this section & mark progress log entry for Step 12.
+
+Non-Goals:
+
+- Implementing multiple simultaneously rendered views.
+- Introducing view creation/destruction APIs.
+- Adding per-view configuration or horizontal scrolling fields.
+
+Outcome:
+
+- Centralized authoritative description reduces future design friction.
+- Clear checklist for future mutations: adding a field to `View` requires
+  updating the documented invariants.
+
+Testing:
+
+- Pure documentation change; existing tests unchanged and expected to pass.
+
+Status: Implemented (Phase 3 Step 12).
+
 ## 16. Progress Log
 
 (Will be updated as steps complete.)
@@ -660,7 +711,7 @@ Status: Implemented (Phase 3 Step 11).
 - [x] Step 9.1 – Buffer replacement invalidation (Full escalation on :e)
 - [x] Step 10 – Large candidate escalation heuristic
 - [x] Step 11 – Undo snapshot dedupe + metric
-- [ ] Step 12 – Multi-view rustdoc & cleanup
+- [x] Step 12 – Multi-view rustdoc & cleanup
 - [ ] Step 13 – Integration tests (partial vs full parity)
 - [ ] Step 14 – Documentation updates (partial pipeline & metrics)
 - [ ] Step 15 – Phase closure quality gate

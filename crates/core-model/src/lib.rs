@@ -1,38 +1,76 @@
 //! High-level editor model (Phase 3 multi-view scaffolding).
 //!
-//! This crate introduces `View` as the owner of *presentation* state that used to
-//! live inside `EditorState` (cursor position & `viewport_first_line`). Moving
-//! these fields decouples buffer / editing semantics from per-view concerns and
-//! lays the groundwork for split windows without retrofitting core state again.
+//! Phase 3 established the first cut of *multi-view aware* architecture without
+//! yet rendering more than one view. This file now carries the authoritative
+//! rustdoc (Step 12) describing invariants and forward expansion points so that
+//! later phases (true splits, per-view status bars, independent buffers) can
+//! evolve with high confidence. Keeping this documentation co-located with the
+//! code enforces the "single source of truth" design tenet.
 //!
-//! Breadth-first design guarantees:
-//! * Single active view (index 0) – future steps will add APIs to create / focus
-//!   additional views; existing callers remain source compatible.
-//! * `EditorModel` is a light wrapper around `EditorState` plus a `Vec<View>`.
-//! * No additional allocations or behavioral changes relative to pre-migration
-//!   semantics besides owning the cursor + viewport here.
-//! * Auto-scroll logic now lives on `View::auto_scroll` keeping scroll policies
-//!   local to presentation state (simplifies future per-view customization).
+//! Why a `View` type?
+//! ------------------
+//! A `View` owns presentation state that was previously embedded in
+//! `EditorState` (cursor, `viewport_first_line`). Extracting it:
+//! * Decouples buffer editing semantics from viewport & focus concerns.
+//! * Prevents a future retrofitting exercise when adding splits.
+//! * Makes per-view policies (scroll margins, future horizontal offsets, fold
+//!   state, local options) naturally local.
 //!
-//! Multi-view roadmap (deferred):
-//! * Multiple simultaneously rendered views (split layout) feeding the renderer.
-//! * Per-view buffer mapping (different buffers in different splits).
-//! * Focus change actions producing semantic render deltas.
-//! * View lifecycle events (open, close) integrated with undo/redo isolation.
+//! Breadth-first constraints (Phase 3 / Step 12):
+//! * Exactly one active view (index 0) is created; APIs intentionally *look* as
+//!   if N views could exist (Vec storage) while mutators are private/minimal.
+//! * No rendering fan-out yet: renderer receives only the active view.
+//! * Undo/redo still operate at buffer granularity; per-view granularity (e.g.
+//!   independent unrelated buffers visible simultaneously) is deferred.
 //!
-//! Invariants (Phase 3):
+//! Core invariants (must hold after every public call):
 //! * `views` is never empty.
-//! * `active_view_index` always points to a valid element.
-//! * Each `View.buffer_index` references a valid buffer in `EditorState`.
-//! * Undo / redo operate on the active buffer; cursor threading is explicit.
+//! * `active_view_index < views.len()`.
+//! * `views[i].buffer_index` always names an existing buffer inside
+//!   `EditorState` (`EditorState` is the source of truth for buffer storage).
+//! * Active view's cursor line is always a valid line index for its buffer
+//!   except transiently inside mutation helpers before re-clamp.
+//! * Auto-scroll never produces a negative / overflow first line; it clamps to
+//!   valid range based on the last known text height.
 //!
-//! Future refactors will expand rustdoc here rather than scattering comments
-//! across unrelated crates (central single source of truth principle).
+//! Forward roadmap (deferred beyond Phase 3):
+//! * Multiple simultaneously rendered views (grid / stacked layout) with a
+//!   layout manager component.
+//! * Per-view status line (potentially condensed global + local segments).
+//! * Buffer-focus changes as first-class events producing semantic `RenderDelta`.
+//! * View close/open life-cycle with undo isolation (per-buffer or per-view
+//!   stacks depending on chosen UX).
+//! * Horizontal scrolling & pending fold state added to `View`.
+//! * Persistent view identity for layout restoration across sessions.
+//!
+//! Safety notes:
+//! * All mutation APIs remain breadth-first minimal; they will likely become a
+//!   `ViewManager` facade once external commands can create/destroy splits.
+//! * We deliberately avoid exposing interior `views: &mut Vec<View>` to keep
+//!   invariants centralized.
+//!
+//! Testing strategy additions (Step 12):
+//! * Existing tests assert auto-scroll behavior & single-view initialization.
+//! * Future steps will add tests around view creation/focus once those APIs
+//!   land; documenting intent now avoids speculative APIs.
+//!
+//! Non-goals for Phase 3:
+//! * Rendering of more than one view.
+//! * Per-view configuration overrides (options table).
+//! * Cross-view diffing or synchronized scrolling.
+//!
+//! Updating this doc is REQUIRED when adding any new field to `View` or any
+//! new invariant affecting view lifecycle. (Enforced by code review checklist.)
 
 use core_state::EditorState;
 use core_text::Position;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Stable identifier for a `View`.
+///
+/// Breadth-first placeholder: currently just wraps the index. In later phases
+/// we may adopt a generational scheme (u32 generation + u32 slot) to allow
+/// safe reuse after view closure without accidental stale references.
 pub struct ViewId(pub usize);
 
 #[derive(Debug, Clone)]
