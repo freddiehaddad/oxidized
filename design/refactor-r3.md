@@ -172,7 +172,7 @@ Proceeding with R3 reduces complexity for all Phase 4 tracks, confines structura
 - [x] Step 1 – Dispatcher split (2025-09-18)
 - [x] Step 2 – Command parser extraction (2025-09-18)
 - [x] Step 3 – KeyTranslator struct (2025-09-18) – introduced stateful translator scaffold (counts/operator pending) with parity tests; clippy/test clean; behavior unchanged.
-- [ ] Step 4 – Action operator pre-variants
+- [x] Step 4 – Action operator pre-variants (2025-09-18)
 - [ ] Step 5 – StatusLine delta
 - [ ] Step 6 – Status-only detection
 - [ ] Step 7 – BatchWriter

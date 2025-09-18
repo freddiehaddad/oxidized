@@ -106,6 +106,13 @@ pub fn dispatch(
         Action::Undo => undo::handle_undo(state, view),
         Action::Redo => undo::handle_redo(state, view),
         Action::Quit => DispatchResult::quit(),
+        Action::BeginOperator(_) | Action::ApplyOperator { .. } => {
+            // Refactor R3 Step 4 scaffold: operator variants are inert until
+            // Phase 4 translator logic populates and stateful operator engine
+            // is implemented. Treat as no-op (clean) to avoid accidental
+            // renderer triggers.
+            DispatchResult::clean()
+        }
     }
 }
 
