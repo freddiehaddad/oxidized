@@ -154,6 +154,34 @@ async fn main() -> Result<()> {
     let render_span = tracing::info_span!("event_loop");
     let _enter_loop = render_span.enter();
     let mut scheduler = RenderScheduler::new();
+    // Refactor R3 Step 6: snapshot of fields influencing status line to detect
+    // status-only changes and emit RenderDelta::StatusLine instead of CursorOnly.
+    #[derive(Clone)]
+    struct StatusSnapshot {
+        mode_disc: std::mem::Discriminant<Mode>,
+        command_active: bool,
+        command_buffer: String,
+        ephemeral: Option<String>,
+        dirty: bool,
+    }
+    impl StatusSnapshot {
+        fn capture(state: &EditorState) -> Self {
+            Self {
+                mode_disc: std::mem::discriminant(&state.mode),
+                command_active: state.command_line.is_active(),
+                command_buffer: state.command_line.buffer().to_string(),
+                ephemeral: state.ephemeral_status.as_ref().map(|m| m.text.clone()),
+                dirty: state.dirty,
+            }
+        }
+        fn differs(&self, other: &StatusSnapshot) -> bool {
+            self.mode_disc != other.mode_disc
+                || self.command_active != other.command_active
+                || self.command_buffer != other.command_buffer
+                || self.ephemeral != other.ephemeral
+                || self.dirty != other.dirty
+        }
+    }
     // Refactor R1 Step 8: prepare empty observer list (macro recorder, analytics to be added later).
     let observers: Vec<Box<dyn ActionObserver>> = Vec::new();
     while let Some(event) = rx.recv().await {
@@ -168,6 +196,7 @@ async fn main() -> Result<()> {
                 let snapshot_mode = model.state().mode; // minimize immutable borrows
                 let cmd_buf = model.state().command_line.buffer().to_string();
                 if let Some(act) = translate_key_wrapper(snapshot_mode, &cmd_buf, &k) {
+                    let pre_status_snapshot = StatusSnapshot::capture(model.state());
                     let before_line = model.active_view().cursor.line;
                     let dr = dispatch(act, &mut model, &mut sticky_visual_col, &observers);
                     if dr.buffer_replaced {
@@ -176,12 +205,15 @@ async fn main() -> Result<()> {
                         render_engine.invalidate_for_resize(); // reuse same cache clear semantics
                         scheduler.mark(RenderDelta::Full);
                     } else if dr.dirty {
-                        // Heuristic mapping (Phase 2 Step 17): if line changed -> Lines(range of that line),
-                        // if only cursor moved within same line -> CursorOnly, else fallback Full.
                         let after_line = model.active_view().cursor.line;
                         let insert_mode = matches!(model.state().mode, Mode::Insert);
-                        if before_line != after_line || insert_mode {
+                        let post_status_snapshot = StatusSnapshot::capture(model.state());
+                        let status_changed = post_status_snapshot.differs(&pre_status_snapshot);
+                        let line_changed = before_line != after_line || insert_mode;
+                        if line_changed {
                             scheduler.mark(RenderDelta::Lines(after_line..after_line + 1));
+                        } else if status_changed {
+                            scheduler.mark(RenderDelta::StatusLine);
                         } else {
                             scheduler.mark(RenderDelta::CursorOnly);
                         }
@@ -213,6 +245,7 @@ async fn main() -> Result<()> {
         }
         // Expire ephemeral status if needed (breadth-first synchronous check)
         if model.state_mut().tick_ephemeral() {
+            // Ephemeral expiry changes status content; mark status-only delta.
             scheduler.mark(RenderDelta::StatusLine);
         }
         // Auto-scroll (Phase 2 Step 8): keep cursor visible.
