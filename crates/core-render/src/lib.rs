@@ -2,7 +2,6 @@
 //!
 //! Exposed Components:
 //! - `Cell` / `Frame`: logical grid backing full-frame composition.
-//! - Legacy `Renderer`: row/column traversal full repaint (kept for fallback / tests).
 //! - `render_engine`: orchestrates full + partial paths (cursor-only & lines) with
 //!   hashing cache, overlay application, status line integration, and instrumentation.
 //! - `scheduler`: merges fine‑grained semantic deltas (`RenderDelta`) into an effective
@@ -65,10 +64,7 @@
 //!
 //! See Phase 3 design document (Step 14) for extended narrative & rationale.
 
-use anyhow::Result;
 use bitflags::bitflags;
-use crossterm::{cursor::MoveTo, queue, style::Print};
-use std::io::{Write, stdout};
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,33 +121,8 @@ impl Frame {
     }
 }
 
-pub struct Renderer;
-
-impl Renderer {
-    pub fn render(frame: &Frame) -> Result<()> {
-        let mut out = stdout();
-        queue!(out, MoveTo(0, 0))?;
-        let mut x = 0u16;
-        let mut y = 0u16;
-        for (i, cell) in frame.cells.iter().enumerate() {
-            let expected_y = i as u16 / frame.width;
-            let expected_x = i as u16 % frame.width;
-            if expected_x != x || expected_y != y {
-                queue!(out, MoveTo(expected_x, expected_y))?;
-                x = expected_x;
-                y = expected_y;
-            }
-            // For now, we only visually differentiate REVERSE (cursor span) by wrapping with simple ANSI invert if flag set.
-            if cell.flags.contains(CellFlags::REVERSE) {
-                queue!(out, Print(format!("\x1b[7m{}\x1b[0m", cell.ch)))?;
-            } else {
-                queue!(out, Print(cell.ch))?;
-            }
-        }
-        out.flush()?;
-        Ok(())
-    }
-}
+// Legacy full-frame `Renderer` removed in Refactor R3 Step 12. All rendering paths
+// now flow through `RenderEngine` (full + partial) and shared writer abstraction.
 
 pub mod batch_writer; // Refactor R3 Step 7: batching writer wrapper
 pub mod dirty; // Phase 3 Step 1: dirty line tracking (external to RenderDelta)

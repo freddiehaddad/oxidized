@@ -180,7 +180,7 @@ Proceeding with R3 reduces complexity for all Phase 4 tracks, confines structura
 - [x] Step 9 – Layout scaffold (2025-09-18) – introduced `core-model::layout::{Layout, LayoutRegion}` single-region abstraction; render engine APIs now accept a `&Layout` (currently always `Layout::single`). Invariants documented with unit test; no rendering behavior change.
 - [x] Step 10 – TerminalCapabilities stub (2025-09-18) – added `core-terminal::TerminalCapabilities` with optimistic `supports_scroll_region` flag and integrated into `RenderEngine` (field + accessor) to gate future scroll optimizations; no behavior change yet.
 - [x] Step 11 – Metrics command stub (2025-09-18) – implemented `:metrics` handling (ephemeral "Metrics OK") and added execution test; no metrics snapshot yet (deferred to Phase 4).
-- [ ] Step 12 – Legacy Renderer removal
+- [x] Step 12 – Legacy Renderer removal (2025-09-18) – removed obsolete full-frame `Renderer` struct and render routine from `core-render::lib`; all rendering paths consolidated under `RenderEngine` + writer abstraction (full + partial). Eliminates dead code and focuses future optimization work in a single engine.
 - [ ] Step 13 – Documentation pass
 - [ ] Step 14 – Quality gate & closure
 
