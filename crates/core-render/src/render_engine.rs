@@ -738,63 +738,9 @@ impl RenderEngine {
         self.metrics.print_commands.fetch_add(print_cmds, Relaxed);
         self.metrics.cells_printed.fetch_add(cells, Relaxed);
 
-        // Shift cache (incremental) for reused lines; recompute hashes for entering lines.
-        if delta > 0 {
-            // shift existing up
-            for i in 0..(visible_rows - entering_count) {
-                let src = i + entering_count;
-                if src < self.cache.line_hashes.len() {
-                    self.cache.line_hashes[i] = self.cache.line_hashes[src];
-                }
-            }
-            // recompute entering hashes
-            for i in 0..entering_count {
-                let row = visible_rows - entering_count + i;
-                let buf_line = new_viewport_first + row;
-                let vh = if let Some(raw_line) = buf.line(buf_line) {
-                    let content_trim: &str = if raw_line.ends_with(['\n', '\r']) {
-                        &raw_line[..raw_line.len() - 1]
-                    } else {
-                        raw_line.as_str()
-                    };
-                    crate::partial_cache::PartialCache::compute_hash(content_trim)
-                } else {
-                    crate::partial_cache::PartialCache::compute_hash("")
-                };
-                if row < self.cache.line_hashes.len() {
-                    self.cache.line_hashes[row] = vh;
-                }
-            }
-        } else {
-            // delta < 0
-            let absd = (-delta) as usize;
-            // shift existing down (from bottom upwards to avoid overwrite)
-            for i in (0..(visible_rows - absd)).rev() {
-                let src = i;
-                let dst = i + absd;
-                if dst < self.cache.line_hashes.len() && src < self.cache.line_hashes.len() {
-                    self.cache.line_hashes[dst] = self.cache.line_hashes[src];
-                }
-            }
-            // recompute entering hashes at top
-            for i in 0..absd {
-                let buf_line = new_viewport_first + i;
-                let vh = if let Some(raw_line) = buf.line(buf_line) {
-                    let content_trim: &str = if raw_line.ends_with(['\n', '\r']) {
-                        &raw_line[..raw_line.len() - 1]
-                    } else {
-                        raw_line.as_str()
-                    };
-                    crate::partial_cache::PartialCache::compute_hash(content_trim)
-                } else {
-                    crate::partial_cache::PartialCache::compute_hash("")
-                };
-                if i < self.cache.line_hashes.len() {
-                    self.cache.line_hashes[i] = vh;
-                }
-            }
-        }
-        self.cache.viewport_start = new_viewport_first;
+        // Shift & update cache via dedicated API (Phase 4 Step 11 abstraction).
+        self.cache
+            .shift_for_scroll(delta, new_viewport_first, visible_rows, |idx| buf.line(idx));
         self.cache.last_cursor_line = Some(cursor_line);
         Ok(())
     }
@@ -804,6 +750,17 @@ impl RenderEngine {
     }
     pub fn test_last_repaint_kind(&self) -> Option<&'static str> {
         self.last_repaint_kind
+    }
+
+    /// Phase 4 Step 11 test hook: expose current cache line hashes (immutable) for
+    /// verifying shift-for-scroll reuse and recompute behavior.
+    pub fn test_cache_hashes(&self) -> &[crate::partial_cache::ViewportLineHash] {
+        &self.cache.line_hashes
+    }
+
+    /// Phase 4 Step 11 test hook: expose viewport_start for cache parity assertions.
+    pub fn test_cache_viewport_start(&self) -> usize {
+        self.cache.viewport_start
     }
 
     /// Access a snapshot of current metrics (for tests and future status integration).

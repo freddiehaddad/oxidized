@@ -84,6 +84,84 @@ impl PartialCache {
     pub fn get(&self, row: usize) -> Option<ViewportLineHash> {
         self.line_hashes.get(row).copied()
     }
+
+    /// Phase 4 Step 11: shift cache in-place for a scroll-region shift.
+    ///
+    /// Arguments:
+    /// * `delta` – positive when viewport moved down (content scrolled up / new lines enter at bottom),
+    ///   negative when viewport moved up (new lines enter at top).
+    /// * `new_first` – new viewport starting buffer line.
+    /// * `visible_rows` – number of text rows (excluding status line) represented in the cache.
+    /// * `buf_line_provider` – closure returning an optional raw buffer line by absolute line index.
+    ///
+    /// Behavior:
+    /// * Reuses existing hash entries for lines that remain visible by shifting them in-place.
+    /// * Recomputes hashes only for entering lines (top or bottom segment depending on delta).
+    /// * If `delta` magnitude >= visible_rows, caller should have degraded to full render
+    ///   before invoking (we assert to catch misuse in tests / debug builds).
+    pub fn shift_for_scroll<F>(
+        &mut self,
+        delta: i32,
+        new_first: usize,
+        visible_rows: usize,
+        mut buf_line_provider: F,
+    ) where
+        F: FnMut(usize) -> Option<String>,
+    {
+        debug_assert!(
+            visible_rows == self.line_hashes.len(),
+            "cache size mismatch"
+        );
+        debug_assert!(delta != 0, "no-op delta passed to shift_for_scroll");
+        let abs = delta.unsigned_abs() as usize;
+        debug_assert!(
+            abs < visible_rows,
+            "degenerate shift should have escalated to full"
+        );
+
+        if delta > 0 {
+            // Scroll down: viewport moved down, content moved up, new lines at bottom.
+            let entering = abs;
+            // Shift existing reused lines up.
+            for i in 0..(visible_rows - entering) {
+                let src = i + entering;
+                self.line_hashes[i] = self.line_hashes[src];
+            }
+            // Recompute hashes for entering lines (bottom segment).
+            for i in 0..entering {
+                let row = visible_rows - entering + i;
+                let buf_line_index = new_first + row;
+                let vh = if let Some(raw_line) = buf_line_provider(buf_line_index) {
+                    let content_trim: &str = raw_line.trim_end_matches(['\n', '\r']);
+                    PartialCache::compute_hash(content_trim)
+                } else {
+                    PartialCache::compute_hash("")
+                };
+                self.line_hashes[row] = vh;
+            }
+        } else {
+            // Scroll up: new lines entering at top.
+            let entering = abs;
+            // Shift existing reused lines down (iterate from bottom to avoid overwrite).
+            for i in (0..(visible_rows - entering)).rev() {
+                let dst = i + entering;
+                self.line_hashes[dst] = self.line_hashes[i];
+            }
+            // Recompute top entering line hashes.
+            for i in 0..entering {
+                let buf_line_index = new_first + i;
+                let vh = if let Some(raw_line) = buf_line_provider(buf_line_index) {
+                    let content_trim: &str = raw_line.trim_end_matches(['\n', '\r']);
+                    PartialCache::compute_hash(content_trim)
+                } else {
+                    PartialCache::compute_hash("")
+                };
+                self.line_hashes[i] = vh;
+            }
+        }
+        self.viewport_start = new_first;
+        // last_cursor_line left unchanged; render path will update after overlay.
+    }
 }
 
 #[cfg(test)]
