@@ -184,6 +184,46 @@ impl Buffer {
         self.rope.remove(start_char..end_char);
         // Position stays at same byte (now pointing at next cluster or EOL)
     }
+
+    /// Return the UTF-8 slice in the absolute byte range `[start,end)`.
+    /// Caller guarantees `start <= end` and both on character boundaries.
+    /// (Motion span resolver ensures grapheme boundaries which imply char boundaries.)
+    pub fn slice_bytes(&self, start: usize, end: usize) -> String {
+        if start >= end {
+            return String::new();
+        }
+        let total = self.rope.len_bytes();
+        let s = start.min(total);
+        let e = end.min(total);
+        if s >= e {
+            return String::new();
+        }
+        // Safety: assume boundaries are on char boundaries (debug assert in dev builds).
+        debug_assert_eq!(self.rope.char_to_byte(self.rope.byte_to_char(s)), s);
+        debug_assert_eq!(self.rope.char_to_byte(self.rope.byte_to_char(e)), e);
+        self.rope.slice(s..e).to_string()
+    }
+
+    /// Delete the UTF-8 slice in absolute byte range `[start,end)` (clamped).
+    /// Returns the removed text for register / undo integration.
+    pub fn delete_bytes(&mut self, start: usize, end: usize) -> String {
+        if start >= end {
+            return String::new();
+        }
+        let total = self.rope.len_bytes();
+        let s = start.min(total);
+        let e = end.min(total);
+        if s >= e {
+            return String::new();
+        }
+        debug_assert_eq!(self.rope.char_to_byte(self.rope.byte_to_char(s)), s);
+        debug_assert_eq!(self.rope.char_to_byte(self.rope.byte_to_char(e)), e);
+        let removed = self.rope.slice(s..e).to_string();
+        let start_char = self.rope.byte_to_char(s);
+        let end_char = self.rope.byte_to_char(e);
+        self.rope.remove(start_char..end_char);
+        removed
+    }
 }
 
 /// Grapheme and width utilities (Phase 1). These are pure helpers operating on a single line.

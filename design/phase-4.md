@@ -231,7 +231,7 @@ Simple monotonic interval (e.g. 250ms) generating `Event::Tick` pushing status r
 - [x] Step 2 – Operator pending state & ApplyOperator emission (complete)
 - [x] Step 3 – Registers struct (unnamed + numbered ring scaffold) (complete)
 - [x] Step 4 – Motion span resolver (byte span tests) (complete)
-- [ ] Step 5 – Integrate span delete with undo (pending)
+- [x] Step 5 – Integrate span delete with undo (complete)
 - [ ] Step 6 – Delete operator d{motion}[count] (pending)
 - [ ] Step 7 – Yank operator y{motion}[count] storing registers (pending)
 - [ ] Step 8 – Change operator c{motion}[count] enters insert (pending)

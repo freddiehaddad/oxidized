@@ -399,6 +399,31 @@ impl EditorState {
         self.push_snapshot(SnapshotKind::Edit, cursor);
     }
 
+    /// Delete a byte span `[start,end)` from the active buffer with an undo snapshot.
+    /// Returns the removed text. The provided `cursor` represents the current cursor
+    /// (start position of operator). After deletion, the cursor is clamped to the start
+    /// of the removed region (matching typical Vim semantics for `d` operations).
+    ///
+    /// Breadth-first: This operation treats every span delete as a discrete edit snapshot.
+    /// Future refinement (multi-operator coalescing) can add smarter grouping.
+    pub fn delete_span_with_snapshot(
+        &mut self,
+        cursor: &mut Position,
+        start: usize,
+        end: usize,
+    ) -> String {
+        // Push snapshot of pre-delete state for undo. Use current cursor (before mutation).
+        self.push_discrete_edit_snapshot(*cursor);
+        let buf = self.active_buffer().clone(); // snapshot already cloned within push
+        let mut working = buf.clone();
+        let removed = working.delete_bytes(start, end);
+        // Replace buffer
+        self.buffers[self.active] = working;
+        // Recompute cursor line/byte from absolute start (simple linear scan using public APIs).
+        *cursor = absolute_position(self.active_buffer(), start);
+        removed
+    }
+
     /// Increment the edit counter for an active insert run (used for diagnostics / future heuristics).
     pub fn note_insert_edit(&mut self) {
         self.undo.note_insert_edit();
@@ -872,6 +897,99 @@ mod tests {
                 "idempotence failed for sample: {s}"
             );
             assert!(!n2.normalized.contains('\r'));
+        }
+    }
+}
+
+// Test module for span deletion API (Phase 4 Step 5)
+#[cfg(test)]
+mod span_delete_tests {
+    use super::*;
+    use core_text::{Buffer, Position};
+
+    #[test]
+    fn delete_span_single_line() {
+        let buf = Buffer::from_str("t", "abcdef\n").unwrap();
+        let mut st = EditorState::new(buf);
+        let mut cursor = Position::origin();
+        // delete 'bcd' (bytes 1..4)
+        let removed = st.delete_span_with_snapshot(&mut cursor, 1, 4);
+        assert_eq!(removed, "bcd");
+        let line = st.active_buffer().line(0).unwrap();
+        assert!(line.starts_with("aef"), "line now: {line}");
+        assert_eq!(cursor.line, 0);
+        assert_eq!(cursor.byte, 1); // start of deleted span
+        assert_eq!(st.undo_depth(), 1);
+        assert!(st.undo(&mut cursor));
+        let restored = st.active_buffer().line(0).unwrap();
+        assert!(restored.starts_with("abcdef"));
+    }
+
+    #[test]
+    fn delete_span_multi_line() {
+        let buf = Buffer::from_str("t", "one\ntwo\nthree\n").unwrap();
+        let mut st = EditorState::new(buf);
+        let mut cursor = Position::origin();
+        // Compute absolute bytes manually using slice_bytes helper after building resolver logic.
+        // Lines:
+        // one\n -> 4 bytes
+        // two\n -> 4 bytes (cumulative 8)
+        // three\n -> 6 bytes (cumulative 14)
+        // Delete 'two\nthree\n' (bytes 4..14)
+        let removed = st.delete_span_with_snapshot(&mut cursor, 4, 14);
+        assert_eq!(removed, "two\nthree\n");
+        let l0 = st.active_buffer().line(0).unwrap();
+        assert_eq!(l0, "one\n");
+        // After deletion we expect remaining text: "one\n" only.
+        // Ropey will represent this as two lines: "one\n" and an empty last line (since original ended with newline).
+        assert_eq!(st.active_buffer().line_count(), 2);
+        // Cursor should land somewhere within remaining buffer (line 0 or 1) after deletion.
+        assert!(cursor.line <= 1);
+        assert!(st.undo(&mut cursor));
+        // After undo we expect original prefix 'one\n' present.
+        let restored_first = st.active_buffer().line(0).unwrap();
+        assert!(restored_first.starts_with("one"));
+    }
+}
+
+// Convert absolute byte index into Position using public Buffer APIs (linear scan).
+fn absolute_position(buffer: &Buffer, abs: usize) -> Position {
+    let mut remaining = abs;
+    let mut line = 0usize;
+    while line < buffer.line_count() {
+        let line_len = buffer.line_byte_len(line);
+        let has_newline = buffer
+            .line(line)
+            .map(|l| l.ends_with('\n'))
+            .unwrap_or(false);
+        if remaining <= line_len {
+            return Position {
+                line,
+                byte: remaining,
+            };
+        }
+        remaining -= line_len;
+        if has_newline {
+            if remaining == 0 {
+                // exactly at newline boundary -> cursor stays at end of line
+                return Position {
+                    line,
+                    byte: line_len,
+                };
+            }
+            remaining -= 1; // consume newline byte
+        }
+        line += 1;
+    }
+    // Clamp to last line end
+    if line == 0 {
+        Position::origin()
+    } else {
+        let last = buffer.line_count().saturating_sub(1);
+        let last_len = buffer.line_byte_len(last);
+        Position {
+            line: last,
+            byte: last_len,
         }
     }
 }
