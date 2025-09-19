@@ -28,6 +28,7 @@ struct Case<'a> {
     text: &'a str,
     keys: &'a str,
     expect_structural: bool,
+    is_yank: bool,
 }
 
 #[test]
@@ -38,30 +39,64 @@ fn delete_motion_matrix() {
             text: "one two three\n",
             keys: "dw",
             expect_structural: false,
+            is_yank: false,
         },
         Case {
             name: "2dw_charwise",
             text: "one two three four\n",
             keys: "2dw",
             expect_structural: false,
+            is_yank: false,
         },
         Case {
             name: "dj_linewise_two_lines",
             text: "l1\nl2\nl3\n",
             keys: "dj",
             expect_structural: true,
+            is_yank: false,
         },
         Case {
             name: "2dj_linewise_three_lines",
             text: "a1\na2\na3\na4\n",
             keys: "2dj",
             expect_structural: true,
+            is_yank: false,
         },
         Case {
             name: "d2j_linewise_three_lines",
             text: "b1\nb2\nb3\nb4\n",
             keys: "d2j",
             expect_structural: true,
+            is_yank: false,
+        },
+        // Yank cases
+        Case {
+            name: "yw_charwise",
+            text: "one two three\n",
+            keys: "yw",
+            expect_structural: false,
+            is_yank: true,
+        },
+        Case {
+            name: "2yw_charwise",
+            text: "one two three four\n",
+            keys: "2yw",
+            expect_structural: false,
+            is_yank: true,
+        },
+        Case {
+            name: "yj_linewise_two_lines",
+            text: "l1\nl2\nl3\n",
+            keys: "yj",
+            expect_structural: false,
+            is_yank: true,
+        },
+        Case {
+            name: "2yj_linewise_three_lines",
+            text: "a1\na2\na3\na4\n",
+            keys: "2yj",
+            expect_structural: false,
+            is_yank: true,
         },
     ];
 
@@ -77,5 +112,8 @@ fn delete_motion_matrix() {
             "case '{}' structural flag mismatch",
             case.name
         );
+        if case.is_yank {
+            assert!(!res.dirty, "yank should not dirty buffer");
+        }
     }
 }

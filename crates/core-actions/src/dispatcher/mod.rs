@@ -215,7 +215,86 @@ pub fn dispatch(
                         }
                     }
                 }
-                _ => DispatchResult::clean(), // Yank/Change later steps
+                OperatorKind::Yank => {
+                    use crate::span_resolver::resolve_span;
+                    let start_pos = view.cursor;
+                    let vertical = matches!(
+                        motion,
+                        crate::MotionKind::Up
+                            | crate::MotionKind::Down
+                            | crate::MotionKind::PageHalfUp
+                            | crate::MotionKind::PageHalfDown
+                    );
+                    if vertical {
+                        let buf = state.active_buffer();
+                        let mut tmp = start_pos;
+                        for _ in 0..count.max(1) {
+                            match motion {
+                                crate::MotionKind::Up => {
+                                    let _ = core_text::motion::up(buf, &mut tmp, None);
+                                }
+                                crate::MotionKind::Down => {
+                                    let _ = core_text::motion::down(buf, &mut tmp, None);
+                                }
+                                crate::MotionKind::PageHalfUp => {
+                                    let _ = core_text::motion::up(buf, &mut tmp, None);
+                                }
+                                crate::MotionKind::PageHalfDown => {
+                                    let _ = core_text::motion::down(buf, &mut tmp, None);
+                                }
+                                _ => {}
+                            }
+                        }
+                        let line_start = start_pos.line.min(tmp.line);
+                        let line_end = start_pos.line.max(tmp.line);
+                        if line_start != line_end {
+                            let buffer = state.active_buffer();
+                            let mut collected = String::new();
+                            for l in line_start..=line_end {
+                                if let Some(s) = buffer.line(l) {
+                                    collected.push_str(&s);
+                                } else {
+                                    break;
+                                }
+                            }
+                            state.registers_mut().record_yank(collected);
+                            return DispatchResult::clean();
+                        }
+                    }
+                    // Characterwise span resolution (non-mutating)
+                    let span = resolve_span(state, start_pos, motion, count);
+                    if span.start == span.end {
+                        return DispatchResult::clean();
+                    }
+                    // Collect substring for span without mutating buffer.
+                    let buffer = state.active_buffer();
+                    // Reconstruct by iterating lines overlapping span (simple early impl):
+                    let mut collected = String::new();
+                    let remaining_start = span.start;
+                    let remaining_end = span.end;
+                    // Iterate all lines accumulating absolute byte offsets similarly to delete path.
+                    let mut abs = 0usize;
+                    for l in 0..buffer.line_count() {
+                        let line = buffer.line(l).unwrap();
+                        let line_len_bytes = line.len();
+                        let line_end_abs = abs + line_len_bytes;
+                        if line_end_abs <= remaining_start {
+                            abs = line_end_abs;
+                            continue;
+                        }
+                        if abs >= remaining_end {
+                            break;
+                        }
+                        // Overlap region within this line
+                        let local_start = remaining_start.saturating_sub(abs);
+                        let local_end = (remaining_end - abs).min(line_len_bytes);
+                        collected.push_str(&line[local_start..local_end]);
+                        abs = line_end_abs;
+                    }
+                    state.registers_mut().record_yank(collected);
+                    DispatchResult::clean()
+                }
+                OperatorKind::Change => DispatchResult::clean(), // Step 8
             }
         }
     }
@@ -881,5 +960,245 @@ mod tests {
             !res.buffer_replaced,
             "single-line delete should not be structural"
         );
+    }
+
+    // --- Step 7 Yank operator tests ---
+
+    fn key_evt(c: char) -> KeyEvent {
+        KeyEvent {
+            code: KeyCode::Char(c),
+            mods: KeyModifiers::empty(),
+        }
+    }
+
+    #[test]
+    fn operator_yank_basic_yw() {
+        let buffer = Buffer::from_str("t", "one two three\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // y w
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key_evt('y'),
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key_evt('w'),
+        )
+        .unwrap();
+        if let Action::ApplyOperator { op, motion, count } = act {
+            assert!(matches!(op, OperatorKind::Yank));
+            assert!(matches!(motion, MotionKind::WordForward));
+            assert_eq!(count, 1);
+        } else {
+            panic!();
+        }
+        let pre_text = {
+            let b = model.state().active_buffer();
+            let mut s = String::new();
+            for i in 0..b.line_count() {
+                if let Some(l) = b.line(i) {
+                    s.push_str(&l);
+                }
+            }
+            s
+        };
+        let res = dispatch(act, &mut model, &mut sticky, &[]);
+        assert!(!res.dirty, "yank should not mark dirty (buffer unchanged)");
+        let after = {
+            let b = model.state().active_buffer();
+            let mut s = String::new();
+            for i in 0..b.line_count() {
+                if let Some(l) = b.line(i) {
+                    s.push_str(&l);
+                }
+            }
+            s
+        };
+        assert_eq!(after, pre_text);
+        assert!(model.state().registers.unnamed.starts_with("one"));
+    }
+
+    #[test]
+    fn operator_yank_prefix_count_2yw() {
+        let buffer = Buffer::from_str("t", "one two three four\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // 2 y w
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key_evt('2'),
+        );
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key_evt('y'),
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key_evt('w'),
+        )
+        .unwrap();
+        if let Action::ApplyOperator { count, .. } = act {
+            assert_eq!(count, 2);
+        } else {
+            panic!();
+        }
+        let pre = {
+            let b = model.state().active_buffer();
+            let mut s = String::new();
+            for i in 0..b.line_count() {
+                if let Some(l) = b.line(i) {
+                    s.push_str(&l);
+                }
+            }
+            s
+        };
+        dispatch(act, &mut model, &mut sticky, &[]);
+        let after = {
+            let b = model.state().active_buffer();
+            let mut s = String::new();
+            for i in 0..b.line_count() {
+                if let Some(l) = b.line(i) {
+                    s.push_str(&l);
+                }
+            }
+            s
+        };
+        assert_eq!(after, pre);
+        assert!(model.state().registers.unnamed.contains("one two"));
+    }
+
+    #[test]
+    fn operator_yank_post_count_y2w() {
+        let buffer = Buffer::from_str("t", "one two three four\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // y 2 w
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key_evt('y'),
+        );
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key_evt('2'),
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key_evt('w'),
+        )
+        .unwrap();
+        if let Action::ApplyOperator { count, .. } = act {
+            assert_eq!(count, 2);
+        } else {
+            panic!();
+        }
+        let pre = {
+            let b = model.state().active_buffer();
+            let mut s = String::new();
+            for i in 0..b.line_count() {
+                if let Some(l) = b.line(i) {
+                    s.push_str(&l);
+                }
+            }
+            s
+        };
+        dispatch(act, &mut model, &mut sticky, &[]);
+        let after = {
+            let b = model.state().active_buffer();
+            let mut s = String::new();
+            for i in 0..b.line_count() {
+                if let Some(l) = b.line(i) {
+                    s.push_str(&l);
+                }
+            }
+            s
+        };
+        assert_eq!(after, pre);
+        assert!(model.state().registers.unnamed.contains("one two"));
+    }
+
+    #[test]
+    fn operator_yank_linewise_yj() {
+        let buffer = Buffer::from_str("t", "l1\nl2\nl3\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // y j
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key_evt('y'),
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key_evt('j'),
+        )
+        .unwrap();
+        let pre = {
+            let b = model.state().active_buffer();
+            let mut s = String::new();
+            for i in 0..b.line_count() {
+                if let Some(l) = b.line(i) {
+                    s.push_str(&l);
+                }
+            }
+            s
+        };
+        dispatch(act, &mut model, &mut sticky, &[]);
+        let after = {
+            let b = model.state().active_buffer();
+            let mut s = String::new();
+            for i in 0..b.line_count() {
+                if let Some(l) = b.line(i) {
+                    s.push_str(&l);
+                }
+            }
+            s
+        };
+        assert_eq!(after, pre);
+        assert!(model.state().registers.unnamed.contains("l1"));
+        assert!(model.state().registers.unnamed.contains("l2"));
+    }
+
+    #[test]
+    fn operator_yank_linewise_count_2yj() {
+        let buffer = Buffer::from_str("t", "a1\na2\na3\na4\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // 2 y j (captures three lines total like 2dj semantics for delete)
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key_evt('2'),
+        );
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key_evt('y'),
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key_evt('j'),
+        )
+        .unwrap();
+        dispatch(act, &mut model, &mut sticky, &[]);
+        assert!(model.state().registers.unnamed.contains("a1"));
+        assert!(model.state().registers.unnamed.contains("a2"));
+        assert!(model.state().registers.unnamed.contains("a3"));
+        assert!(!model.state().registers.unnamed.contains("a4"));
     }
 }
