@@ -8,7 +8,7 @@ use crate::partial_diff::classify_viewport_changes;
 use crate::partial_metrics::{RenderPathMetrics, RenderPathMetricsSnapshot};
 use crate::{CellFlags, Frame};
 use anyhow::Result;
-use core_model::View;
+use core_model::{Layout, View};
 use core_state::EditorState;
 use core_text::grapheme;
 
@@ -56,12 +56,20 @@ impl RenderEngine {
     }
 
     /// Build + render a full frame (current behavior; breadth-first guarantee).
-    pub fn render_full(&mut self, state: &EditorState, view: &View, w: u16, h: u16) -> Result<()> {
+    pub fn render_full(
+        &mut self,
+        state: &EditorState,
+        view: &View,
+        layout: &Layout,
+        w: u16,
+        h: u16,
+    ) -> Result<()> {
         let start = std::time::Instant::now();
         // Step 5: classify hash differences (still full frame output). We run this
         // before building the frame so the hashing path always executes each frame.
         classify_viewport_changes(state, view, w, h, &mut self.cache, &self.metrics, None);
 
+        let _primary = layout.primary(); // reserved for future multi-region use
         let mut frame = build_content_frame(state, view, w, h);
         self.apply_cursor_overlay(state, view, &mut frame, w, h);
         apply_status_line(state, view, &mut frame, w, h);
@@ -94,12 +102,13 @@ impl RenderEngine {
         &mut self,
         state: &EditorState,
         view: &View,
+        layout: &Layout,
         w: u16,
         h: u16,
     ) -> Result<()> {
         // Step 7 currently only activates for CursorOnly effective decisions.
         // Fallback to full for any other future kinds until Step 8 extends logic.
-        self.render_full(state, view, w, h)
+        self.render_full(state, view, layout, w, h)
     }
 
     /// Phase 3 Step 7: cursor-only partial repaint. Repaints just the previous cursor line
@@ -108,6 +117,7 @@ impl RenderEngine {
         &mut self,
         state: &EditorState,
         view: &View,
+        _layout: &Layout,
         w: u16,
         h: u16,
     ) -> Result<()> {
@@ -267,6 +277,7 @@ impl RenderEngine {
         &mut self,
         state: &EditorState,
         view: &View,
+        _layout: &Layout,
         w: u16,
         h: u16,
         dirty_tracker: &mut crate::dirty::DirtyLinesTracker,
@@ -286,7 +297,7 @@ impl RenderEngine {
         // If cache cold (viewport changed or width mismatch) fallback via full render (caller should have escalated).
         if self.cache.viewport_start != viewport_first || self.cache.width != w {
             // Defensive: escalate by calling full render.
-            return self.render_full(state, view, w, h);
+            return self.render_full(state, view, _layout, w, h);
         }
 
         let mut writer = BatchWriter::new();
@@ -315,7 +326,7 @@ impl RenderEngine {
             self.metrics.escalated_large_set.fetch_add(1, Relaxed);
             self.last_repaint_kind = Some("escalated_full");
             self.last_repaint_lines.clear();
-            return self.render_full(state, view, w, h);
+            return self.render_full(state, view, _layout, w, h);
         }
 
         // Update metrics for candidate set (dirty_lines_marked already counted earlier by diff classifier in full frames; here we just record candidates & repaints).
@@ -656,7 +667,9 @@ mod tests {
         let mut model = mk_state("a\nb\nc\n");
         let mut eng = RenderEngine::new();
         let view = model.active_view().clone();
-        eng.render_full(model.state(), &view, 80, 10).unwrap();
+        let layout = core_model::Layout::single(80, 10);
+        eng.render_full(model.state(), &view, &layout, 80, 10)
+            .unwrap();
         assert_eq!(eng.last_cursor_line(), Some(0));
         // Move cursor
         {
@@ -664,7 +677,9 @@ mod tests {
             view_mut.cursor.line = 2;
         }
         let view_after = model.active_view().clone();
-        eng.render_full(model.state(), &view_after, 80, 10).unwrap();
+        let layout = core_model::Layout::single(80, 10);
+        eng.render_full(model.state(), &view_after, &layout, 80, 10)
+            .unwrap();
         assert_eq!(eng.last_cursor_line(), Some(2));
     }
 
@@ -673,8 +688,11 @@ mod tests {
         let model = mk_state("x\n");
         let mut eng = RenderEngine::new();
         let view = model.active_view().clone();
-        eng.render_full(model.state(), &view, 40, 5).unwrap();
-        eng.render_full(model.state(), &view, 40, 5).unwrap();
+        let layout = core_model::Layout::single(40, 5);
+        eng.render_full(model.state(), &view, &layout, 40, 5)
+            .unwrap();
+        eng.render_full(model.state(), &view, &layout, 40, 5)
+            .unwrap();
         let snap = eng.metrics_snapshot();
         assert_eq!(snap.full_frames, 2);
         assert!(snap.last_full_render_ns > 0);
@@ -685,12 +703,15 @@ mod tests {
         let model = mk_state("a\nb\nc\n");
         let mut eng = RenderEngine::new();
         let view0 = model.active_view().clone();
-        eng.render_full(model.state(), &view0, 80, 6).unwrap();
+        let layout = core_model::Layout::single(80, 6);
+        eng.render_full(model.state(), &view0, &layout, 80, 6)
+            .unwrap();
         assert_eq!(eng.last_cursor_line(), Some(0));
         // Move cursor to line 2 and perform cursor-only partial render.
         let mut view_move = view0.clone();
         view_move.cursor.line = 2;
-        eng.render_cursor_only(model.state(), &view_move, 80, 6)
+        let layout = core_model::Layout::single(80, 6);
+        eng.render_cursor_only(model.state(), &view_move, &layout, 80, 6)
             .unwrap();
         let snap = eng.metrics_snapshot();
         assert_eq!(snap.full_frames, 1, "only initial full frame counted");
@@ -705,7 +726,9 @@ mod tests {
         let model = mk_state("alpha\nβeta\nγ\n");
         let mut eng = RenderEngine::new();
         let view = model.active_view().clone();
-        eng.render_full(model.state(), &view, 40, 6).unwrap();
+        let layout = core_model::Layout::single(40, 6);
+        eng.render_full(model.state(), &view, &layout, 40, 6)
+            .unwrap();
         let before = eng.metrics_snapshot().resize_invalidations;
         // Invalidate (simulate terminal resize event) then render again with different size.
         eng.invalidate_for_resize();
@@ -716,7 +739,9 @@ mod tests {
             "metric must increment"
         );
         // Subsequent full render should succeed and recache for new width.
-        eng.render_full(model.state(), &view, 50, 8).unwrap();
+        let layout = core_model::Layout::single(50, 8);
+        eng.render_full(model.state(), &view, &layout, 50, 8)
+            .unwrap();
         let after = eng.metrics_snapshot();
         assert_eq!(after.full_frames, 2, "two full frames executed");
     }

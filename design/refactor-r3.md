@@ -177,7 +177,7 @@ Proceeding with R3 reduces complexity for all Phase 4 tracks, confines structura
 - [x] Step 6 – Status-only detection (2025-09-18)
 - [x] Step 7 – BatchWriter (2025-09-18) – introduces conservative batching (plain single-width cell run aggregation) + metrics (print_commands, cells_printed) and baseline test.
 - [x] Step 8 – UndoEngine extraction (2025-09-18) – snapshot logic moved into `undo.rs` (`UndoEngine`); `EditorState` now delegates via accessors (`undo_depth`, `redo_depth`, `insert_run`). Behavior unchanged (all undo/coalescing tests green).
-- [ ] Step 9 – Layout scaffold
+- [x] Step 9 – Layout scaffold (2025-09-18) – introduced `core-model::layout::{Layout, LayoutRegion}` single-region abstraction; render engine APIs now accept a `&Layout` (currently always `Layout::single`). Invariants documented with unit test; no rendering behavior change.
 - [ ] Step 10 – TerminalCapabilities stub
 - [ ] Step 11 – Metrics command stub
 - [ ] Step 12 – Legacy Renderer removal

@@ -10,7 +10,8 @@ use core_text::Buffer;
 fn mk_engine_warm(state: &EditorState, view: &View, w: u16, h: u16) -> RenderEngine {
     let mut eng = RenderEngine::new();
     // Perform an initial full render to warm cache; ignore result.
-    let _ = eng.render_full(state, view, w, h);
+    let layout = core_model::Layout::single(w, h);
+    let _ = eng.render_full(state, view, &layout, w, h);
     eng
 }
 
@@ -21,7 +22,8 @@ fn last_render_ns_non_zero_after_render() {
     let view = View::new(ViewId(0), state.active, core_text::Position::origin(), 0);
     let mut engine = RenderEngine::new();
     let start = std::time::Instant::now();
-    let _ = engine.render_full(&state, &view, 80, 10);
+    let layout = core_model::Layout::single(80, 10);
+    let _ = engine.render_full(&state, &view, &layout, 80, 10);
     let elapsed = start.elapsed().as_nanos() as u64;
     record_last_render_ns(elapsed);
     assert!(last_render_ns() > 0, "expected non-zero render timing");
@@ -42,7 +44,8 @@ fn lines_partial_single_line_edit() {
     let mut tracker = DirtyLinesTracker::new();
     tracker.mark(0);
     let before = eng.metrics_snapshot();
-    let _ = eng.render_lines_partial(&state, &view, 80, 6, &mut tracker);
+    let layout = core_model::Layout::single(80, 6);
+    let _ = eng.render_lines_partial(&state, &view, &layout, 80, 6, &mut tracker);
     let after = eng.metrics_snapshot();
     assert_eq!(after.partial_frames, before.partial_frames + 1);
     assert_eq!(after.lines_frames, before.lines_frames + 1);
@@ -71,7 +74,8 @@ fn lines_partial_escalates_large_set() {
         tracker.mark(l);
     }
     let before = eng.metrics_snapshot();
-    let _ = eng.render_lines_partial(&state, &view, 80, 12, &mut tracker);
+    let layout = core_model::Layout::single(80, 12);
+    let _ = eng.render_lines_partial(&state, &view, &layout, 80, 12, &mut tracker);
     let after = eng.metrics_snapshot();
     // Because we escalated, we expect a full frame increment instead of lines partial counters OR partial counters if implementation escalated internally.
     let escalated = after.full_frames > before.full_frames;

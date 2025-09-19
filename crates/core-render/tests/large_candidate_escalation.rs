@@ -22,7 +22,9 @@ fn large_candidate_set_escalates_to_full_and_increments_metric() {
     let mut eng = RenderEngine::new();
     let view0 = model.active_view().clone();
     // Initial full render to warm cache.
-    eng.render_full(model.state(), &view0, 80, 11).unwrap();
+    let layout = core_model::Layout::single(80, 11);
+    eng.render_full(model.state(), &view0, &layout, 80, 11)
+        .unwrap();
 
     // Simulate dirty tracker with >= threshold candidates in viewport (lines 0..10 text rows).
     // We'll mark 6 distinct lines.
@@ -34,9 +36,11 @@ fn large_candidate_set_escalates_to_full_and_increments_metric() {
     // Call lines partial path directly (engine method) and expect escalation to full.
     // We check metric afterwards.
     let before = eng.metrics_snapshot();
+    let layout = core_model::Layout::single(80, 11);
     eng.render_lines_partial(
         model.state(),
         &model.active_view().clone(),
+        &layout,
         80,
         11,
         &mut tracker,
@@ -68,16 +72,20 @@ fn candidate_set_below_threshold_stays_partial() {
     let model = model_with_lines(50);
     let mut eng = RenderEngine::new();
     let view0 = model.active_view().clone();
-    eng.render_full(model.state(), &view0, 80, 11).unwrap();
+    let layout = core_model::Layout::single(80, 11);
+    eng.render_full(model.state(), &view0, &layout, 80, 11)
+        .unwrap();
 
     let mut tracker = core_render::dirty::DirtyLinesTracker::new();
     for line in [0, 1, 2, 3, 4] {
         tracker.mark(line);
     }
     let before = eng.metrics_snapshot();
+    let layout = core_model::Layout::single(80, 11);
     eng.render_lines_partial(
         model.state(),
         &model.active_view().clone(),
+        &layout,
         80,
         11,
         &mut tracker,

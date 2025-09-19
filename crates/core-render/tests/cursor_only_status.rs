@@ -22,12 +22,16 @@ fn setup(buffer_content: &str) -> (EditorState, View, RenderEngine, u16, u16) {
 fn cursor_only_horizontal_updates_status() {
     let (state, mut view, mut engine, w, h) = setup("abcdef\n");
     // Initial full render to warm cache.
-    engine.render_full(&state, &view, w, h).unwrap();
+    let layout = core_model::Layout::single(w, h);
+    engine.render_full(&state, &view, &layout, w, h).unwrap();
     // Move cursor horizontally within same line several times; emulate CursorOnly partial path call.
     for col in 1..4 {
         // move to columns 1..3
         view.cursor.byte = col; // byte index equals col for ASCII
-        engine.render_cursor_only(&state, &view, w, h).unwrap();
+        let layout = core_model::Layout::single(w, h);
+        engine
+            .render_cursor_only(&state, &view, &layout, w, h)
+            .unwrap();
         let snap = engine.metrics_snapshot();
         assert!(snap.cursor_only_frames >= col as u64); // monotonically increasing
     }

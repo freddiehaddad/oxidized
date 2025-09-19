@@ -64,6 +64,8 @@
 
 use core_state::EditorState;
 use core_text::Position;
+mod layout;
+pub use layout::{Layout, LayoutRegion};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Stable identifier for a `View`.

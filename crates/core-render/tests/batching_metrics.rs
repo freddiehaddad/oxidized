@@ -13,7 +13,9 @@ fn batched_full_frame_print_commands_not_exceed_cells() {
     let model = mk_model("hello world\nsecond line here\nthird line\n");
     let mut eng = RenderEngine::new();
     let view = model.active_view().clone();
-    eng.render_full(model.state(), &view, 80, 10).unwrap();
+    let layout = core_model::Layout::single(80, 10);
+    eng.render_full(model.state(), &view, &layout, 80, 10)
+        .unwrap();
     let snap = eng.metrics_snapshot();
     assert!(
         snap.print_commands <= snap.cells_printed,

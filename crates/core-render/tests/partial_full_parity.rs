@@ -23,14 +23,17 @@ fn cursor_only_parity() {
     let mut model = mk_model("a\nb\nc\n");
     let mut eng = RenderEngine::new();
     let view0 = model.active_view().clone();
-    eng.render_full(model.state(), &view0, W, H).unwrap(); // seed cache
+    let layout = core_model::Layout::single(W, H);
+    eng.render_full(model.state(), &view0, &layout, W, H)
+        .unwrap(); // seed cache
     // Move cursor only
     {
         let v = model.active_view_mut();
         v.cursor.line = 2;
     }
     let view_after = model.active_view().clone();
-    eng.render_cursor_only(model.state(), &view_after, W, H)
+    let layout = core_model::Layout::single(W, H);
+    eng.render_cursor_only(model.state(), &view_after, &layout, W, H)
         .unwrap();
     // Baseline full frame of same state
     let full_again = build_full_frame_for_test(model.state(), &view_after, W, H);
@@ -50,7 +53,9 @@ fn single_line_edit_parity() {
     let mut model = mk_model("one\ntwo\nthree\n");
     let mut eng = RenderEngine::new();
     let view0 = model.active_view().clone();
-    eng.render_full(model.state(), &view0, W, H).unwrap();
+    let layout = core_model::Layout::single(W, H);
+    eng.render_full(model.state(), &view0, &layout, W, H)
+        .unwrap();
     // Edit line 1 ("two") by appending X
     {
         let st = model.state_mut();
@@ -66,7 +71,8 @@ fn single_line_edit_parity() {
     let mut dirty = DirtyLinesTracker::new();
     dirty.mark(1);
     let view_after = model.active_view().clone();
-    eng.render_lines_partial(model.state(), &view_after, W, H, &mut dirty)
+    let layout = core_model::Layout::single(W, H);
+    eng.render_lines_partial(model.state(), &view_after, &layout, W, H, &mut dirty)
         .unwrap();
     // Baseline full frame
     let full_again = build_full_frame_for_test(model.state(), &view_after, W, H);
@@ -89,7 +95,8 @@ fn multi_line_edit_below_threshold_parity() {
     let mut model = mk_model("0\n1\n2\n3\n4\n5\n6\n7\n8\n");
     let mut eng = RenderEngine::new();
     let v0 = model.active_view().clone();
-    eng.render_full(model.state(), &v0, W, H).unwrap();
+    let layout = core_model::Layout::single(W, H);
+    eng.render_full(model.state(), &v0, &layout, W, H).unwrap();
     {
         let st = model.state_mut();
         let mut buf = st.active_buffer().clone();
@@ -103,7 +110,8 @@ fn multi_line_edit_below_threshold_parity() {
     let mut dirty = DirtyLinesTracker::new();
     dirty.mark_range(2, 4);
     let view_after = model.active_view().clone();
-    eng.render_lines_partial(model.state(), &view_after, W, H, &mut dirty)
+    let layout = core_model::Layout::single(W, H);
+    eng.render_lines_partial(model.state(), &view_after, &layout, W, H, &mut dirty)
         .unwrap();
     let baseline = build_full_frame_for_test(model.state(), &view_after, W, H);
     let full_again = build_full_frame_for_test(model.state(), &view_after, W, H);
@@ -123,7 +131,8 @@ fn escalation_threshold_full_parity() {
     let mut model = mk_model("0\n1\n2\n3\n4\n5\n6\n7\n8\n");
     let mut eng = RenderEngine::new();
     let v0 = model.active_view().clone();
-    eng.render_full(model.state(), &v0, W, H).unwrap();
+    let layout = core_model::Layout::single(W, H);
+    eng.render_full(model.state(), &v0, &layout, W, H).unwrap();
     {
         let st = model.state_mut();
         let mut buf = st.active_buffer().clone();
@@ -137,7 +146,8 @@ fn escalation_threshold_full_parity() {
     let mut dirty = DirtyLinesTracker::new();
     dirty.mark_range(1, 6);
     let view_after = model.active_view().clone();
-    eng.render_lines_partial(model.state(), &view_after, W, H, &mut dirty)
+    let layout = core_model::Layout::single(W, H);
+    eng.render_lines_partial(model.state(), &view_after, &layout, W, H, &mut dirty)
         .unwrap();
     assert_eq!(eng.test_last_repaint_kind(), Some("escalated_full"));
     // Parity: full render of final state vs itself (sanity)
@@ -151,11 +161,14 @@ fn resize_then_partial_parity() {
     let mut model = mk_model("a\nb\nc\nd\n");
     let mut eng = RenderEngine::new();
     let v0 = model.active_view().clone();
-    eng.render_full(model.state(), &v0, W, H).unwrap();
+    let layout = core_model::Layout::single(W, H);
+    eng.render_full(model.state(), &v0, &layout, W, H).unwrap();
     // Invalidate for resize then render full at new width
     eng.invalidate_for_resize();
     let v_after = model.active_view().clone();
-    eng.render_full(model.state(), &v_after, 60, H).unwrap(); // new width
+    let layout = core_model::Layout::single(60, H);
+    eng.render_full(model.state(), &v_after, &layout, 60, H)
+        .unwrap(); // new width
     // Now perform single-line edit and partial
     {
         let st = model.state_mut();
@@ -167,7 +180,8 @@ fn resize_then_partial_parity() {
     let mut dirty = DirtyLinesTracker::new();
     dirty.mark(1);
     let view_after2 = model.active_view().clone();
-    eng.render_lines_partial(model.state(), &view_after2, 60, H, &mut dirty)
+    let layout = core_model::Layout::single(60, H);
+    eng.render_lines_partial(model.state(), &view_after2, &layout, 60, H, &mut dirty)
         .unwrap();
     let baseline = build_full_frame_for_test(model.state(), &view_after2, 60, H);
     let full_again = build_full_frame_for_test(model.state(), &view_after2, 60, H);
@@ -180,7 +194,8 @@ fn buffer_replacement_full_parity() {
     let mut model = mk_model("old1\nold2\n");
     let mut eng = RenderEngine::new();
     let v0 = model.active_view().clone();
-    eng.render_full(model.state(), &v0, W, H).unwrap();
+    let layout = core_model::Layout::single(W, H);
+    eng.render_full(model.state(), &v0, &layout, W, H).unwrap();
     // Replace buffer
     {
         let st = model.state_mut();
@@ -190,7 +205,9 @@ fn buffer_replacement_full_parity() {
         eng.invalidate_for_resize();
     }
     let v_after = model.active_view().clone();
-    eng.render_full(model.state(), &v_after, W, H).unwrap();
+    let layout = core_model::Layout::single(W, H);
+    eng.render_full(model.state(), &v_after, &layout, W, H)
+        .unwrap();
     let baseline = build_full_frame_for_test(model.state(), &v_after, W, H);
     let full_again = build_full_frame_for_test(model.state(), &v_after, W, H);
     assert_eq!(baseline.cells, full_again.cells);

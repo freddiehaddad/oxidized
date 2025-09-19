@@ -300,16 +300,15 @@ fn render(
     // Refactor R2 Step 2: stateful engine retains cursor span metadata (still full render).
     // Refactor R2 Step 11: capture render duration.
     let start = Instant::now();
+    let layout = core_model::Layout::single(w, h);
     let res = match &decision.effective {
         core_render::scheduler::RenderDelta::CursorOnly => {
-            engine.render_cursor_only(state, view, w, h)
+            engine.render_cursor_only(state, view, &layout, w, h)
         }
         core_render::scheduler::RenderDelta::Lines(_) => {
-            // Current architecture: DirtyLinesTracker lives in scheduler or event loop scope; for MVP call full until plumbed.
-            // Placeholder: invoke full render; follow-up Step 8 test harness will directly call engine.render_lines_partial.
-            engine.render_full(state, view, w, h)
+            engine.render_full(state, view, &layout, w, h)
         }
-        _ => engine.render_full(state, view, w, h),
+        _ => engine.render_full(state, view, &layout, w, h),
     };
     let elapsed = start.elapsed();
     record_last_render_ns(elapsed.as_nanos() as u64);
@@ -509,7 +508,8 @@ mod tests {
         view.cursor.line = 0;
         view.cursor.byte = 1; // 'b'
         let mut eng = RenderEngine::new();
-        let _ = eng.render_full(&state, &view, 20, 4);
+        let layout = core_model::Layout::single(20, 4);
+        let _ = eng.render_full(&state, &view, &layout, 20, 4);
         let frame = build_content_frame(&state, &view, 20, 4);
         let idx = 1; // (y * width) + x
         let cell = frame.cells[idx];

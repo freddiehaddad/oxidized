@@ -40,7 +40,9 @@ fn cursor_only_unicode_column_correct_single_emoji() {
     let mut model = mk_model("😀 text\n");
     let mut eng = RenderEngine::new();
     let view0 = model.active_view().clone();
-    eng.render_full(model.state(), &view0, 40, 5).unwrap();
+    let layout = core_model::Layout::single(40, 5);
+    eng.render_full(model.state(), &view0, &layout, 40, 5)
+        .unwrap();
     {
         let v = model.active_view_mut();
         // Move byte index by one grapheme boundary (emoji cluster length)
@@ -48,7 +50,8 @@ fn cursor_only_unicode_column_correct_single_emoji() {
         v.cursor.byte = next; // same line
     }
     let moved_view = model.active_view().clone();
-    eng.render_cursor_only(model.state(), &moved_view, 40, 5)
+    let layout = core_model::Layout::single(40, 5);
+    eng.render_cursor_only(model.state(), &moved_view, &layout, 40, 5)
         .unwrap();
     // Rebuild status (full frame path) to compare textual column number. Should be Col 3 (1-based) if width 2.
     let status = status_line_str(&model);
@@ -64,14 +67,17 @@ fn cursor_only_unicode_column_cjk_wide() {
     let mut model = mk_model("漢A\n");
     let mut eng = RenderEngine::new();
     let view0 = model.active_view().clone();
-    eng.render_full(model.state(), &view0, 40, 5).unwrap();
+    let layout = core_model::Layout::single(40, 5);
+    eng.render_full(model.state(), &view0, &layout, 40, 5)
+        .unwrap();
     {
         let v = model.active_view_mut();
         let next = core_text::grapheme::next_boundary("漢A", 0);
         v.cursor.byte = next;
     }
     let moved_view = model.active_view().clone();
-    eng.render_cursor_only(model.state(), &moved_view, 40, 5)
+    let layout = core_model::Layout::single(40, 5);
+    eng.render_cursor_only(model.state(), &moved_view, &layout, 40, 5)
         .unwrap();
     let status = status_line_str(&model);
     assert!(
@@ -86,14 +92,17 @@ fn cursor_only_unicode_column_combining_mark() {
     let mut model = mk_model("e\u{0301}x\n");
     let mut eng = RenderEngine::new();
     let view0 = model.active_view().clone();
-    eng.render_full(model.state(), &view0, 40, 5).unwrap();
+    let layout = core_model::Layout::single(40, 5);
+    eng.render_full(model.state(), &view0, &layout, 40, 5)
+        .unwrap();
     {
         let v = model.active_view_mut();
         let next = core_text::grapheme::next_boundary("e\u{0301}x", 0);
         v.cursor.byte = next;
     }
     let moved_view = model.active_view().clone();
-    eng.render_cursor_only(model.state(), &moved_view, 40, 5)
+    let layout = core_model::Layout::single(40, 5);
+    eng.render_cursor_only(model.state(), &moved_view, &layout, 40, 5)
         .unwrap();
     let status = status_line_str(&model);
     // After moving over first grapheme (e + combining), column should be 2 (1-based Col 2)
@@ -108,14 +117,17 @@ fn cursor_only_unicode_column_ascii() {
     let mut model = mk_model("abc\n");
     let mut eng = RenderEngine::new();
     let view0 = model.active_view().clone();
-    eng.render_full(model.state(), &view0, 40, 5).unwrap();
+    let layout = core_model::Layout::single(40, 5);
+    eng.render_full(model.state(), &view0, &layout, 40, 5)
+        .unwrap();
     {
         let v = model.active_view_mut();
         let next = core_text::grapheme::next_boundary("abc", 0);
         v.cursor.byte = next;
     }
     let moved_view = model.active_view().clone();
-    eng.render_cursor_only(model.state(), &moved_view, 40, 5)
+    let layout = core_model::Layout::single(40, 5);
+    eng.render_cursor_only(model.state(), &moved_view, &layout, 40, 5)
         .unwrap();
     let status = status_line_str(&model);
     assert!(status.contains("Col 2"), "ASCII column incorrect: {status}");
