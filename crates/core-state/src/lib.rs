@@ -119,6 +119,7 @@ pub struct EditorState {
     pub original_line_ending: LineEnding,
     pub had_trailing_newline: bool,
     pub config_vertical_margin: usize,
+    pub registers: Registers, // Phase 4 Step 3 scaffold now integrated (Step 6 uses delete)
 }
 
 /// Line ending style detected from source file (Phase 2 Step 9).
@@ -305,6 +306,7 @@ impl EditorState {
             original_line_ending: LineEnding::Lf,
             had_trailing_newline: false,
             config_vertical_margin: 0,
+            registers: Registers::new(),
         }
     }
 
@@ -454,6 +456,11 @@ impl EditorState {
     }
     pub fn insert_run(&self) -> &InsertRun {
         self.undo.insert_run()
+    }
+
+    /// Mutable access to registers (operators populate these)
+    pub fn registers_mut(&mut self) -> &mut Registers {
+        &mut self.registers
     }
 }
 

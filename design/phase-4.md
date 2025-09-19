@@ -232,7 +232,8 @@ Simple monotonic interval (e.g. 250ms) generating `Event::Tick` pushing status r
 - [x] Step 3 – Registers struct (unnamed + numbered ring scaffold) (complete)
 - [x] Step 4 – Motion span resolver (byte span tests) (complete)
 - [x] Step 5 – Integrate span delete with undo (complete)
-- [ ] Step 6 – Delete operator d{motion}[count] (pending)
+- [x] Step 6 – Delete operator d{motion}[count] (complete)
+- [ ] Step 6.1 – Ctrl-D precedence fix (pending) – adjust KeyTranslator to route Ctrl-D (PageHalfDown) and Ctrl-U (PageHalfUp) before operator detection; cancel any pending operator on ctrl chord. Ensures half-page scrolling not misinterpreted as delete.
 - [ ] Step 7 – Yank operator y{motion}[count] storing registers (pending)
 - [ ] Step 8 – Change operator c{motion}[count] enters insert (pending)
 - [ ] Step 9 – Operator & register metrics counters (pending)

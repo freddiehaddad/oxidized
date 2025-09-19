@@ -120,12 +120,31 @@ pub fn dispatch(
         Action::Undo => undo::handle_undo(state, view),
         Action::Redo => undo::handle_redo(state, view),
         Action::Quit => DispatchResult::quit(),
-        Action::BeginOperator(_) | Action::ApplyOperator { .. } => {
-            // Refactor R3 Step 4 scaffold: operator variants are inert until
-            // Phase 4 translator logic populates and stateful operator engine
-            // is implemented. Treat as no-op (clean) to avoid accidental
-            // renderer triggers.
-            DispatchResult::clean()
+        Action::BeginOperator(_) => DispatchResult::clean(),
+        Action::ApplyOperator { op, motion, count } => {
+            use crate::OperatorKind;
+            use crate::span_resolver::resolve_span;
+            match op {
+                OperatorKind::Delete => {
+                    // Resolve span from current cursor
+                    let start_pos = view.cursor;
+                    let span = resolve_span(state, start_pos, motion, count);
+                    if span.start == span.end {
+                        return DispatchResult::clean();
+                    }
+                    let mut cursor = view.cursor; // copy for deletion API
+                    let removed =
+                        state.delete_span_with_snapshot(&mut cursor, span.start, span.end);
+                    // Update registers
+                    state.registers_mut().record_delete(removed);
+                    view.cursor = cursor; // apply updated cursor
+                    if !state.dirty {
+                        state.dirty = true;
+                    }
+                    DispatchResult::dirty()
+                }
+                _ => DispatchResult::clean(), // Yank/Change later steps
+            }
         }
     }
 }
@@ -133,7 +152,7 @@ pub fn dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EditKind, ModeChange, translate_key}; // test-only imports
+    use crate::{Action, EditKind, ModeChange, MotionKind, OperatorKind, translate_key}; // test-only imports
     use core_events::{KeyCode, KeyEvent, KeyModifiers};
     use core_model::EditorModel;
     use core_text::Buffer;
@@ -512,5 +531,108 @@ mod tests {
         );
         assert_eq!(model.active_view().cursor, before, "cursor unchanged");
         assert_eq!(model.state().active_buffer().line(0).unwrap(), "");
+    }
+
+    fn key(c: char) -> KeyEvent {
+        KeyEvent {
+            code: KeyCode::Char(c),
+            mods: KeyModifiers::empty(),
+        }
+    }
+
+    #[test]
+    fn operator_delete_dw_basic() {
+        let buffer = Buffer::from_str("t", "one two three\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // Simulate: d w
+        // 'd'
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('d'),
+        );
+        // translator state is thread-local; call directly for second key
+        let apply = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('w'),
+        )
+        .expect("apply op");
+        if let Action::ApplyOperator { op, motion, count } = apply {
+            assert!(matches!(op, OperatorKind::Delete));
+            assert!(matches!(motion, MotionKind::WordForward));
+            assert_eq!(count, 1);
+            assert!(dispatch(apply, &mut model, &mut sticky, &[]).dirty);
+        } else {
+            panic!("expected ApplyOperator");
+        }
+        // Expect registers populated
+        assert!(!model.state().registers.unnamed.is_empty());
+    }
+
+    #[test]
+    fn operator_delete_count_prefix_2dw() {
+        let buffer = Buffer::from_str("t", "one two three four five\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // 2 d w -> should delete two words starting at cursor ("one ")? Implementation: count applies to motion; starting at origin before 'one' deleting up to after second word.
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('2'),
+        );
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('d'),
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('w'),
+        )
+        .unwrap();
+        if let Action::ApplyOperator { count, .. } = act {
+            assert_eq!(count, 2);
+        } else {
+            panic!();
+        }
+        dispatch(act, &mut model, &mut sticky, &[]);
+        assert!(!model.state().registers.unnamed.is_empty());
+    }
+
+    #[test]
+    fn operator_delete_multiplicative_d2w() {
+        let buffer = Buffer::from_str("t", "one two three four five\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // d 2 w -> post-op count
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('d'),
+        );
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('2'),
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('w'),
+        )
+        .unwrap();
+        if let Action::ApplyOperator { count, .. } = act {
+            assert_eq!(count, 2);
+        } else {
+            panic!();
+        }
+        dispatch(act, &mut model, &mut sticky, &[]);
+        assert!(!model.state().registers.unnamed.is_empty());
     }
 }
