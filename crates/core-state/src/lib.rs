@@ -37,6 +37,63 @@ pub mod undo;
 use undo::UndoEngine;
 pub use undo::{InsertRun, SnapshotKind, UNDO_HISTORY_MAX};
 
+// Phase 4 Step 3: Registers scaffold
+// Breadth-first: Introduces an in-memory register ring storing text captured
+// by yank/delete/change operators. Integration (population on operator
+// application and paste semantics) will follow in later steps. This module
+// intentionally keeps the data structure minimal and cheap.
+//
+// Model (subset of Vim semantics):
+// - Unnamed register ("") always mirrors the most recent yank/delete/change.
+// - Numbered ring (0..=9) rotates; newest textual content pushed at index 0.
+// - Capacity fixed at 10 for now; future expansion can generalize via const.
+// - Change operations behave like delete + enter-insert (population handled
+//   by operator engine later).
+// - Paste & explicit register selection are deferred (Phase 5+ per design).
+#[derive(Debug, Default, Clone)]
+pub struct Registers {
+    pub unnamed: String,
+    numbered: Vec<String>, // newest at index 0, length <= 10
+}
+
+impl Registers {
+    pub const MAX: usize = 10; // ring capacity
+
+    pub fn new() -> Self {
+        Self {
+            unnamed: String::new(),
+            numbered: Vec::new(),
+        }
+    }
+
+    /// Push a yank (non-destructive copy). Mirrors into unnamed and ring[0].
+    pub fn record_yank<S: Into<String>>(&mut self, text: S) {
+        let s = text.into();
+        self.unnamed = s.clone();
+        self.unshift_numbered(s);
+    }
+
+    /// Push a delete/change (destructive). Semantics identical for ring/unnamed at this stage.
+    pub fn record_delete<S: Into<String>>(&mut self, text: S) {
+        let s = text.into();
+        self.unnamed = s.clone();
+        self.unshift_numbered(s);
+    }
+
+    /// Return immutable slice of numbered ring (newest first).
+    pub fn numbered(&self) -> &[String] {
+        &self.numbered
+    }
+
+    fn unshift_numbered(&mut self, s: String) {
+        if self.numbered.len() == Self::MAX {
+            // Drop the oldest (tail) to keep capacity.
+            self.numbered.pop();
+        }
+        self.numbered.insert(0, s);
+    }
+}
+
 // (Undo snapshot types moved to undo module)
 
 /// Current editor mode.
@@ -816,5 +873,44 @@ mod tests {
             );
             assert!(!n2.normalized.contains('\r'));
         }
+    }
+}
+
+#[cfg(test)]
+mod register_tests {
+    use super::Registers;
+
+    #[test]
+    fn yank_populates_unnamed_and_ring() {
+        let mut r = Registers::new();
+        r.record_yank("alpha");
+        assert_eq!(r.unnamed, "alpha");
+        assert_eq!(r.numbered(), &["alpha".to_string()]);
+    }
+
+    #[test]
+    fn delete_rotates_ring_capped() {
+        let mut r = Registers::new();
+        for i in 0..12 {
+            // exceed capacity intentionally
+            r.record_delete(format!("d{i}"));
+        }
+        assert_eq!(r.numbered().len(), Registers::MAX);
+        // Newest at 0
+        assert_eq!(r.numbered()[0], "d11");
+        // Oldest retained should be d2 (d0,d1 dropped after overflow)
+        assert_eq!(r.numbered().last().unwrap(), "d2");
+        assert_eq!(r.unnamed, "d11");
+    }
+
+    #[test]
+    fn interleave_yank_delete_ordering() {
+        let mut r = Registers::new();
+        r.record_yank("y1");
+        r.record_delete("d1");
+        r.record_yank("y2");
+        let ring: Vec<_> = r.numbered().iter().map(|s| s.as_str()).collect();
+        assert_eq!(ring, vec!["y2", "d1", "y1"]);
+        assert_eq!(r.unnamed, "y2");
     }
 }
