@@ -41,6 +41,8 @@ pub struct RenderPathMetrics {
     pub scroll_region_shifts: AtomicU64,
     /// Total lines saved from repaint due to scroll shift optimization.
     pub scroll_region_lines_saved: AtomicU64,
+    /// Scroll shift attempts that degraded to a full repaint (Step 10 interim safeguard).
+    pub scroll_shift_degraded_full: AtomicU64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +62,7 @@ pub struct RenderPathMetricsSnapshot {
     pub cells_printed: u64,
     pub scroll_region_shifts: u64,
     pub scroll_region_lines_saved: u64,
+    pub scroll_shift_degraded_full: u64,
 }
 
 impl RenderPathMetrics {
@@ -80,6 +83,7 @@ impl RenderPathMetrics {
             cells_printed: self.cells_printed.load(Ordering::Relaxed),
             scroll_region_shifts: self.scroll_region_shifts.load(Ordering::Relaxed),
             scroll_region_lines_saved: self.scroll_region_lines_saved.load(Ordering::Relaxed),
+            scroll_shift_degraded_full: self.scroll_shift_degraded_full.load(Ordering::Relaxed),
         }
     }
 }
