@@ -294,7 +294,121 @@ pub fn dispatch(
                     state.registers_mut().record_yank(collected);
                     DispatchResult::clean()
                 }
-                OperatorKind::Change => DispatchResult::clean(), // Step 8
+                OperatorKind::Change => {
+                    // Change = Delete span then enter Insert at span start.
+                    use crate::span_resolver::resolve_span;
+                    let start_pos = view.cursor;
+                    let vertical = matches!(
+                        motion,
+                        crate::MotionKind::Up
+                            | crate::MotionKind::Down
+                            | crate::MotionKind::PageHalfUp
+                            | crate::MotionKind::PageHalfDown
+                    );
+                    if vertical {
+                        // Replay vertical motion to compute inclusive line range identical to Delete.
+                        let buf = state.active_buffer();
+                        let mut tmp = start_pos;
+                        for _ in 0..count.max(1) {
+                            match motion {
+                                crate::MotionKind::Up => {
+                                    let _ = core_text::motion::up(buf, &mut tmp, None);
+                                }
+                                crate::MotionKind::Down => {
+                                    let _ = core_text::motion::down(buf, &mut tmp, None);
+                                }
+                                crate::MotionKind::PageHalfUp => {
+                                    let _ = core_text::motion::up(buf, &mut tmp, None);
+                                }
+                                crate::MotionKind::PageHalfDown => {
+                                    let _ = core_text::motion::down(buf, &mut tmp, None);
+                                }
+                                _ => {}
+                            }
+                        }
+                        let line_start = start_pos.line.min(tmp.line);
+                        let line_end = start_pos.line.max(tmp.line);
+                        let buffer = state.active_buffer();
+                        let mut abs_start = 0usize;
+                        for l in 0..line_start {
+                            abs_start += buffer.line_byte_len(l);
+                            if let Some(s) = buffer.line(l)
+                                && s.ends_with('\n')
+                            {
+                                abs_start += 1;
+                            }
+                        }
+                        let mut abs_after_last = abs_start;
+                        for l in line_start..=line_end {
+                            abs_after_last += buffer.line_byte_len(l);
+                            if let Some(s) = buffer.line(l)
+                                && s.ends_with('\n')
+                            {
+                                abs_after_last += 1;
+                            }
+                        }
+                        if abs_start == abs_after_last {
+                            return DispatchResult::clean();
+                        }
+                        let mut cursor = view.cursor;
+                        let removed =
+                            state.delete_span_with_snapshot(&mut cursor, abs_start, abs_after_last);
+                        let structural = line_end > line_start || removed.contains('\n');
+                        state.registers_mut().record_delete(removed);
+                        // For change we enter Insert at original start of span (line_start, col 0)
+                        view.cursor.line = line_start;
+                        view.cursor.byte = 0;
+                        state.mode = core_state::Mode::Insert;
+                        if !state.dirty {
+                            state.dirty = true;
+                        }
+                        if structural {
+                            DispatchResult::buffer_replaced()
+                        } else {
+                            DispatchResult::dirty()
+                        }
+                    } else {
+                        let span = resolve_span(state, start_pos, motion, count);
+                        if span.start == span.end {
+                            return DispatchResult::clean();
+                        }
+                        let mut cursor = view.cursor;
+                        let removed =
+                            state.delete_span_with_snapshot(&mut cursor, span.start, span.end);
+                        let structural = removed.contains('\n');
+                        state.registers_mut().record_delete(removed);
+                        // Map absolute byte index span.start back to (line, byte)
+                        let buffer = state.active_buffer();
+                        let mut abs = 0usize;
+                        let mut new_line = 0usize;
+                        let mut new_byte = 0usize;
+                        'outer: for l in 0..buffer.line_count() {
+                            let mut line_total = buffer.line_byte_len(l);
+                            if let Some(s) = buffer.line(l)
+                                && s.ends_with('\n')
+                            {
+                                line_total += 1;
+                            }
+                            if abs + line_total > span.start {
+                                new_line = l;
+                                new_byte = span.start - abs;
+                                break 'outer;
+                            }
+                            abs += line_total;
+                        }
+                        view.cursor.line = new_line;
+                        view.cursor.byte = new_byte;
+                        state.mode = core_state::Mode::Insert;
+                        if !state.dirty {
+                            state.dirty = true;
+                        }
+                        if structural {
+                            DispatchResult::buffer_replaced()
+                        } else {
+                            DispatchResult::dirty()
+                        }
+                    }
+                }
             }
         }
     }
@@ -1073,6 +1187,96 @@ mod tests {
         };
         assert_eq!(after, pre);
         assert!(model.state().registers.unnamed.contains("one two"));
+    }
+
+    // Change operator tests (Step 8)
+    fn change_sequence(model: &mut EditorModel, seq: &str) -> Action {
+        let mut last = None;
+        for ch in seq.chars() {
+            let evt = KeyEvent {
+                code: KeyCode::Char(ch),
+                mods: KeyModifiers::empty(),
+            };
+            last = crate::translate_key(
+                model.state().mode,
+                model.state().command_line.buffer(),
+                &evt,
+            );
+        }
+        last.expect("sequence produced final action")
+    }
+
+    #[test]
+    fn operator_change_basic_cw() {
+        let buffer = Buffer::from_str("t", "one two three\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let act = change_sequence(&mut model, "cw");
+        let mut sticky = None;
+        let res = dispatch(act, &mut model, &mut sticky, &[]);
+        assert!(res.dirty);
+        assert_eq!(model.state().mode, core_state::Mode::Insert);
+        assert!(model.state().registers.unnamed.contains("one"));
+        // Buffer should have removed first word only (current resolver yields remaining without leading space)
+        let after_line = model.state().active_buffer().line(0).unwrap();
+        assert!(after_line.starts_with("two"));
+    }
+
+    #[test]
+    fn operator_change_prefix_count_2cw() {
+        let buffer = Buffer::from_str("t", "one two three four\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let act = change_sequence(&mut model, "2cw");
+        let mut sticky = None;
+        dispatch(act, &mut model, &mut sticky, &[]);
+        assert_eq!(model.state().mode, core_state::Mode::Insert);
+        let after_line = model.state().active_buffer().line(0).unwrap();
+        // two words removed -> remaining starts with third word directly
+        assert!(after_line.starts_with("three"));
+    }
+
+    #[test]
+    fn operator_change_post_count_c2w() {
+        let buffer = Buffer::from_str("t", "one two three four\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let act = change_sequence(&mut model, "c2w");
+        let mut sticky = None;
+        dispatch(act, &mut model, &mut sticky, &[]);
+        assert_eq!(model.state().mode, core_state::Mode::Insert);
+        let after_line = model.state().active_buffer().line(0).unwrap();
+        assert!(after_line.starts_with("three"));
+    }
+
+    #[test]
+    fn operator_change_linewise_cj() {
+        let buffer = Buffer::from_str("t", "l1\nl2\nl3\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let act = change_sequence(&mut model, "cj");
+        let mut sticky = None;
+        let res = dispatch(act, &mut model, &mut sticky, &[]);
+        assert!(res.buffer_replaced);
+        assert_eq!(model.state().mode, core_state::Mode::Insert);
+        // first two lines removed; resulting first line expected to be l3
+        let after_line0 = model.state().active_buffer().line(0).unwrap();
+        assert!(after_line0.starts_with("l3"));
+    }
+
+    #[test]
+    fn operator_change_linewise_prefix_2cj() {
+        let buffer = Buffer::from_str("t", "a1\na2\na3\na4\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let act = change_sequence(&mut model, "2cj");
+        let mut sticky = None;
+        let res = dispatch(act, &mut model, &mut sticky, &[]);
+        assert!(res.buffer_replaced);
+        assert_eq!(model.state().mode, core_state::Mode::Insert);
+        let after_line0 = model.state().active_buffer().line(0).unwrap();
+        // Inclusive vertical motion semantics: prefix count 2 with motion j deletes lines a1..a3, leaving a4
+        assert!(after_line0.starts_with("a4"));
     }
 
     #[test]

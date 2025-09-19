@@ -29,6 +29,7 @@ struct Case<'a> {
     keys: &'a str,
     expect_structural: bool,
     is_yank: bool,
+    is_change: bool,
 }
 
 #[test]
@@ -40,6 +41,7 @@ fn delete_motion_matrix() {
             keys: "dw",
             expect_structural: false,
             is_yank: false,
+            is_change: false,
         },
         Case {
             name: "2dw_charwise",
@@ -47,6 +49,7 @@ fn delete_motion_matrix() {
             keys: "2dw",
             expect_structural: false,
             is_yank: false,
+            is_change: false,
         },
         Case {
             name: "dj_linewise_two_lines",
@@ -54,6 +57,7 @@ fn delete_motion_matrix() {
             keys: "dj",
             expect_structural: true,
             is_yank: false,
+            is_change: false,
         },
         Case {
             name: "2dj_linewise_three_lines",
@@ -61,6 +65,7 @@ fn delete_motion_matrix() {
             keys: "2dj",
             expect_structural: true,
             is_yank: false,
+            is_change: false,
         },
         Case {
             name: "d2j_linewise_three_lines",
@@ -68,6 +73,7 @@ fn delete_motion_matrix() {
             keys: "d2j",
             expect_structural: true,
             is_yank: false,
+            is_change: false,
         },
         // Yank cases
         Case {
@@ -76,6 +82,7 @@ fn delete_motion_matrix() {
             keys: "yw",
             expect_structural: false,
             is_yank: true,
+            is_change: false,
         },
         Case {
             name: "2yw_charwise",
@@ -83,6 +90,7 @@ fn delete_motion_matrix() {
             keys: "2yw",
             expect_structural: false,
             is_yank: true,
+            is_change: false,
         },
         Case {
             name: "yj_linewise_two_lines",
@@ -90,6 +98,7 @@ fn delete_motion_matrix() {
             keys: "yj",
             expect_structural: false,
             is_yank: true,
+            is_change: false,
         },
         Case {
             name: "2yj_linewise_three_lines",
@@ -97,6 +106,40 @@ fn delete_motion_matrix() {
             keys: "2yj",
             expect_structural: false,
             is_yank: true,
+            is_change: false,
+        },
+        // Change cases
+        Case {
+            name: "cw_charwise",
+            text: "one two three\n",
+            keys: "cw",
+            expect_structural: false,
+            is_yank: false,
+            is_change: true,
+        },
+        Case {
+            name: "2cw_charwise",
+            text: "one two three four\n",
+            keys: "2cw",
+            expect_structural: false,
+            is_yank: false,
+            is_change: true,
+        },
+        Case {
+            name: "cj_linewise_two_lines",
+            text: "l1\nl2\nl3\n",
+            keys: "cj",
+            expect_structural: true,
+            is_yank: false,
+            is_change: true,
+        },
+        Case {
+            name: "2cj_linewise_three_lines",
+            text: "a1\na2\na3\na4\n",
+            keys: "2cj",
+            expect_structural: true,
+            is_yank: false,
+            is_change: true,
         },
     ];
 
@@ -114,6 +157,9 @@ fn delete_motion_matrix() {
         );
         if case.is_yank {
             assert!(!res.dirty, "yank should not dirty buffer");
+        }
+        if case.is_change {
+            assert!(res.dirty, "change must dirty buffer");
         }
     }
 }

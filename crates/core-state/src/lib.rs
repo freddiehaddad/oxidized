@@ -97,7 +97,7 @@ impl Registers {
 // (Undo snapshot types moved to undo module)
 
 /// Current editor mode.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     /// Normal command/navigation mode.
     Normal,
