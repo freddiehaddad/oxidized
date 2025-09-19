@@ -126,22 +126,90 @@ pub fn dispatch(
             use crate::span_resolver::resolve_span;
             match op {
                 OperatorKind::Delete => {
-                    // Resolve span from current cursor
+                    // Step 6.2: Linewise vertical delete semantics.
+                    // If motion is vertical (Up/Down/PageHalfUp/PageHalfDown) treat the
+                    // operator as *linewise*: delete whole lines from the starting line
+                    // through the target line inclusive. Otherwise use character span.
                     let start_pos = view.cursor;
-                    let span = resolve_span(state, start_pos, motion, count);
-                    if span.start == span.end {
-                        return DispatchResult::clean();
+                    let vertical = matches!(
+                        motion,
+                        crate::MotionKind::Up
+                            | crate::MotionKind::Down
+                            | crate::MotionKind::PageHalfUp
+                            | crate::MotionKind::PageHalfDown
+                    );
+                    if vertical {
+                        // Replay motion count times on a temp cursor to find target line.
+                        let buf = state.active_buffer();
+                        let mut tmp = start_pos;
+                        for _ in 0..count.max(1) {
+                            match motion {
+                                crate::MotionKind::Up => {
+                                    let _ = core_text::motion::up(buf, &mut tmp, None);
+                                }
+                                crate::MotionKind::Down => {
+                                    let _ = core_text::motion::down(buf, &mut tmp, None);
+                                }
+                                crate::MotionKind::PageHalfUp => {
+                                    let _ = core_text::motion::up(buf, &mut tmp, None);
+                                }
+                                crate::MotionKind::PageHalfDown => {
+                                    let _ = core_text::motion::down(buf, &mut tmp, None);
+                                }
+                                _ => {}
+                            }
+                        }
+                        let line_start = start_pos.line.min(tmp.line);
+                        let line_end = start_pos.line.max(tmp.line);
+                        // Compute absolute byte start of first line and start of line after last.
+                        let buffer = state.active_buffer();
+                        let mut abs_start = 0usize;
+                        for l in 0..line_start {
+                            abs_start += buffer.line_byte_len(l);
+                            if let Some(s) = buffer.line(l)
+                                && s.ends_with('\n')
+                            {
+                                abs_start += 1;
+                            }
+                        }
+                        let mut abs_after_last = abs_start;
+                        for l in line_start..=line_end {
+                            abs_after_last += buffer.line_byte_len(l);
+                            if let Some(s) = buffer.line(l)
+                                && s.ends_with('\n')
+                            {
+                                abs_after_last += 1;
+                            }
+                        }
+                        if abs_start == abs_after_last {
+                            return DispatchResult::clean();
+                        }
+                        let mut cursor = view.cursor;
+                        let removed =
+                            state.delete_span_with_snapshot(&mut cursor, abs_start, abs_after_last);
+                        state.registers_mut().record_delete(removed);
+                        view.cursor = cursor; // positioned at start of first removed line
+                        if !state.dirty {
+                            state.dirty = true;
+                        }
+                        // Structural: multiple lines may have shifted; request full repaint via dirty flag only for now.
+                        DispatchResult::dirty()
+                    } else {
+                        // Characterwise path (existing semantics)
+                        let span = resolve_span(state, start_pos, motion, count);
+                        if span.start == span.end {
+                            return DispatchResult::clean();
+                        }
+                        let mut cursor = view.cursor; // copy for deletion API
+                        let removed =
+                            state.delete_span_with_snapshot(&mut cursor, span.start, span.end);
+                        state.registers_mut().record_delete(removed);
+                        view.cursor = cursor;
+                        if !state.dirty {
+                            state.dirty = true;
+                        }
+                        DispatchResult::dirty()
                     }
-                    let mut cursor = view.cursor; // copy for deletion API
-                    let removed =
-                        state.delete_span_with_snapshot(&mut cursor, span.start, span.end);
-                    // Update registers
-                    state.registers_mut().record_delete(removed);
-                    view.cursor = cursor; // apply updated cursor
-                    if !state.dirty {
-                        state.dirty = true;
-                    }
-                    DispatchResult::dirty()
                 }
                 _ => DispatchResult::clean(), // Yank/Change later steps
             }
@@ -634,5 +702,101 @@ mod tests {
         }
         dispatch(act, &mut model, &mut sticky, &[]);
         assert!(!model.state().registers.unnamed.is_empty());
+    }
+
+    // --- Step 6.2 tests: linewise vertical delete ---
+
+    #[test]
+    fn operator_delete_dj_linewise_two_lines() {
+        let text = "l1\nl2\nl3\nl4\n"; // trailing newline
+        let buffer = Buffer::from_str("t", text).unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // d
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('d'),
+        );
+        // j
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('j'),
+        )
+        .unwrap();
+        if let Action::ApplyOperator { motion, .. } = act {
+            assert!(matches!(motion, MotionKind::Down));
+        }
+        dispatch(act, &mut model, &mut sticky, &[]);
+        // Expect lines l3,l4 remain
+        let b = model.state().active_buffer();
+        assert_eq!(b.line(0).unwrap(), "l3\n");
+        assert_eq!(b.line(1).unwrap(), "l4\n");
+        // ring contains deleted text (l1 + l2 + newline)
+        assert!(model.state().registers.unnamed.contains("l1\nl2\n"));
+    }
+
+    #[test]
+    fn operator_delete_2dj_linewise_three_lines() {
+        let text = "a1\na2\na3\na4\na5\n";
+        let buffer = Buffer::from_str("t", text).unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // 2 d j -> should delete three lines total (current + two down) since motion Down with count 2 reaches line index 2 inclusive (a1,a2,a3)
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('2'),
+        );
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('d'),
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('j'),
+        )
+        .unwrap();
+        dispatch(act, &mut model, &mut sticky, &[]);
+        let b = model.state().active_buffer();
+        assert_eq!(b.line(0).unwrap(), "a4\n");
+        assert_eq!(b.line(1).unwrap(), "a5\n");
+        assert!(model.state().registers.unnamed.starts_with("a1\na2\na3"));
+    }
+
+    #[test]
+    fn operator_delete_d2j_linewise_three_lines() {
+        let text = "b1\nb2\nb3\nb4\nb5\n";
+        let buffer = Buffer::from_str("t", text).unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // d 2 j -> post operator count
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('d'),
+        );
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('2'),
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('j'),
+        )
+        .unwrap();
+        dispatch(act, &mut model, &mut sticky, &[]);
+        let b = model.state().active_buffer();
+        assert_eq!(b.line(0).unwrap(), "b4\n");
+        assert_eq!(b.line(1).unwrap(), "b5\n");
+        assert!(model.state().registers.unnamed.starts_with("b1\nb2\nb3"));
     }
 }
