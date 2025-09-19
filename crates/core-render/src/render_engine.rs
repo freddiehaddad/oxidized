@@ -533,8 +533,10 @@ impl RenderEngine {
         self.last_cursor = meta;
     }
 
-    /// Temporary full-frame translation using Writer (Step 6). Keeps behavior identical
-    /// to legacy Renderer::render while establishing the abstraction for later partial path.
+    /// Full-frame translation using Writer (originally introduced in Step 6 as a
+    /// temporary bridge). Legacy `Renderer` removed in Refactor R3 Step 12; this now
+    /// serves as the canonical full-frame emission path (until scroll-region +
+    /// diff optimizations arrive). Behavior remains stable and parity-tested.
     fn render_via_writer(&self, frame: &Frame) -> Result<(u64, u64)> {
         // Step 6.1 hotfix: row-major iteration with explicit MoveTo at each row start
         // eliminates reliance on terminal implicit wrap behavior (prevents content

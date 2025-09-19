@@ -182,7 +182,7 @@ Proceeding with R3 reduces complexity for all Phase 4 tracks, confines structura
 - [x] Step 11 – Metrics command stub (2025-09-18) – implemented `:metrics` handling (ephemeral "Metrics OK") and added execution test; no metrics snapshot yet (deferred to Phase 4).
 - [x] Step 12 – Legacy Renderer removal (2025-09-18) – removed obsolete full-frame `Renderer` struct and render routine from `core-render::lib`; all rendering paths consolidated under `RenderEngine` + writer abstraction (full + partial). Eliminates dead code and focuses future optimization work in a single engine.
 - [x] Step 13 – Documentation pass (2025-09-18) – updated crate-level rustdocs (core-actions, core-render, core-state, core-model, core-terminal) to reflect dispatcher modularization, KeyTranslator scaffold, UndoEngine extraction, Layout & TerminalCapabilities scaffolds, and removal of legacy renderer. Aligns public-facing documentation with current architecture for Phase 4 readiness.
-- [ ] Step 14 – Quality gate & closure
+- [x] Step 14 – Quality gate & closure (2025-09-18) – final sweep removed stale legacy Renderer comment, re-ran full quality gates (fmt, clippy -D warnings, nextest all green). R3 exits with zero known regressions, unified RenderEngine path, and scaffolds (Layout, TerminalCapabilities, KeyTranslator, operator variants, metrics command stub) in place for Phase 4.
 
 ## 12. Notes
 
