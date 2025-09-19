@@ -110,3 +110,38 @@ fn handle_write(state: &mut EditorState) -> DispatchResult {
     }
     DispatchResult::dirty()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Action;
+    use core_text::Buffer;
+
+    // Helper to construct minimal editor state + view for command tests
+    fn mk_state() -> (EditorState, core_model::View) {
+        let st = EditorState::new(Buffer::from_str("test", "abc\n").unwrap());
+        let view = core_model::View::new(core_model::ViewId(0), st.active, Position::origin(), 0);
+        (st, view)
+    }
+
+    #[test]
+    fn metrics_command_sets_ephemeral() {
+        let (mut st, mut view) = mk_state();
+        // Simulate entering command mode then executing :metrics
+        let _ = handle_command_action(Action::CommandStart, &mut st, &mut view);
+        let res = handle_command_action(
+            Action::CommandExecute(":metrics".to_string()),
+            &mut st,
+            &mut view,
+        );
+        assert!(
+            res.dirty,
+            "metrics command should mark dirty for status repaint"
+        );
+        assert!(
+            st.ephemeral_status.is_some(),
+            "ephemeral status should be set"
+        );
+        assert_eq!(st.ephemeral_status.as_ref().unwrap().text, "Metrics OK");
+    }
+}
