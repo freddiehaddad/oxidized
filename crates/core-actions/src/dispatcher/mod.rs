@@ -183,7 +183,13 @@ pub fn dispatch(
                         let removed =
                             state.delete_span_with_snapshot(&mut cursor, abs_start, abs_after_last);
                         let structural = line_end > line_start || removed.contains('\n');
-                        state.registers_mut().record_delete(removed);
+                        let metrics_ptr: *mut _ = state.operator_metrics_mut();
+                        unsafe {
+                            (*metrics_ptr).incr_delete();
+                        }
+                        // Safe because we have exclusive &mut state in scope; raw pointer used to avoid borrow overlap.
+                        let metrics_ref = unsafe { &mut *metrics_ptr };
+                        state.registers_mut().record_delete(removed, metrics_ref);
                         view.cursor = cursor;
                         if !state.dirty {
                             state.dirty = true;
@@ -203,7 +209,12 @@ pub fn dispatch(
                         let removed =
                             state.delete_span_with_snapshot(&mut cursor, span.start, span.end);
                         let structural = removed.contains('\n');
-                        state.registers_mut().record_delete(removed);
+                        let metrics_ptr: *mut _ = state.operator_metrics_mut();
+                        unsafe {
+                            (*metrics_ptr).incr_delete();
+                        }
+                        let metrics_ref = unsafe { &mut *metrics_ptr };
+                        state.registers_mut().record_delete(removed, metrics_ref);
                         view.cursor = cursor;
                         if !state.dirty {
                             state.dirty = true;
@@ -257,7 +268,12 @@ pub fn dispatch(
                                     break;
                                 }
                             }
-                            state.registers_mut().record_yank(collected);
+                            let metrics_ptr: *mut _ = state.operator_metrics_mut();
+                            unsafe {
+                                (*metrics_ptr).incr_yank();
+                            }
+                            let metrics_ref = unsafe { &mut *metrics_ptr };
+                            state.registers_mut().record_yank(collected, metrics_ref);
                             return DispatchResult::clean();
                         }
                     }
@@ -291,7 +307,12 @@ pub fn dispatch(
                         collected.push_str(&line[local_start..local_end]);
                         abs = line_end_abs;
                     }
-                    state.registers_mut().record_yank(collected);
+                    let metrics_ptr: *mut _ = state.operator_metrics_mut();
+                    unsafe {
+                        (*metrics_ptr).incr_yank();
+                    }
+                    let metrics_ref = unsafe { &mut *metrics_ptr };
+                    state.registers_mut().record_yank(collected, metrics_ref);
                     DispatchResult::clean()
                 }
                 OperatorKind::Change => {
@@ -354,7 +375,12 @@ pub fn dispatch(
                         let removed =
                             state.delete_span_with_snapshot(&mut cursor, abs_start, abs_after_last);
                         let structural = line_end > line_start || removed.contains('\n');
-                        state.registers_mut().record_delete(removed);
+                        let metrics_ptr: *mut _ = state.operator_metrics_mut();
+                        unsafe {
+                            (*metrics_ptr).incr_change();
+                        }
+                        let metrics_ref = unsafe { &mut *metrics_ptr };
+                        state.registers_mut().record_delete(removed, metrics_ref);
                         // For change we enter Insert at original start of span (line_start, col 0)
                         view.cursor.line = line_start;
                         view.cursor.byte = 0;
@@ -376,7 +402,12 @@ pub fn dispatch(
                         let removed =
                             state.delete_span_with_snapshot(&mut cursor, span.start, span.end);
                         let structural = removed.contains('\n');
-                        state.registers_mut().record_delete(removed);
+                        let metrics_ptr: *mut _ = state.operator_metrics_mut();
+                        unsafe {
+                            (*metrics_ptr).incr_change();
+                        }
+                        let metrics_ref = unsafe { &mut *metrics_ptr };
+                        state.registers_mut().record_delete(removed, metrics_ref);
                         // Map absolute byte index span.start back to (line, byte)
                         let buffer = state.active_buffer();
                         let mut abs = 0usize;
@@ -1277,6 +1308,88 @@ mod tests {
         let after_line0 = model.state().active_buffer().line(0).unwrap();
         // Inclusive vertical motion semantics: prefix count 2 with motion j deletes lines a1..a3, leaving a4
         assert!(after_line0.starts_with("a4"));
+    }
+
+    #[test]
+    fn operator_metrics_delete_yank_change_counts() {
+        let buffer = Buffer::from_str("t", "one two three\nalpha beta gamma\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // d w
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('d'),
+        );
+        let act_del = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('w'),
+        )
+        .unwrap();
+        dispatch(act_del, &mut model, &mut sticky, &[]);
+        // y w
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('y'),
+        );
+        let act_yank = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('w'),
+        )
+        .unwrap();
+        dispatch(act_yank, &mut model, &mut sticky, &[]);
+        // c w
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('c'),
+        );
+        let act_change = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('w'),
+        )
+        .unwrap();
+        dispatch(act_change, &mut model, &mut sticky, &[]);
+        let snap = model.state().operator_metrics_snapshot();
+        assert_eq!(snap.operator_delete, 1);
+        assert_eq!(snap.operator_yank, 1);
+        assert_eq!(snap.operator_change, 1);
+        // At least three register writes (one per op) though change/delete may rotate.
+        assert!(snap.register_writes >= 3);
+    }
+
+    #[test]
+    fn operator_metrics_numbered_ring_rotation() {
+        // Build buffer with many distinct words so each yank is unique
+        let text = "w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12\n";
+        let buffer = Buffer::from_str("t", text).unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // Perform more than ring capacity yanks (Registers::MAX == 10)
+        for _ in 0..12 {
+            translate_key(
+                model.state().mode,
+                model.state().command_line.buffer(),
+                &key('y'),
+            );
+            let act = translate_key(
+                model.state().mode,
+                model.state().command_line.buffer(),
+                &key('w'),
+            )
+            .unwrap();
+            dispatch(act, &mut model, &mut sticky, &[]);
+        }
+        let snap = model.state().operator_metrics_snapshot();
+        assert_eq!(snap.operator_yank, 12);
+        // Rotations should be >= (yanks - capacity) i.e. at least 2
+        assert!(snap.numbered_ring_rotations >= 2);
     }
 
     #[test]

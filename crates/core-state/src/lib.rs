@@ -56,6 +56,54 @@ pub struct Registers {
     numbered: Vec<String>, // newest at index 0, length <= 10
 }
 
+// Phase 4 Step 9: Operator & register metrics counters
+// Breadth-first: simple non-atomic u64 fields mutated on dispatcher thread only.
+// Future async multi-producer (multi-view) scenario can upgrade to atomics.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct OperatorMetricsSnapshot {
+    pub operator_delete: u64,
+    pub operator_yank: u64,
+    pub operator_change: u64,
+    pub register_writes: u64,
+    pub numbered_ring_rotations: u64,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct OperatorMetrics {
+    operator_delete: u64,
+    operator_yank: u64,
+    operator_change: u64,
+    register_writes: u64,
+    numbered_ring_rotations: u64,
+}
+
+impl OperatorMetrics {
+    pub fn snapshot(&self) -> OperatorMetricsSnapshot {
+        OperatorMetricsSnapshot {
+            operator_delete: self.operator_delete,
+            operator_yank: self.operator_yank,
+            operator_change: self.operator_change,
+            register_writes: self.register_writes,
+            numbered_ring_rotations: self.numbered_ring_rotations,
+        }
+    }
+    pub fn incr_delete(&mut self) {
+        self.operator_delete += 1;
+    }
+    pub fn incr_yank(&mut self) {
+        self.operator_yank += 1;
+    }
+    pub fn incr_change(&mut self) {
+        self.operator_change += 1;
+    }
+    pub fn note_register_write(&mut self, rotated: bool) {
+        self.register_writes += 1;
+        if rotated {
+            self.numbered_ring_rotations += 1;
+        }
+    }
+}
+
 impl Registers {
     pub const MAX: usize = 10; // ring capacity
 
@@ -67,17 +115,19 @@ impl Registers {
     }
 
     /// Push a yank (non-destructive copy). Mirrors into unnamed and ring[0].
-    pub fn record_yank<S: Into<String>>(&mut self, text: S) {
+    pub fn record_yank<S: Into<String>>(&mut self, text: S, metrics: &mut OperatorMetrics) {
         let s = text.into();
         self.unnamed = s.clone();
-        self.unshift_numbered(s);
+        let rotated = self.unshift_numbered(s);
+        metrics.note_register_write(rotated);
     }
 
     /// Push a delete/change (destructive). Semantics identical for ring/unnamed at this stage.
-    pub fn record_delete<S: Into<String>>(&mut self, text: S) {
+    pub fn record_delete<S: Into<String>>(&mut self, text: S, metrics: &mut OperatorMetrics) {
         let s = text.into();
         self.unnamed = s.clone();
-        self.unshift_numbered(s);
+        let rotated = self.unshift_numbered(s);
+        metrics.note_register_write(rotated);
     }
 
     /// Return immutable slice of numbered ring (newest first).
@@ -85,12 +135,13 @@ impl Registers {
         &self.numbered
     }
 
-    fn unshift_numbered(&mut self, s: String) {
-        if self.numbered.len() == Self::MAX {
-            // Drop the oldest (tail) to keep capacity.
+    fn unshift_numbered(&mut self, s: String) -> bool {
+        let rotated = self.numbered.len() == Self::MAX;
+        if rotated {
             self.numbered.pop();
         }
         self.numbered.insert(0, s);
+        rotated
     }
 }
 
@@ -120,6 +171,7 @@ pub struct EditorState {
     pub had_trailing_newline: bool,
     pub config_vertical_margin: usize,
     pub registers: Registers, // Phase 4 Step 3 scaffold now integrated (Step 6 uses delete)
+    pub operator_metrics: OperatorMetrics, // Phase 4 Step 9 counters
 }
 
 /// Line ending style detected from source file (Phase 2 Step 9).
@@ -307,6 +359,7 @@ impl EditorState {
             had_trailing_newline: false,
             config_vertical_margin: 0,
             registers: Registers::new(),
+            operator_metrics: OperatorMetrics::default(),
         }
     }
 
@@ -461,6 +514,16 @@ impl EditorState {
     /// Mutable access to registers (operators populate these)
     pub fn registers_mut(&mut self) -> &mut Registers {
         &mut self.registers
+    }
+
+    /// Access operator/register metrics (mutable for instrumentation).
+    pub fn operator_metrics_mut(&mut self) -> &mut OperatorMetrics {
+        &mut self.operator_metrics
+    }
+
+    /// Snapshot current operator/register metrics.
+    pub fn operator_metrics_snapshot(&self) -> OperatorMetricsSnapshot {
+        self.operator_metrics.snapshot()
     }
 }
 
@@ -1003,12 +1066,13 @@ fn absolute_position(buffer: &Buffer, abs: usize) -> Position {
 
 #[cfg(test)]
 mod register_tests {
-    use super::Registers;
+    use super::{OperatorMetrics, Registers};
 
     #[test]
     fn yank_populates_unnamed_and_ring() {
         let mut r = Registers::new();
-        r.record_yank("alpha");
+        let mut m = OperatorMetrics::default();
+        r.record_yank("alpha", &mut m);
         assert_eq!(r.unnamed, "alpha");
         assert_eq!(r.numbered(), &["alpha".to_string()]);
     }
@@ -1016,9 +1080,10 @@ mod register_tests {
     #[test]
     fn delete_rotates_ring_capped() {
         let mut r = Registers::new();
+        let mut m = OperatorMetrics::default();
         for i in 0..12 {
             // exceed capacity intentionally
-            r.record_delete(format!("d{i}"));
+            r.record_delete(format!("d{i}"), &mut m);
         }
         assert_eq!(r.numbered().len(), Registers::MAX);
         // Newest at 0
@@ -1031,9 +1096,10 @@ mod register_tests {
     #[test]
     fn interleave_yank_delete_ordering() {
         let mut r = Registers::new();
-        r.record_yank("y1");
-        r.record_delete("d1");
-        r.record_yank("y2");
+        let mut m = OperatorMetrics::default();
+        r.record_yank("y1", &mut m);
+        r.record_delete("d1", &mut m);
+        r.record_yank("y2", &mut m);
         let ring: Vec<_> = r.numbered().iter().map(|s| s.as_str()).collect();
         assert_eq!(ring, vec!["y2", "d1", "y1"]);
         assert_eq!(r.unnamed, "y2");
