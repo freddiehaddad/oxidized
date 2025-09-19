@@ -27,6 +27,7 @@ use core_state::Mode;
 
 mod key_translator;
 use key_translator::KeyTranslator;
+pub mod span_resolver; // Phase 4 Step 4
 
 #[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
