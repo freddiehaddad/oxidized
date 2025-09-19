@@ -373,7 +373,7 @@ mod tests {
             &observers,
         );
         assert_eq!(model.state().active_buffer().line(0).unwrap(), "a");
-        assert_eq!(model.state().undo_stack.len(), 1, "expected first snapshot");
+        assert_eq!(model.state().undo_depth(), 1, "expected first snapshot");
         // Newline
         dispatch(
             Action::Edit(EditKind::InsertNewline),
@@ -392,7 +392,7 @@ mod tests {
         );
         assert_eq!(model.state().active_buffer().line(1).unwrap(), "b");
         assert_eq!(
-            model.state().undo_stack.len(),
+            model.state().undo_depth(),
             2,
             "expected second snapshot after new run"
         );
@@ -422,11 +422,7 @@ mod tests {
             &observers,
         );
         assert_eq!(model.state().active_buffer().line(0).unwrap(), "ab");
-        assert_eq!(
-            model.state().undo_stack.len(),
-            1,
-            "still single run snapshot"
-        );
+        assert_eq!(model.state().undo_depth(), 1, "still single run snapshot");
         // Backspace
         dispatch(
             Action::Edit(EditKind::Backspace),
@@ -436,7 +432,7 @@ mod tests {
         );
         assert_eq!(model.state().active_buffer().line(0).unwrap(), "a");
         assert_eq!(
-            model.state().undo_stack.len(),
+            model.state().undo_depth(),
             1,
             "backspace should not create new snapshot"
         );
@@ -465,11 +461,7 @@ mod tests {
             &observers,
         );
         assert_eq!(model.state().active_buffer().line(0).unwrap(), "bc");
-        assert_eq!(
-            model.state().undo_stack.len(),
-            1,
-            "snapshot pushed for delete"
-        );
+        assert_eq!(model.state().undo_depth(), 1, "snapshot pushed for delete");
         // Undo
         assert!(dispatch(Action::Undo, &mut model, &mut sticky, &observers).dirty);
         assert_eq!(model.state().active_buffer().line(0).unwrap(), "abc");
@@ -495,7 +487,7 @@ mod tests {
             &observers,
         );
         assert_eq!(model.state().active_buffer().line(0).unwrap(), "cd");
-        assert_eq!(model.state().undo_stack.len(), 2, "two discrete snapshots");
+        assert_eq!(model.state().undo_depth(), 2, "two discrete snapshots");
         // Undo last -> should restore to "bcd" (?) Actually sequence: start abcd -> after first delete bcd -> after second delete cd. Undo should return to bcd.
         assert!(dispatch(Action::Undo, &mut model, &mut sticky, &observers).dirty);
         assert_eq!(model.state().active_buffer().line(0).unwrap(), "bcd");

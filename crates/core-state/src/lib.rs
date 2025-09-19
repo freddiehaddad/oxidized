@@ -24,32 +24,11 @@
 //!   navigation (`motion`) live in the dispatcher; undo/redo spans wrap calls into this module.
 
 use core_text::{Buffer, Position};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::Hasher;
-use std::sync::atomic::{AtomicU64, Ordering};
-use tracing::trace;
+pub mod undo;
+use undo::UndoEngine;
+pub use undo::{InsertRun, SnapshotKind, UNDO_HISTORY_MAX};
 
-/// Maximum number of snapshots retained in undo history.
-const UNDO_HISTORY_MAX: usize = 200;
-
-/// Snapshot classification controlling restore semantics.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SnapshotKind {
-    /// Text edit snapshot (coalesced insert run or discrete edit). Mode is not restored.
-    Edit,
-    // Future: ModeTransition, Structural, etc.
-}
-
-/// A full-state snapshot for undo/redo (Phase 1: coarse clone for simplicity).
-#[derive(Clone)]
-pub struct EditSnapshot {
-    pub kind: SnapshotKind,
-    pub buffer: Buffer,
-    pub position: Position,
-    pub mode: Mode,
-    /// Content hash of the buffer at snapshot capture (Phase 3 Step 11).
-    pub hash: u64,
-}
+// (Undo snapshot types moved to undo module)
 
 /// Current editor mode.
 #[derive(Debug, Clone, Copy)]
@@ -68,16 +47,12 @@ pub struct EditorState {
     pub mode: Mode,
     pub file_name: Option<std::path::PathBuf>,
     pub dirty: bool,
-    pub undo_stack: Vec<EditSnapshot>,
-    pub redo_stack: Vec<EditSnapshot>,
-    pub insert_run: InsertRun,
+    undo: UndoEngine,
     pub command_line: CommandLineState,
     pub ephemeral_status: Option<EphemeralMessage>,
     pub original_line_ending: LineEnding,
     pub had_trailing_newline: bool,
     pub config_vertical_margin: usize,
-    /// Count of snapshots skipped due to identical successive state (Phase 3 Step 11).
-    pub undo_snapshots_skipped: AtomicU64,
 }
 
 /// Line ending style detected from source file (Phase 2 Step 9).
@@ -196,18 +171,7 @@ pub fn normalize_line_endings(input: &str) -> NormalizedText {
     }
 }
 
-/// Insert run state tracking (Refactor R1 Step 6).
-///
-/// In Phase 1 this is informational beyond boundary detection and counting edits. Future
-/// heuristics (time-based split, telemetry) can leverage `started_at` and `edits`.
-#[derive(Debug, Clone)]
-pub enum InsertRun {
-    Inactive,
-    Active {
-        started_at: std::time::Instant,
-        edits: u32,
-    },
-}
+// InsertRun moved to undo module
 
 /// Minimal command-line state container (Refactor R1 Step 2).
 /// Breadth-first: only stores raw buffer including leading ':' when active.
@@ -269,15 +233,12 @@ impl EditorState {
             mode: Mode::Normal,
             file_name: None,
             dirty: false,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
-            insert_run: InsertRun::Inactive,
+            undo: UndoEngine::new(),
             command_line: CommandLineState::default(),
             ephemeral_status: None,
             original_line_ending: LineEnding::Lf,
             had_trailing_newline: false,
             config_vertical_margin: 0,
-            undo_snapshots_skipped: AtomicU64::new(0),
         }
     }
 
@@ -326,43 +287,12 @@ impl EditorState {
 
     /// Capture a snapshot of the current editable state (active single buffer only in Phase 1).
     pub fn push_snapshot(&mut self, kind: SnapshotKind, cursor: Position) {
-        let current_hash = buffer_hash(self.active_buffer());
-        if let Some(last) = self.undo_stack.last()
-            && last.hash == current_hash
-        {
-            // Identical successive snapshot -> skip push, increment metric.
-            self.undo_snapshots_skipped.fetch_add(1, Ordering::Relaxed);
-            trace!(
-                undo_depth = self.undo_stack.len(),
-                redo_depth = self.redo_stack.len(),
-                hash = current_hash,
-                "snapshot_dedupe_skip"
-            );
-            return;
-        }
-        let snap = EditSnapshot {
-            kind,
-            buffer: self.active_buffer().clone(),
-            position: cursor,
-            mode: self.mode,
-            hash: current_hash,
-        };
-        let rope_lines_before = self.active_buffer().line_count(); // coarse metric (lines)
-        self.undo_stack.push(snap);
-        trace!(
-            undo_depth = self.undo_stack.len(),
-            redo_depth = self.redo_stack.len(),
-            lines = rope_lines_before,
-            hash = current_hash,
-            "push_snapshot"
-        );
-        if self.undo_stack.len() > UNDO_HISTORY_MAX {
-            let _ = self.undo_stack.remove(0);
-            trace!("undo_stack_trimmed oldest removed");
-        }
-        // New edit invalidates redo stack.
-        self.redo_stack.clear();
-        trace!("redo_stack_cleared_on_new_edit");
+        // Avoid double-borrow of &self by cloning buffer ref first
+        let mode = self.mode;
+        let buf_clone = self.active_buffer().clone();
+        self.undo.push_snapshot(kind, cursor, &buf_clone, mode);
+        // Replace active buffer clone to maintain identical behavior (original implementation cloned internally)
+        self.buffers[self.active] = buf_clone;
     }
 
     /// Begin an Insert-mode coalescing run: push a pre-edit snapshot only once.
@@ -378,16 +308,10 @@ impl EditorState {
     /// an Insert mutation (insert grapheme, backspace, newline) so the pre-edit state is captured
     /// exactly once.
     pub fn begin_insert_coalescing(&mut self, cursor: Position) {
-        match self.insert_run {
-            InsertRun::Inactive => {
-                self.push_snapshot(SnapshotKind::Edit, cursor);
-                self.insert_run = InsertRun::Active {
-                    started_at: std::time::Instant::now(),
-                    edits: 0,
-                };
-            }
-            InsertRun::Active { .. } => { /* already active */ }
-        }
+        let mode = self.mode;
+        let buf_clone = self.active_buffer().clone();
+        self.undo.begin_insert_coalescing(cursor, &buf_clone, mode);
+        self.buffers[self.active] = buf_clone;
     }
 
     /// Ends the current Insert-mode coalescing run. Boundary triggers:
@@ -398,7 +322,7 @@ impl EditorState {
     /// The next Insert mutation will start a new run and thus push a new snapshot via
     /// `begin_insert_coalescing`.
     pub fn end_insert_coalescing(&mut self) {
-        self.insert_run = InsertRun::Inactive;
+        self.undo.end_insert_coalescing();
     }
 
     /// Push a discrete edit snapshot (used for Normal mode edits like `x` or
@@ -411,89 +335,41 @@ impl EditorState {
 
     /// Increment the edit counter for an active insert run (used for diagnostics / future heuristics).
     pub fn note_insert_edit(&mut self) {
-        if let InsertRun::Active { edits, .. } = &mut self.insert_run {
-            *edits += 1;
-        }
+        self.undo.note_insert_edit();
     }
     /// Restore previously captured snapshot (caller ensures existence). Returns true if restored.
     pub fn undo(&mut self, cursor: &mut Position) -> bool {
-        if let Some(last) = self.undo_stack.pop() {
-            trace!(
-                undo_depth = self.undo_stack.len(),
-                redo_depth = self.redo_stack.len(),
-                "undo_pop"
-            );
-            // Push current state to redo before replacing.
-            let current = EditSnapshot {
-                kind: last.kind,
-                buffer: self.active_buffer().clone(),
-                position: *cursor,
-                mode: self.mode,
-                hash: buffer_hash(self.active_buffer()),
-            };
-            self.redo_stack.push(current);
-            trace!(redo_depth = self.redo_stack.len(), "redo_push_from_undo");
-            self.buffers[self.active] = last.buffer;
-            *cursor = last.position;
-            if !matches!(last.kind, SnapshotKind::Edit) {
-                self.mode = last.mode;
-            }
-            true
-        } else {
-            false
-        }
+        let buffer = &mut self.buffers[self.active];
+        self.undo.undo(cursor, buffer, &mut self.mode)
     }
 
     /// Redo previously undone snapshot. Returns true if applied.
     pub fn redo(&mut self, cursor: &mut Position) -> bool {
-        if let Some(next) = self.redo_stack.pop() {
-            trace!(
-                redo_depth = self.redo_stack.len(),
-                undo_depth = self.undo_stack.len(),
-                "redo_pop"
-            );
-            // Save current to undo stack.
-            let current = EditSnapshot {
-                kind: next.kind,
-                buffer: self.active_buffer().clone(),
-                position: *cursor,
-                mode: self.mode,
-                hash: buffer_hash(self.active_buffer()),
-            };
-            self.undo_stack.push(current);
-            trace!(undo_depth = self.undo_stack.len(), "undo_push_from_redo");
-            self.buffers[self.active] = next.buffer;
-            *cursor = next.position;
-            if !matches!(next.kind, SnapshotKind::Edit) {
-                self.mode = next.mode;
-            }
-            true
-        } else {
-            false
-        }
+        let buffer = &mut self.buffers[self.active];
+        self.undo.redo(cursor, buffer, &mut self.mode)
     }
 
     /// Number of successive identical snapshots skipped (Phase 3 Step 11).
     pub fn undo_snapshots_skipped(&self) -> u64 {
-        self.undo_snapshots_skipped.load(Ordering::Relaxed)
+        self.undo.snapshots_skipped()
+    }
+
+    // Test/metrics helpers
+    pub fn undo_depth(&self) -> usize {
+        self.undo.undo_depth()
+    }
+    pub fn redo_depth(&self) -> usize {
+        self.undo.redo_depth()
+    }
+    pub fn insert_run(&self) -> &InsertRun {
+        self.undo.insert_run()
     }
 }
 
-/// Compute a stable hash for the entire buffer content (Phase 3 Step 11).
-/// Simplicity-first implementation concatenates all lines (including newline characters)
-/// into the hasher. Future phases may adopt incremental diffing or rolling hashes.
-fn buffer_hash(buf: &Buffer) -> u64 {
-    let mut h = DefaultHasher::new();
-    let line_count = buf.line_count();
-    for i in 0..line_count {
-        if let Some(l) = buf.line(i) {
-            // includes trailing newline if present
-            h.write(l.as_bytes());
-        }
-    }
-    h.finish()
-}
-
+// Compute a stable hash for the entire buffer content (Phase 3 Step 11).
+// Simplicity-first implementation concatenates all lines (including newline characters)
+// into the hasher. Future phases may adopt incremental diffing or rolling hashes.
+// buffer_hash moved to undo module
 // NOTE (4.11 Deferred): Time-based coalescing for Insert runs is intentionally not implemented yet.
 // Future work: maintain timestamp of last inserted grapheme; if elapsed > THRESHOLD_MS, begin a new coalescing run.
 // This will integrate with an async timer or action producer feeding a boundary Action without blocking input.
@@ -553,10 +429,10 @@ mod tests {
         let mut st = EditorState::new(buf);
         let cursor = Position { line: 0, byte: 0 };
         st.push_snapshot(SnapshotKind::Edit, cursor);
-        let before = st.undo_stack.len();
+        let before = st.undo_depth();
         st.push_snapshot(SnapshotKind::Edit, cursor); // identical state -> skip
         assert_eq!(
-            st.undo_stack.len(),
+            st.undo_depth(),
             before,
             "duplicate snapshot was not skipped"
         );
@@ -580,11 +456,7 @@ mod tests {
             st.buffers[st.active] = modified;
         }
         st.push_snapshot(SnapshotKind::Edit, cursor); // should NOT skip
-        assert_eq!(
-            st.undo_stack.len(),
-            2,
-            "changed snapshot unexpectedly skipped"
-        );
+        assert_eq!(st.undo_depth(), 2, "changed snapshot unexpectedly skipped");
         assert_eq!(
             st.undo_snapshots_skipped(),
             0,
@@ -599,9 +471,9 @@ mod tests {
         let mut cursor = Position { line: 0, byte: 0 };
         st.mode = Mode::Insert;
         st.begin_insert_coalescing(cursor); // should push snapshot
-        let len_after_first = st.undo_stack.len();
+        let len_after_first = st.undo_depth();
         assert_eq!(len_after_first, 1);
-        assert!(matches!(st.insert_run, InsertRun::Active { .. }));
+        assert!(matches!(st.insert_run(), InsertRun::Active { .. }));
 
         // Simulate multiple inserts inside same run (no further snapshots expected)
         for ch in ["a", "b", "c"] {
@@ -611,23 +483,15 @@ mod tests {
             st.begin_insert_coalescing(cursor); // no-op after first
             st.note_insert_edit();
         }
-        assert_eq!(
-            st.undo_stack.len(),
-            1,
-            "coalescing inserted multiple snapshots"
-        );
+        assert_eq!(st.undo_depth(), 1, "coalescing inserted multiple snapshots");
 
         // End run and start new one -> pushes again
         st.end_insert_coalescing();
         st.begin_insert_coalescing(cursor);
         st.note_insert_edit();
-        assert_eq!(
-            st.undo_stack.len(),
-            2,
-            "second run did not create new snapshot"
-        );
-        if let InsertRun::Active { edits, .. } = st.insert_run {
-            assert_eq!(edits, 1);
+        assert_eq!(st.undo_depth(), 2, "second run did not create new snapshot");
+        if let InsertRun::Active { edits, .. } = st.insert_run() {
+            assert_eq!(*edits, 1);
         }
     }
 
@@ -645,12 +509,12 @@ mod tests {
         }
         st.push_snapshot(SnapshotKind::Edit, cursor);
         assert!(st.undo(&mut cursor)); // creates one entry in redo
-        assert_eq!(st.redo_stack.len(), 1);
+        assert_eq!(st.redo_depth(), 1);
 
         // New coalesced run should clear redo stack
         st.mode = Mode::Insert;
         st.begin_insert_coalescing(cursor);
-        assert_eq!(st.redo_stack.len(), 0, "redo stack not cleared on new edit");
+        assert_eq!(st.redo_depth(), 0, "redo stack not cleared on new edit");
     }
 
     #[test]
@@ -666,11 +530,11 @@ mod tests {
             st.buffers[st.active] = modified;
             st.push_snapshot(SnapshotKind::Edit, cursor);
             // ensure length never exceeds cap + 1 transiently (since we remove after push)
-            assert!(st.undo_stack.len() <= UNDO_HISTORY_MAX);
+            assert!(st.undo_depth() <= UNDO_HISTORY_MAX);
             // Reset to allow next iteration to mutate from previous base (simplistic)
             let _ = i; // silence unused warning if any
         }
-        assert_eq!(st.undo_stack.len(), UNDO_HISTORY_MAX);
+        assert_eq!(st.undo_depth(), UNDO_HISTORY_MAX);
     }
 
     #[test]
@@ -695,14 +559,14 @@ mod tests {
             st.begin_insert_coalescing(cursor); // no-op while active
             st.note_insert_edit();
         }
-        if let InsertRun::Active { edits, .. } = st.insert_run {
-            assert_eq!(edits, 2);
+        if let InsertRun::Active { edits, .. } = st.insert_run() {
+            assert_eq!(*edits, 2);
         }
         // End run via Esc boundary semantics
         st.end_insert_coalescing();
         // Simulate Esc leave insert for refined undo semantics
         st.mode = Mode::Normal;
-        assert_eq!(st.undo_stack.len(), 1, "expected single snapshot for run");
+        assert_eq!(st.undo_depth(), 1, "expected single snapshot for run");
         // Perform undo: buffer should become empty again
         assert!(st.undo(&mut cursor));
         assert_eq!(st.active_buffer().line(0).unwrap_or_default(), "");
@@ -773,7 +637,7 @@ mod tests {
             st.buffers[st.active] = modified;
         }
         assert_eq!(
-            st.undo_stack.len(),
+            st.undo_depth(),
             2,
             "expected two snapshots across newline boundary"
         );
@@ -802,13 +666,9 @@ mod tests {
             st.begin_insert_coalescing(cursor); // still active
             st.note_insert_edit();
         }
-        assert_eq!(
-            st.undo_stack.len(),
-            1,
-            "backspace created unexpected snapshot"
-        );
-        if let InsertRun::Active { edits, .. } = st.insert_run {
-            assert_eq!(edits, 3);
+        assert_eq!(st.undo_depth(), 1, "backspace created unexpected snapshot");
+        if let InsertRun::Active { edits, .. } = st.insert_run() {
+            assert_eq!(*edits, 3);
         }
         // End run and undo should revert to empty buffer
         st.end_insert_coalescing();
@@ -838,8 +698,8 @@ mod tests {
             st.buffers[st.active] = modified;
         }
         st.note_insert_edit();
-        if let InsertRun::Active { edits, .. } = st.insert_run {
-            assert_eq!(edits, 1);
+        if let InsertRun::Active { edits, .. } = st.insert_run() {
+            assert_eq!(*edits, 1);
         }
     }
 

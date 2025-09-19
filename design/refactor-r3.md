@@ -176,7 +176,7 @@ Proceeding with R3 reduces complexity for all Phase 4 tracks, confines structura
 - [x] Step 5 – StatusLine delta (2025-09-18)
 - [x] Step 6 – Status-only detection (2025-09-18)
 - [x] Step 7 – BatchWriter (2025-09-18) – introduces conservative batching (plain single-width cell run aggregation) + metrics (print_commands, cells_printed) and baseline test.
-- [ ] Step 8 – UndoEngine extraction
+- [x] Step 8 – UndoEngine extraction (2025-09-18) – snapshot logic moved into `undo.rs` (`UndoEngine`); `EditorState` now delegates via accessors (`undo_depth`, `redo_depth`, `insert_run`). Behavior unchanged (all undo/coalescing tests green).
 - [ ] Step 9 – Layout scaffold
 - [ ] Step 10 – TerminalCapabilities stub
 - [ ] Step 11 – Metrics command stub
