@@ -34,6 +34,10 @@ pub struct PartialCache {
     pub width: u16,
     /// Hash entries per visible buffer line (excluding status line).
     pub line_hashes: Vec<ViewportLineHash>,
+    /// Previous frame's exact UTF-8 text for each visible line (no trailing newline).
+    /// Invariant: `prev_text.len() == line_hashes.len()` whenever cache is warm.
+    /// Entry is `None` when content is unknown (cold start, newly entered via scroll, or after clear).
+    pub prev_text: Vec<Option<String>>,
     /// Previous frame's cursor line (for repaint of old cursor span). None if unknown or no prior frame.
     pub last_cursor_line: Option<usize>,
 }
@@ -50,6 +54,7 @@ impl PartialCache {
         self.viewport_start = 0;
         self.width = 0;
         self.line_hashes.clear();
+        self.prev_text.clear();
         self.last_cursor_line = None;
     }
 
@@ -58,16 +63,22 @@ impl PartialCache {
         self.viewport_start = viewport_start;
         self.width = width;
         self.line_hashes.clear();
+        self.prev_text.clear();
         // Preserve last_cursor_line across resets; it is invalidated only explicitly (resize clears in later step).
         if self.line_hashes.capacity() < expected_lines {
             self.line_hashes
                 .reserve(expected_lines - self.line_hashes.capacity());
+        }
+        if self.prev_text.capacity() < expected_lines {
+            self.prev_text
+                .reserve(expected_lines - self.prev_text.capacity());
         }
     }
 
     /// Push a hash entry for a line (in viewport order).
     pub fn push_line(&mut self, entry: ViewportLineHash) {
         self.line_hashes.push(entry);
+        self.prev_text.push(None); // unknown until actually painted
     }
 
     /// Compute hash for a line (content without trailing newline). Public for tests; later used by partial renderer.
@@ -83,6 +94,19 @@ impl PartialCache {
     /// Access an entry by relative viewport row.
     pub fn get(&self, row: usize) -> Option<ViewportLineHash> {
         self.line_hashes.get(row).copied()
+    }
+
+    /// Access previously painted line text for a relative viewport row, if known.
+    pub fn get_prev_text(&self, row: usize) -> Option<&str> {
+        self.prev_text.get(row).and_then(|o| o.as_deref())
+    }
+
+    /// Update (or set) previously painted text for a relative viewport row.
+    pub fn set_prev_text(&mut self, row: usize, text: String) {
+        if row >= self.prev_text.len() {
+            return; // defensive: ignore out-of-bounds silently (caller logic bug)
+        }
+        self.prev_text[row] = Some(text);
     }
 
     /// Phase 4 Step 11: shift cache in-place for a scroll-region shift.
@@ -112,6 +136,10 @@ impl PartialCache {
             visible_rows == self.line_hashes.len(),
             "cache size mismatch"
         );
+        debug_assert!(
+            visible_rows == self.prev_text.len(),
+            "prev_text size mismatch"
+        );
         debug_assert!(delta != 0, "no-op delta passed to shift_for_scroll");
         let abs = delta.unsigned_abs() as usize;
         debug_assert!(
@@ -126,6 +154,7 @@ impl PartialCache {
             for i in 0..(visible_rows - entering) {
                 let src = i + entering;
                 self.line_hashes[i] = self.line_hashes[src];
+                self.prev_text[i] = self.prev_text[src].take();
             }
             // Recompute hashes for entering lines (bottom segment).
             for i in 0..entering {
@@ -138,6 +167,7 @@ impl PartialCache {
                     PartialCache::compute_hash("")
                 };
                 self.line_hashes[row] = vh;
+                self.prev_text[row] = None; // unknown until painted
             }
         } else {
             // Scroll up: new lines entering at top.
@@ -146,6 +176,7 @@ impl PartialCache {
             for i in (0..(visible_rows - entering)).rev() {
                 let dst = i + entering;
                 self.line_hashes[dst] = self.line_hashes[i];
+                self.prev_text[dst] = self.prev_text[i].take();
             }
             // Recompute top entering line hashes.
             for i in 0..entering {
@@ -157,6 +188,7 @@ impl PartialCache {
                     PartialCache::compute_hash("")
                 };
                 self.line_hashes[i] = vh;
+                self.prev_text[i] = None;
             }
         }
         self.viewport_start = new_first;
@@ -184,6 +216,7 @@ mod tests {
         assert_eq!(c.viewport_start, 10);
         assert_eq!(c.width, 120);
         assert_eq!(c.line_hashes.len(), 2);
+        assert_eq!(c.prev_text.len(), 2);
         assert!(c.get(1).is_some());
     }
 }

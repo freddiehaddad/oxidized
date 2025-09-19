@@ -46,7 +46,94 @@ impl Default for RenderEngine {
     }
 }
 
+impl RenderEngine {}
+
+/// Result of a successful trimmed diff heuristic (Phase 4 Step 12).
+struct TrimResult {
+    prefix_cols: u16,
+    interior: String,
+    clear_suffix: bool,
+    cols_saved: u16,
+}
+
 impl RenderEngine {
+    /// Attempt to compute a trimmed interior diff segment for a changed line.
+    /// Limits: single contiguous interior mutation; if multiple disjoint changes, falls back (None).
+    /// Returns TrimResult with prefix visual column, interior string to print at that column, whether to clear suffix, and columns saved.
+    fn try_trim_line(&self, old: &str, new: &str, width: u16) -> Option<TrimResult> {
+        if old == new || width == 0 {
+            return None;
+        }
+        // Walk forward grapheme clusters to find longest common prefix (byte index).
+        let mut prefix_bytes = 0usize;
+        let mut b_old = 0usize;
+        let mut b_new = 0usize;
+        loop {
+            if b_old >= old.len() || b_new >= new.len() {
+                break; // one exhausted
+            }
+            let next_old = grapheme::next_boundary(old, b_old);
+            let next_new = grapheme::next_boundary(new, b_new);
+            let g_old = &old[b_old..next_old];
+            let g_new = &new[b_new..next_new];
+            if g_old == g_new {
+                prefix_bytes = next_old.min(next_new); // advance
+                b_old = next_old;
+                b_new = next_new;
+                continue;
+            }
+            break;
+        }
+
+        // Walk backward grapheme clusters for suffix (exclusive of prefix region).
+        let mut suffix_new_bytes = 0usize; // length in bytes of common suffix in new
+        let mut eo_old = old.len();
+        let mut eo_new = new.len();
+        while eo_old > prefix_bytes && eo_new > prefix_bytes {
+            // Find previous boundaries
+            let prev_old = grapheme::prev_boundary(old, eo_old);
+            let prev_new = grapheme::prev_boundary(new, eo_new);
+            let g_old = &old[prev_old..eo_old];
+            let g_new = &new[prev_new..eo_new];
+            if g_old == g_new {
+                // Would consuming this suffix remove the entire differing interior? ensure at least one differing cluster remains.
+                if prev_old <= prefix_bytes || prev_new <= prefix_bytes {
+                    break; // would overlap prefix -> no interior
+                }
+                suffix_new_bytes += eo_new - prev_new;
+                eo_old = prev_old;
+                eo_new = prev_new;
+                continue;
+            }
+            break;
+        }
+
+        // Interior slices spanning the changed region (prefix..suffix exclusive)
+        let new_interior = &new[prefix_bytes..new.len() - suffix_new_bytes];
+        if new_interior.is_empty() {
+            // For Step 12 we treat pure deletions as full repaint (need clear logic & potential EOL). Simpler fallback.
+            return None;
+        }
+        // Visual width computations.
+        let prefix_cols = grapheme::visual_col(old, prefix_bytes) as u16; // same for new at that boundary
+        if prefix_cols >= width {
+            return None;
+        }
+        let full_cols_new = grapheme::visual_col(new, new.len()) as u16;
+        let interior_cols_new = grapheme::visual_col(new_interior, new_interior.len()) as u16;
+        let saved_cols = full_cols_new.saturating_sub(interior_cols_new);
+        const TRIM_MIN_SAVINGS_COLS: u16 = 4;
+        if saved_cols < TRIM_MIN_SAVINGS_COLS {
+            return None;
+        }
+        let clear_suffix = new.len() < old.len(); // line shrink or deletion beyond interior; safe to clear
+        Some(TrimResult {
+            prefix_cols,
+            interior: new_interior.to_string(),
+            clear_suffix,
+            cols_saved: saved_cols,
+        })
+    }
     pub fn new() -> Self {
         Self {
             last_cursor: CursorSpanMeta::default(),
@@ -86,6 +173,31 @@ impl RenderEngine {
         let (print_cmds, cells) = self.render_via_writer(&frame)?;
         // Update last cursor line in cache.
         self.cache.last_cursor_line = Some(view.cursor.line);
+        // Populate prev_text shadow for all visible lines (text area only) for trimming in subsequent partial frames.
+        if h > 0 {
+            let text_height = h - 1;
+            let buf = state.active_buffer();
+            let start = view.viewport_first_line;
+            let end = (start + text_height as usize).min(buf.line_count());
+            // Ensure prev_text length matches line_hashes length (line_hashes already updated by classify_viewport_changes earlier).
+            if self.cache.prev_text.len() != self.cache.line_hashes.len() {
+                self.cache
+                    .prev_text
+                    .resize(self.cache.line_hashes.len(), None);
+            }
+            for (row, line_idx) in (start..end).enumerate() {
+                if let Some(raw) = buf.line(line_idx) {
+                    let content_trim: &str = if raw.ends_with(['\n', '\r']) {
+                        &raw[..raw.len() - 1]
+                    } else {
+                        raw.as_str()
+                    };
+                    if row < self.cache.prev_text.len() {
+                        self.cache.set_prev_text(row, content_trim.to_string());
+                    }
+                }
+            }
+        }
         let dur = start.elapsed().as_nanos() as u64;
         use std::sync::atomic::Ordering::Relaxed;
         self.metrics.full_frames.fetch_add(1, Relaxed);
@@ -372,37 +484,62 @@ impl RenderEngine {
                     changed = true;
                 }
                 if changed {
-                    writer.move_to(0, rel_y);
-                    writer.clear_line(0, rel_y);
-                    // Re-render graphemes.
-                    let mut byte = 0;
-                    let mut vis_col = 0u16;
-                    while byte < content_trim.len() && vis_col < w {
-                        let next = grapheme::next_boundary(content_trim, byte);
-                        let cluster = &content_trim[byte..next];
-                        let width = grapheme::cluster_width(cluster) as u16;
-                        let mut chars = cluster.chars();
-                        if let Some(first) = chars.next() {
-                            writer.print(first.to_string());
+                    // Step 12: attempt trimmed diff using previously stored text.
+                    self.metrics.trim_attempts.fetch_add(1, Relaxed);
+                    let cache_row = line_idx - viewport_first;
+                    let mut trimmed_success = false;
+                    if let Some(old_text) = self.cache.get_prev_text(cache_row)
+                        && let Some(tr) = self.try_trim_line(old_text, content_trim, w)
+                    {
+                        // Emit: move to prefix, print interior, optionally clear suffix, then done.
+                        writer.move_to(tr.prefix_cols, rel_y);
+                        // Clear to end of line first if we need to guarantee removal of prior tail (line shrink case); conservative.
+                        if tr.clear_suffix {
+                            writer.clear_line(0, rel_y); // full clear to ensure no artifacts (simple for Phase 4)
+                            writer.move_to(tr.prefix_cols, rel_y);
                         }
-                        if width > 1 {
-                            for _ in 1..width {
-                                if vis_col + 1 >= w {
-                                    break;
-                                }
-                                writer.print(" ");
-                                vis_col += 1;
-                            }
-                        }
-                        vis_col = vis_col.saturating_add(width.max(1));
-                        byte = next;
+                        writer.print(tr.interior);
+                        self.metrics.trim_success.fetch_add(1, Relaxed);
+                        self.metrics
+                            .cols_saved_total
+                            .fetch_add(tr.cols_saved as u64, Relaxed);
+                        trimmed_success = true;
                     }
-                    // Update cache entry (allocate if needed)
-                    if line_idx - viewport_first < self.cache.line_hashes.len()
-                        && let Some(raw) = self.cache.line_hashes.get_mut(line_idx - viewport_first)
+                    if !trimmed_success {
+                        // Fallback: repaint full line.
+                        writer.move_to(0, rel_y);
+                        writer.clear_line(0, rel_y);
+                        let mut byte = 0;
+                        let mut vis_col = 0u16;
+                        while byte < content_trim.len() && vis_col < w {
+                            let next = grapheme::next_boundary(content_trim, byte);
+                            let cluster = &content_trim[byte..next];
+                            let width = grapheme::cluster_width(cluster) as u16;
+                            let mut chars = cluster.chars();
+                            if let Some(first) = chars.next() {
+                                writer.print(first.to_string());
+                            }
+                            if width > 1 {
+                                for _ in 1..width {
+                                    if vis_col + 1 >= w {
+                                        break;
+                                    }
+                                    writer.print(" ");
+                                    vis_col += 1;
+                                }
+                            }
+                            vis_col = vis_col.saturating_add(width.max(1));
+                            byte = next;
+                        }
+                    }
+                    // Update cache hash entry & stored text (store entire new content string).
+                    if cache_row < self.cache.line_hashes.len()
+                        && let Some(raw) = self.cache.line_hashes.get_mut(cache_row)
                     {
                         raw.hash = vh.hash;
                         raw.len = vh.len;
+                        self.cache
+                            .set_prev_text(cache_row, content_trim.to_string());
                     }
                     repainted += 1;
                     self.last_repaint_lines.push(line_idx);
@@ -566,6 +703,9 @@ impl RenderEngine {
                         vis_col = vis_col.saturating_add(width.max(1));
                         byte = next;
                     }
+                    if row < self.cache.prev_text.len() {
+                        self.cache.set_prev_text(row, content_trim.to_string());
+                    }
                 }
                 self.last_repaint_lines.push(buf_line);
             }
@@ -605,6 +745,9 @@ impl RenderEngine {
                         }
                         vis_col = vis_col.saturating_add(width.max(1));
                         byte = next;
+                    }
+                    if row < self.cache.prev_text.len() {
+                        self.cache.set_prev_text(row, content_trim.to_string());
                     }
                 }
                 self.last_repaint_lines.push(buf_line);
@@ -653,6 +796,10 @@ impl RenderEngine {
                     }
                     vis_col = vis_col.saturating_add(width.max(1));
                     byte = next;
+                }
+                let rel_row = old_cursor - new_viewport_first;
+                if rel_row < self.cache.prev_text.len() {
+                    self.cache.set_prev_text(rel_row, content_trim.to_string());
                 }
             }
             self.last_repaint_lines.push(old_cursor);
@@ -761,6 +908,11 @@ impl RenderEngine {
     /// Phase 4 Step 11 test hook: expose viewport_start for cache parity assertions.
     pub fn test_cache_viewport_start(&self) -> usize {
         self.cache.viewport_start
+    }
+
+    /// Phase 4 Step 12 test hook: expose previously painted text for a relative row.
+    pub fn test_prev_text(&self, rel_row: usize) -> Option<&str> {
+        self.cache.prev_text.get(rel_row).and_then(|o| o.as_deref())
     }
 
     /// Access a snapshot of current metrics (for tests and future status integration).

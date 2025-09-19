@@ -43,6 +43,12 @@ pub struct RenderPathMetrics {
     pub scroll_region_lines_saved: AtomicU64,
     /// Scroll shift attempts that degraded to a full repaint (Step 10 interim safeguard).
     pub scroll_shift_degraded_full: AtomicU64,
+    /// Number of line trim attempts (Step 12).
+    pub trim_attempts: AtomicU64,
+    /// Number of successful trimmed line emissions.
+    pub trim_success: AtomicU64,
+    /// Total columns saved across successful trims.
+    pub cols_saved_total: AtomicU64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +69,9 @@ pub struct RenderPathMetricsSnapshot {
     pub scroll_region_shifts: u64,
     pub scroll_region_lines_saved: u64,
     pub scroll_shift_degraded_full: u64,
+    pub trim_attempts: u64,
+    pub trim_success: u64,
+    pub cols_saved_total: u64,
 }
 
 impl RenderPathMetrics {
@@ -84,6 +93,9 @@ impl RenderPathMetrics {
             scroll_region_shifts: self.scroll_region_shifts.load(Ordering::Relaxed),
             scroll_region_lines_saved: self.scroll_region_lines_saved.load(Ordering::Relaxed),
             scroll_shift_degraded_full: self.scroll_shift_degraded_full.load(Ordering::Relaxed),
+            trim_attempts: self.trim_attempts.load(Ordering::Relaxed),
+            trim_success: self.trim_success.load(Ordering::Relaxed),
+            cols_saved_total: self.cols_saved_total.load(Ordering::Relaxed),
         }
     }
 }
