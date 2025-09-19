@@ -140,6 +140,13 @@ impl RenderScheduler {
         }
     }
 
+    /// Step 10: maximum absolute scroll line delta eligible for the scroll-region
+    /// shift fast path. Larger deltas fall back to a full repaint since repainting
+    /// entering lines would approach full frame cost and terminal scroll region
+    /// commands provide diminishing benefit. Tuned conservatively; future tuning
+    /// can be driven by metrics once the path is exercised.
+    pub const SCROLL_SHIFT_MAX: usize = 12;
+
     /// Obtain a snapshot of current metrics (Refactor R2 Step 9).
     pub fn metrics_snapshot(&self) -> RenderDeltaMetricsSnapshot {
         self.metrics.snapshot()
@@ -177,6 +184,23 @@ impl RenderScheduler {
             // Phase 3 Step 7: CursorOnly partial; Phase 3 Step 8: Lines partial path
             RenderDelta::CursorOnly => RenderDelta::CursorOnly,
             RenderDelta::Lines(r) => RenderDelta::Lines(r.clone()),
+            // Phase 4 Step 10: small scrolls (<= SCROLL_SHIFT_MAX) become an
+            // effective Scroll path. Larger scrolls still escalate to Full so
+            // we do not pay for shifting cache state & selective repaints.
+            RenderDelta::Scroll {
+                old_first,
+                new_first,
+            } => {
+                let diff = new_first.abs_diff(*old_first);
+                if diff <= Self::SCROLL_SHIFT_MAX {
+                    RenderDelta::Scroll {
+                        old_first: *old_first,
+                        new_first: *new_first,
+                    }
+                } else {
+                    RenderDelta::Full
+                }
+            }
             _ => RenderDelta::Full,
         };
         Some(RenderDecision {
@@ -427,5 +451,53 @@ mod tests {
         );
         // Frames rendered should equal number of consume decisions (2 here)
         assert_eq!(snap2.semantic_frames, 2);
+    }
+
+    #[test]
+    fn effective_small_scroll_path() {
+        let mut s = RenderScheduler::new();
+        s.mark(RenderDelta::Scroll {
+            old_first: 10,
+            new_first: 15,
+        });
+        let d = s.consume().unwrap();
+        assert_eq!(
+            d.semantic,
+            RenderDelta::Scroll {
+                old_first: 10,
+                new_first: 15
+            }
+        );
+        assert_eq!(
+            d.effective,
+            RenderDelta::Scroll {
+                old_first: 10,
+                new_first: 15
+            },
+            "small scroll within threshold should be effective Scroll"
+        );
+    }
+
+    #[test]
+    fn effective_large_scroll_escalates_full() {
+        let mut s = RenderScheduler::new();
+        // Exceed threshold (SCROLL_SHIFT_MAX=12) with delta 20
+        s.mark(RenderDelta::Scroll {
+            old_first: 0,
+            new_first: 20,
+        });
+        let d = s.consume().unwrap();
+        assert_eq!(
+            d.semantic,
+            RenderDelta::Scroll {
+                old_first: 0,
+                new_first: 20
+            }
+        );
+        assert_eq!(
+            d.effective,
+            RenderDelta::Full,
+            "large scroll should escalate to full effective"
+        );
     }
 }

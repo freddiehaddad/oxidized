@@ -308,6 +308,10 @@ fn render(
         core_render::scheduler::RenderDelta::Lines(_) => {
             engine.render_full(state, view, &layout, w, h)
         }
+        core_render::scheduler::RenderDelta::Scroll {
+            old_first,
+            new_first,
+        } => engine.render_scroll_shift(state, view, &layout, w, h, *old_first, *new_first),
         _ => engine.render_full(state, view, &layout, w, h),
     };
     let elapsed = start.elapsed();

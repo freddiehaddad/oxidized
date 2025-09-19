@@ -37,6 +37,10 @@ pub struct RenderPathMetrics {
     pub print_commands: AtomicU64,
     /// Logical cells printed (batched plain chars + styled/multi-char units).
     pub cells_printed: AtomicU64,
+    /// Count of scroll-region shift renders executed (Step 10).
+    pub scroll_region_shifts: AtomicU64,
+    /// Total lines saved from repaint due to scroll shift optimization.
+    pub scroll_region_lines_saved: AtomicU64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +58,8 @@ pub struct RenderPathMetricsSnapshot {
     pub last_partial_render_ns: u64,
     pub print_commands: u64,
     pub cells_printed: u64,
+    pub scroll_region_shifts: u64,
+    pub scroll_region_lines_saved: u64,
 }
 
 impl RenderPathMetrics {
@@ -72,6 +78,8 @@ impl RenderPathMetrics {
             last_partial_render_ns: self.last_partial_render_ns.load(Ordering::Relaxed),
             print_commands: self.print_commands.load(Ordering::Relaxed),
             cells_printed: self.cells_printed.load(Ordering::Relaxed),
+            scroll_region_shifts: self.scroll_region_shifts.load(Ordering::Relaxed),
+            scroll_region_lines_saved: self.scroll_region_lines_saved.load(Ordering::Relaxed),
         }
     }
 }
