@@ -96,6 +96,20 @@ pub fn dispatch(
 
     match action {
         Action::Motion(kind) => motion::handle_motion(kind, state, view, sticky_visual_col),
+        Action::MotionWithCount {
+            motion: kind,
+            count,
+        } => {
+            let mut result = DispatchResult::clean();
+            for _ in 0..count {
+                // repeat motion count times
+                let r = motion::handle_motion(kind, state, view, sticky_visual_col);
+                if r.dirty {
+                    result.dirty = true;
+                }
+            }
+            result
+        }
         Action::ModeChange(mc) => mode::handle_mode_change(mc, state),
         Action::CommandStart
         | Action::CommandChar(_)

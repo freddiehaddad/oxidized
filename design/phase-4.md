@@ -227,7 +227,7 @@ Simple monotonic interval (e.g. 250ms) generating `Event::Tick` pushing status r
 
 (Will be updated as steps complete)
 
-- [ ] Step 1 – Count accumulation in KeyTranslator (pending)
+- [x] Step 1 – Count accumulation in KeyTranslator (complete)
 - [ ] Step 2 – Operator pending state & ApplyOperator emission (pending)
 - [ ] Step 3 – Registers struct (unnamed + numbered ring scaffold) (pending)
 - [ ] Step 4 – Motion span resolver (byte span tests) (pending)

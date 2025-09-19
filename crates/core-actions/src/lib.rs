@@ -58,6 +58,15 @@ impl<T: ActionObserver + ?Sized> ActionObserver for &T {
 #[derive(Debug, Clone)]
 pub enum Action {
     Motion(MotionKind),
+    #[doc(hidden)]
+    /// Count-prefixed motion (e.g. `5l`). Introduced Phase 4 Step 1. The
+    /// translator collapses the numeric prefix and emits a single action
+    /// which the dispatcher will iterate internally to preserve the one
+    /// key-event => one dispatched action invariant.
+    MotionWithCount {
+        motion: MotionKind,
+        count: u32,
+    },
     Edit(EditKind),
     ModeChange(ModeChange),
     Undo,

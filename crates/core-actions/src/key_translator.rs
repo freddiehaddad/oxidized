@@ -57,11 +57,45 @@ impl KeyTranslator {
         pending_command: &str,
         key: &KeyEvent,
     ) -> Option<Action> {
-        // While counts/operators are unimplemented, simply delegate to legacy logic.
-        // Touch inert scaffolding so clippy does not flag the fields as dead code; this
-        // preserves a zero-warning build while keeping forward-looking structure visible.
-        let _ = self.pending_count;
-        let _ = self.pending_operator;
+        // Command-line active: delegate directly (counts do not apply inside ':')
+        if pending_command.starts_with(':') {
+            return legacy_map(mode, pending_command, key);
+        }
+        // Only Normal mode supports count prefixes at this stage.
+        if matches!(mode, Mode::Normal) {
+            if let KeyCode::Char(c) = key.code {
+                if c.is_ascii_digit() {
+                    // Vim rule: a solitary leading '0' with no accumulated count maps to LineStart motion.
+                    if c == '0' && self.pending_count.is_none() {
+                        return Some(Action::Motion(MotionKind::LineStart));
+                    }
+                    let digit = (c as u8 - b'0') as u32;
+                    let new_val = self
+                        .pending_count
+                        .unwrap_or(0)
+                        .saturating_mul(10)
+                        .saturating_add(digit)
+                        .min(999_999); // clamp safety consistent with design constant
+                    self.pending_count = Some(new_val);
+                    return None; // wait for following motion
+                }
+                // Non-digit: if we have an accumulated count and this char is a motion, emit MotionWithCount.
+                if let Some(count) = self.pending_count.take() {
+                    let mapped = legacy_map(mode, pending_command, key);
+                    if let Some(Action::Motion(m)) = mapped {
+                        return Some(Action::MotionWithCount { motion: m, count });
+                    } else {
+                        // Not a motion -> restore count? Vim typically treats e.g. 12i as entering insert with count ignored.
+                        // For simplicity breadth-first: fall back to mapped action; count discarded (will refine if needed).
+                        return mapped;
+                    }
+                }
+            }
+            // Esc cancels pending count.
+            if matches!(key.code, KeyCode::Esc) {
+                self.pending_count = None;
+            }
+        }
         legacy_map(mode, pending_command, key)
     }
 }
@@ -235,5 +269,59 @@ mod tests {
             tr.translate(Mode::Insert, "", &esc),
             Some(Action::ModeChange(ModeChange::LeaveInsert))
         ));
+    }
+
+    #[test]
+    fn count_accumulation_basic() {
+        let mut tr = KeyTranslator::new();
+        // 5l -> move right 5 times => MotionWithCount
+        let five = KeyEvent {
+            code: KeyCode::Char('5'),
+            mods: KeyModifiers::empty(),
+        };
+        assert!(tr.translate(Mode::Normal, "", &five).is_none());
+        let ell = KeyEvent {
+            code: KeyCode::Char('l'),
+            mods: KeyModifiers::empty(),
+        };
+        match tr.translate(Mode::Normal, "", &ell) {
+            Some(Action::MotionWithCount {
+                motion: MotionKind::Right,
+                count,
+            }) => assert_eq!(count, 5),
+            other => panic!("expected MotionWithCount, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn zero_rule_line_start() {
+        let mut tr = KeyTranslator::new();
+        let zero = KeyEvent {
+            code: KeyCode::Char('0'),
+            mods: KeyModifiers::empty(),
+        };
+        // Leading zero with no prior count -> LineStart motion
+        assert!(matches!(
+            tr.translate(Mode::Normal, "", &zero),
+            Some(Action::Motion(MotionKind::LineStart))
+        ));
+        // Now accumulate 10 by pressing '1','0' then 'l'
+        let one = KeyEvent {
+            code: KeyCode::Char('1'),
+            mods: KeyModifiers::empty(),
+        };
+        assert!(tr.translate(Mode::Normal, "", &one).is_none());
+        assert!(tr.translate(Mode::Normal, "", &zero).is_none());
+        let ell = KeyEvent {
+            code: KeyCode::Char('l'),
+            mods: KeyModifiers::empty(),
+        };
+        match tr.translate(Mode::Normal, "", &ell) {
+            Some(Action::MotionWithCount {
+                motion: MotionKind::Right,
+                count,
+            }) => assert_eq!(count, 10),
+            other => panic!("expected MotionWithCount(10), got {:?}", other),
+        }
     }
 }
