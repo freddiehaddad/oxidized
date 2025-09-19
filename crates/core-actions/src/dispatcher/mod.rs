@@ -126,10 +126,6 @@ pub fn dispatch(
             use crate::span_resolver::resolve_span;
             match op {
                 OperatorKind::Delete => {
-                    // Step 6.2: Linewise vertical delete semantics.
-                    // If motion is vertical (Up/Down/PageHalfUp/PageHalfDown) treat the
-                    // operator as *linewise*: delete whole lines from the starting line
-                    // through the target line inclusive. Otherwise use character span.
                     let start_pos = view.cursor;
                     let vertical = matches!(
                         motion,
@@ -161,7 +157,6 @@ pub fn dispatch(
                         }
                         let line_start = start_pos.line.min(tmp.line);
                         let line_end = start_pos.line.max(tmp.line);
-                        // Compute absolute byte start of first line and start of line after last.
                         let buffer = state.active_buffer();
                         let mut abs_start = 0usize;
                         for l in 0..line_start {
@@ -187,13 +182,17 @@ pub fn dispatch(
                         let mut cursor = view.cursor;
                         let removed =
                             state.delete_span_with_snapshot(&mut cursor, abs_start, abs_after_last);
+                        let structural = line_end > line_start || removed.contains('\n');
                         state.registers_mut().record_delete(removed);
-                        view.cursor = cursor; // positioned at start of first removed line
+                        view.cursor = cursor;
                         if !state.dirty {
                             state.dirty = true;
                         }
-                        // Structural: multiple lines may have shifted; request full repaint via dirty flag only for now.
-                        DispatchResult::dirty()
+                        if structural {
+                            DispatchResult::buffer_replaced()
+                        } else {
+                            DispatchResult::dirty()
+                        }
                     } else {
                         // Characterwise path (existing semantics)
                         let span = resolve_span(state, start_pos, motion, count);
@@ -203,12 +202,17 @@ pub fn dispatch(
                         let mut cursor = view.cursor; // copy for deletion API
                         let removed =
                             state.delete_span_with_snapshot(&mut cursor, span.start, span.end);
+                        let structural = removed.contains('\n');
                         state.registers_mut().record_delete(removed);
                         view.cursor = cursor;
                         if !state.dirty {
                             state.dirty = true;
                         }
-                        DispatchResult::dirty()
+                        if structural {
+                            DispatchResult::buffer_replaced()
+                        } else {
+                            DispatchResult::dirty()
+                        }
                     }
                 }
                 _ => DispatchResult::clean(), // Yank/Change later steps
@@ -798,5 +802,84 @@ mod tests {
         assert_eq!(b.line(0).unwrap(), "b4\n");
         assert_eq!(b.line(1).unwrap(), "b5\n");
         assert!(model.state().registers.unnamed.starts_with("b1\nb2\nb3"));
+    }
+
+    #[test]
+    fn structural_multi_line_delete_sets_buffer_replaced() {
+        let buffer = Buffer::from_str("t", "a1\na2\na3\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // d j (delete two lines)
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('d'),
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('j'),
+        )
+        .unwrap();
+        let res = dispatch(act, &mut model, &mut sticky, &[]);
+        assert!(
+            res.buffer_replaced,
+            "multi-line delete must mark structural"
+        );
+    }
+
+    #[test]
+    fn structural_multi_line_delete_then_undo_sets_buffer_replaced() {
+        let buffer = Buffer::from_str("t", "b1\nb2\nb3\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // Perform dj
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('d'),
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('j'),
+        )
+        .unwrap();
+        let res = dispatch(act, &mut model, &mut sticky, &[]);
+        assert!(res.buffer_replaced);
+        // Undo
+        let undo_res = dispatch(Action::Undo, &mut model, &mut sticky, &[]);
+        assert!(
+            undo_res.buffer_replaced,
+            "undo restoring lines must be structural"
+        );
+    }
+
+    #[test]
+    fn single_line_delete_not_structural() {
+        let buffer = Buffer::from_str("t", "one two three\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // dw (delete one word inside single line)
+        translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('d'),
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('w'),
+        )
+        .unwrap();
+        let res = dispatch(act, &mut model, &mut sticky, &[]);
+        assert!(res.dirty);
+        assert!(
+            !res.buffer_replaced,
+            "single-line delete should not be structural"
+        );
     }
 }

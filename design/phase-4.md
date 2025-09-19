@@ -235,6 +235,7 @@ Simple monotonic interval (e.g. 250ms) generating `Event::Tick` pushing status r
 - [x] Step 6 – Delete operator d{motion}[count] (complete)
 - [x] Step 6.1 – Ctrl-D precedence fix (complete) – KeyTranslator short-circuits Ctrl-D / Ctrl-U to half-page motions before operator/count logic, resetting any pending operator & counts to preserve Vim parity.
 - [x] Step 6.2 – Linewise vertical delete semantics (complete) – vertical motions with delete (e.g. dj, d2j) now compute a linewise span (start line through target line inclusive) outside the generic charwise span resolver; structural edit path reuses existing delete_snapshot. Added tests: dj (2 lines), 2dj (3 lines), d2j (3 lines). Yank/change steps will mirror this logic.
+- [x] Step 6.3 – Structural multi-line edit invalidation (complete) – multi-line deletes and their undo/redo now mark `buffer_replaced` forcing a full repaint, eliminating transient duplicated / out-of-order line artifacts. Temporary guard to be replaced by granular scroll/shift + line range semantics in Steps 10–11.
 - [ ] Step 7 – Yank operator y{motion}[count] storing registers (pending)
 - [ ] Step 8 – Change operator c{motion}[count] enters insert (pending)
 - [ ] Step 9 – Operator & register metrics counters (pending)

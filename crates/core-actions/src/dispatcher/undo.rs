@@ -16,8 +16,14 @@ use core_state::EditorState;
 pub(crate) fn handle_undo(state: &mut EditorState, view: &mut View) -> DispatchResult {
     let span = tracing::trace_span!("undo");
     let _e = span.enter();
+    let before = state.active_buffer().line_count();
     if state.undo(&mut view.cursor) {
-        DispatchResult::dirty()
+        let after = state.active_buffer().line_count();
+        if before != after {
+            DispatchResult::buffer_replaced()
+        } else {
+            DispatchResult::dirty()
+        }
     } else {
         DispatchResult::clean()
     }
@@ -26,8 +32,14 @@ pub(crate) fn handle_undo(state: &mut EditorState, view: &mut View) -> DispatchR
 pub(crate) fn handle_redo(state: &mut EditorState, view: &mut View) -> DispatchResult {
     let span = tracing::trace_span!("redo");
     let _e = span.enter();
+    let before = state.active_buffer().line_count();
     if state.redo(&mut view.cursor) {
-        DispatchResult::dirty()
+        let after = state.active_buffer().line_count();
+        if before != after {
+            DispatchResult::buffer_replaced()
+        } else {
+            DispatchResult::dirty()
+        }
     } else {
         DispatchResult::clean()
     }
