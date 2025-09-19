@@ -1,5 +1,18 @@
 //! Rendering primitives + frame assembly + partial repaint engine.
 //!
+//! Post Refactor R3 (Step 12) the legacy one-shot `Renderer` was removed; all
+//! paths flow through `RenderEngine` which owns metrics, hashing, scheduling,
+//! and writer emission. This concentrates optimization and future scroll-region
+//! work in a single locus.
+//!
+//! Integration Points:
+//! - `Layout` (core-model): currently single-region; future multi-view fan-out will
+//!   iterate regions and invoke partial scheduling per viewport.
+//! - `TerminalCapabilities` (core-terminal): stub exposes `supports_scroll_region` and
+//!   will gate scroll-delta optimization & cache shifting in Phase 4.
+//! - `UndoEngine` (core-state) indirectly influences dirty marking via dispatcher edits.
+//! - `KeyTranslator` / command system drive semantic deltas feeding the scheduler.
+//!
 //! Exposed Components:
 //! - `Cell` / `Frame`: logical grid backing full-frame composition.
 //! - `render_engine`: orchestrates full + partial paths (cursor-only & lines) with

@@ -181,7 +181,7 @@ Proceeding with R3 reduces complexity for all Phase 4 tracks, confines structura
 - [x] Step 10 – TerminalCapabilities stub (2025-09-18) – added `core-terminal::TerminalCapabilities` with optimistic `supports_scroll_region` flag and integrated into `RenderEngine` (field + accessor) to gate future scroll optimizations; no behavior change yet.
 - [x] Step 11 – Metrics command stub (2025-09-18) – implemented `:metrics` handling (ephemeral "Metrics OK") and added execution test; no metrics snapshot yet (deferred to Phase 4).
 - [x] Step 12 – Legacy Renderer removal (2025-09-18) – removed obsolete full-frame `Renderer` struct and render routine from `core-render::lib`; all rendering paths consolidated under `RenderEngine` + writer abstraction (full + partial). Eliminates dead code and focuses future optimization work in a single engine.
-- [ ] Step 13 – Documentation pass
+- [x] Step 13 – Documentation pass (2025-09-18) – updated crate-level rustdocs (core-actions, core-render, core-state, core-model, core-terminal) to reflect dispatcher modularization, KeyTranslator scaffold, UndoEngine extraction, Layout & TerminalCapabilities scaffolds, and removal of legacy renderer. Aligns public-facing documentation with current architecture for Phase 4 readiness.
 - [ ] Step 14 – Quality gate & closure
 
 ## 12. Notes

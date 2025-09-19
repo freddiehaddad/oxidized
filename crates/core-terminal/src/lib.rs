@@ -1,4 +1,7 @@
 //! Terminal backend abstraction and crossterm implementation.
+//!
+//! Refactor R3: Introduced `TerminalCapabilities` stub (scroll region support flag)
+//! consumed by the render engine to gate forthcoming scroll-delta optimizations.
 
 use anyhow::Result;
 use crossterm::{

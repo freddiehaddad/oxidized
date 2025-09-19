@@ -19,7 +19,9 @@
 //! Breadth-first constraints (Phase 3 / Step 12):
 //! * Exactly one active view (index 0) is created; APIs intentionally *look* as
 //!   if N views could exist (Vec storage) while mutators are private/minimal.
-//! * No rendering fan-out yet: renderer receives only the active view.
+//! * No rendering fan-out yet: renderer receives only the active view; `Layout`
+//!   currently wraps a single region but signatures accept a layout reference
+//!   so multi-region traversal can remain a local change.
 //! * Undo/redo still operate at buffer granularity; per-view granularity (e.g.
 //!   independent unrelated buffers visible simultaneously) is deferred.
 //!
@@ -35,7 +37,8 @@
 //!
 //! Forward roadmap (deferred beyond Phase 3):
 //! * Multiple simultaneously rendered views (grid / stacked layout) with a
-//!   layout manager component.
+//!   layout manager component; render engine will iterate `LayoutRegion`s and
+//!   schedule per-region partial decisions gated by terminal capabilities.
 //! * Per-view status line (potentially condensed global + local segments).
 //! * Buffer-focus changes as first-class events producing semantic `RenderDelta`.
 //! * View close/open life-cycle with undo isolation (per-buffer or per-view

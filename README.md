@@ -8,9 +8,10 @@
 
 Still early – but now with a real partial rendering MVP under the hood. Expect sharp edges, missing subsystems, and occasional intentional breakage while the core shape settles. Not a daily driver yet — perfect if you enjoy watching (and nudging) a clean architecture grow.
 
-What works today (Phase 3 complete):
+What works today:
 
 * Classic movement: `h j k l 0 $` plus naive `w / b` word hops.
+* Half‑page motions: `Ctrl-D` (down) / `Ctrl-U` (up) honoring vertical margin.
 * Insert text (full Unicode grapheme clusters — emoji families, combining marks, CJK) without shredding them.
 * Backspace removes whole clusters (no half‑emoji horror show).
 * Undo / Redo with sensible insert run coalescing (Esc or newline = boundary) + duplicate snapshot dedupe (skips redundant undo states).
@@ -20,20 +21,24 @@ What works today (Phase 3 complete):
   * Cursor‑only path repaints just old/new cursor lines + status line.
   * Lines path selectively repaints changed lines via line hash diff + dirty tracking.
   * Safe full redraw fallback for scroll, resize, buffer replace, or large dirty sets (>=60% of viewport).
+  * Status‑only semantic delta classification (mode switch, command typing) avoids marking unrelated lines dirty.
+* Writer batching foundation: consecutive plain single‑width cells coalesced (lower print command count baseline).
 * Resize + buffer replacement invalidation (cache clears; next frame full + rebuild).
 * Metrics instrumentation (full vs partial frame counts, dirty line funnel, escalation, timings).
-* Multi‑view scaffolding (internal single active view; real splits later).
+* Multi‑view scaffolding (internal single active view; real splits later) + `Layout` abstraction.
+* Terminal capability probe stub (scroll region support flag) readying scroll optimization work.
+* `:metrics` command stub (placeholder message) — real snapshot coming later.
 * Tracing spans for motions & edits for future profiling.
 
 Still missing / deferred:
 
-* Scroll region optimization (scroll still triggers full redraw).
-* Multiple simultaneously visible splits / window layout.
+* Scroll region optimization (scroll still triggers full redraw; capability stub in place).
+* Multiple simultaneously visible splits / window layout (layout regions beyond 1).
 * Search, syntax highlighting, theming, plugins, LSP/DAP, completion, git integration.
 * Smarter word motions (current word logic intentionally naive).
 * Time‑based undo coalescing.
-* Status line semantics split (currently repainted on every cursor move).
-* Performance dashboard / metrics command.
+* Status line repaint skip when content identical (delta type exists; no diff suppression yet).
+* Performance dashboard / real metrics surface (`:metrics` only a stub today).
 
 If that sounds fun rather than disappointing — you get the vibe.
 

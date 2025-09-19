@@ -1,5 +1,26 @@
-//! High-level semantic editor actions and translation from raw input.
-//! Phase 1 Task 9.4–9.5: Introduce Action abstraction.
+//! High-level semantic editor actions, key translation, and command dispatch.
+//!
+//! Scope (Refactor R3):
+//! - `Action` enum models motions, edits, mode transitions, command-line lifecycle,
+//!   undo/redo, and (scaffolded) operator application variants.
+//! - `KeyTranslator` (stateful) replaces earlier stateless free function; currently
+//!   semantics are identical while laying groundwork for count & operator-pending
+//!   logic (Phase 4 enablement).
+//! - Modular dispatcher (split into motion/edit/command/mode/undo submodules) reduces
+//!   single-file churn and keeps future feature growth localized.
+//! - Command parsing layer isolates `:commands` growth (`:metrics` stub added in Step 11).
+//!
+//! Design Tenets Applied:
+//! - Breadth-first: operator & count variants exist but are not emitted yet.
+//! - Modularity: translation, dispatch, IO helpers, and parser separated for clarity.
+//! - Evolution over legacy: deprecated stateless translator path shims to the new
+//!   stateful version and can be removed once Phase 4 count/operator work lands.
+//!
+//! Forward (Phase 4+) Roadmap:
+//! - Implement numeric prefixes accumulation (e.g. `3dw`).
+//! - Operator-pending state machine (BeginOperator -> motion -> ApplyOperator).
+//! - Register/yank integration and macro recording observer hooks.
+//! - Async command execution hooks (LSP, formatting) via observer or dispatcher extension.
 
 use core_events::KeyEvent;
 use core_state::Mode;

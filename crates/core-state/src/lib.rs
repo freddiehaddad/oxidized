@@ -1,4 +1,13 @@
-//! Editor state: buffer collection, mode, and core editor metadata.
+//! Editor state: buffer collection, mode, undo engine, and core editor metadata.
+//!
+//! Refactor R3 Additions:
+//! - Undo logic extracted into `undo::UndoEngine` (Step 8) isolating snapshot
+//!   push/undo/redo & coalescing policy from higher-level dispatch.
+//! - Ephemeral status messages & command line state surfaced here but rendered
+//!   via `core-render::status` to keep presentation logic decoupled.
+//! - View/model separation lives in `core-model`; this crate intentionally
+//!   remains buffer-centric (single active buffer in Phase 3) while `EditorModel`
+//!   orchestrates per-view cursors and scroll state.
 //!
 //! Insert Coalescing (Phase 1):
 //! - A contiguous run of Insert-mode text entry (grapheme inserts and backspaces) is captured
