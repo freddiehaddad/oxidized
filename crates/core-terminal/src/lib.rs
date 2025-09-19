@@ -11,6 +11,9 @@ use crossterm::{
 };
 use std::io::stdout;
 
+pub mod capabilities;
+pub use capabilities::TerminalCapabilities;
+
 pub trait TerminalBackend {
     fn enter(&mut self) -> Result<()>;
     fn leave(&mut self) -> Result<()>;

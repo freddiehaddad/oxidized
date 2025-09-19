@@ -10,6 +10,7 @@ use crate::{CellFlags, Frame};
 use anyhow::Result;
 use core_model::{Layout, View};
 use core_state::EditorState;
+use core_terminal::TerminalCapabilities; // Step 10 capabilities stub
 use core_text::grapheme;
 
 /// Metadata describing the last cursor span painted (for future minimal invalidation logic).
@@ -25,6 +26,7 @@ pub struct RenderEngine {
     last_cursor: CursorSpanMeta,
     cache: PartialCache,
     metrics: RenderPathMetrics,
+    capabilities: TerminalCapabilities, // Phase 3 Step 10: terminal feature gates
     // Instrumentation (Phase 3 Step 13): always compiled (lightweight) so integration
     // tests outside the crate (crate/tests) can assert repaint scope & path decisions.
     // Overhead is negligible: small Vec cleared/pushed only for partial paths.
@@ -50,9 +52,15 @@ impl RenderEngine {
             last_cursor: CursorSpanMeta::default(),
             cache: PartialCache::new(),
             metrics: RenderPathMetrics::default(),
+            capabilities: TerminalCapabilities::detect(),
             last_repaint_lines: Vec::new(),
             last_repaint_kind: None,
         }
+    }
+
+    /// Expose terminal capabilities (read-only) for scheduler decisions or tests.
+    pub fn capabilities(&self) -> TerminalCapabilities {
+        self.capabilities
     }
 
     /// Build + render a full frame (current behavior; breadth-first guarantee).
@@ -70,6 +78,7 @@ impl RenderEngine {
         classify_viewport_changes(state, view, w, h, &mut self.cache, &self.metrics, None);
 
         let _primary = layout.primary(); // reserved for future multi-region use
+        let _caps = self.capabilities; // reserved for scroll-region path gating (future)
         let mut frame = build_content_frame(state, view, w, h);
         self.apply_cursor_overlay(state, view, &mut frame, w, h);
         apply_status_line(state, view, &mut frame, w, h);
