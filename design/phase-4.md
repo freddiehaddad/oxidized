@@ -93,8 +93,8 @@ pub const TRIM_MIN_SAVINGS_COLS: u16 = 4; // require benefit
 ### 5.1 Count & Operator Translation
 
 1. Digit (0-9) in Normal & no pending operator: - If current count None and digit == '0' → motion to line start (Vim rule) unless a prior digit present; else accumulate.
-2. Operator key (`d`,`y`,`c`): capture pending op; store count (=1 or accumulated) then await motion.
-3. Motion arrives → produce `Action::ApplyOperator { op, motion, count }` and clear pending.
+2. Operator key (`d`,`y`,`c`): capture pending op; store count (=1 or accumulated) then await motion (Step 2 adds multiplicative count logic with optional secondary count after operator and before motion, e.g. `2d3w`).
+3. Motion arrives → produce `Action::ApplyOperator { op, motion, count }` and clear pending (count = prefix_count * post_op_count, defaulting missing parts to 1). `d0` special-cases `0` as LineStart motion.
 4. Escape cancels pending count/op state.
 
 ### 5.2 Motion Span Resolution
@@ -141,7 +141,7 @@ Simple monotonic interval (e.g. 250ms) generating `Event::Tick` pushing status r
 ## 6. Steps (Ordered, One Commit Each)
 
 1. feat(input): count accumulation in KeyTranslator (tests: basic, 0 motion rule).
-2. feat(input): operator pending state & ApplyOperator action emission.
+2. feat(input): operator pending state & ApplyOperator action emission. (complete)
 3. feat(state): introduce Registers struct + unnamed/numbered ring.
 4. feat(actions): motion span resolver (byte span tests across motions).
 5. feat(undo): integrate span delete with undo snapshots (coalescing boundaries respected).
@@ -228,7 +228,7 @@ Simple monotonic interval (e.g. 250ms) generating `Event::Tick` pushing status r
 (Will be updated as steps complete)
 
 - [x] Step 1 – Count accumulation in KeyTranslator (complete)
-- [ ] Step 2 – Operator pending state & ApplyOperator emission (pending)
+- [x] Step 2 – Operator pending state & ApplyOperator emission (complete)
 - [ ] Step 3 – Registers struct (unnamed + numbered ring scaffold) (pending)
 - [ ] Step 4 – Motion span resolver (byte span tests) (pending)
 - [ ] Step 5 – Integrate span delete with undo (pending)

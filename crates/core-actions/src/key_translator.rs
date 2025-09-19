@@ -1,35 +1,43 @@
-//! KeyTranslator: stateful key->Action translation (Refactor R3 Step 3).
+//! KeyTranslator: stateful key->Action translation.
 //!
-//! This struct encapsulates transient translation state (counts and pending
-//! operator scaffolding), preparing for Phase 4 expansion. For now it behaves
-//! identically to the historical stateless `translate_key` free function:
-//! * No count accumulation yet (digits are passed through as literals unless
-//!   part of a command buffer).
-//! * No operator-pending state; related fields exist but remain `None`.
+//! Phase 4 Progress:
+//! * Step 1: Count accumulation for motions (e.g. `5l`) -> `MotionWithCount`.
+//! * Step 2: Operator pending state (`d`,`y`,`c`) + composite
+//!   `ApplyOperator { op, motion, count }` emission with multiplicative count
+//!   semantics (e.g. `2d3w` => count 6). Vim rule for `0` as a motion after an
+//!   operator (e.g. `d0`) is preserved (treat as `LineStart` motion rather than
+//!   starting a trailing count).
 //!
-//! Design Tenet Alignment:
-//! * Modularity: isolates future complexity (counts/operators) from callers.
-//! * Unicode correctness: defers grapheme decisions to edit paths (unchanged).
-//! * Evolution over legacy: stateless function remains a thin wrapper for
-//!   backward test compatibility and will be removed once counts/operators
-//!   ship.
+//! State Machine (minimal):
+//! * Idle: optional `pending_count` accumulating prefix digits.
+//! * OperatorPending(op): operator captured; may accumulate a post-operator
+//!   count (`post_op_count`) via digits 1-9 (leading 0 is NOT a count and is a
+//!   motion `LineStart`).
+//! * On motion while OperatorPending -> emit `ApplyOperator` with
+//!   `count = prefix_count * post_op_count` (default 1). State resets.
+//! * <Esc> while pending operator cancels and resets state silently.
 //!
-//! Forward Roadmap (Phase 4):
-//! * Accumulate numeric prefix before motion/operator (e.g. `5j`).
-//! * Support operator capture (e.g. `d` then motion) producing composite
-//!   action variants.
-//! * Integrate register capture and dot-repeat state tracking.
-//! * Provide reset semantics on mode switches and command entry.
+//! Breadth-First Guarantee: Dispatcher still treats operator actions as
+//! inert (no buffer mutation yet). Later steps will implement span
+//! resolution & actual delete/yank/change semantics.
+//!
+//! Design Tenets Applied:
+//! * Modularity: confines complexity to this translator.
+//! * Evolution: incremental activation per design plan.
+//! * Safety: clamped counts (<= 999_999) prevent overflow.
 
-use crate::{Action, EditKind, ModeChange, MotionKind};
+use crate::{Action, EditKind, ModeChange, MotionKind, OperatorKind};
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_state::Mode;
 
 #[derive(Debug, Default)]
 pub struct KeyTranslator {
+    /// Count prefix prior to an operator or motion (e.g. `12d` or `12w`).
     pending_count: Option<u32>,
-    // Placeholder for operator kind once Step 4 introduces OperatorKind.
-    pending_operator: Option<()>,
+    /// Pending operator kind (d,y,c) awaiting motion.
+    pending_operator: Option<OperatorKind>,
+    /// Count following an operator but before the motion (e.g. `d3w`).
+    post_op_count: Option<u32>,
 }
 
 impl KeyTranslator {
@@ -37,6 +45,7 @@ impl KeyTranslator {
         Self {
             pending_count: None,
             pending_operator: None,
+            post_op_count: None,
         }
     }
 
@@ -48,6 +57,7 @@ impl KeyTranslator {
     pub fn reset(&mut self) {
         self.pending_count = None;
         self.pending_operator = None;
+        self.post_op_count = None;
     }
 
     /// Core translation entrypoint. Mirrors previous `translate_key` behavior.
@@ -57,15 +67,77 @@ impl KeyTranslator {
         pending_command: &str,
         key: &KeyEvent,
     ) -> Option<Action> {
-        // Command-line active: delegate directly (counts do not apply inside ':')
+        // Command-line active: delegate directly (counts/operators do not apply inside ':')
         if pending_command.starts_with(':') {
             return legacy_map(mode, pending_command, key);
         }
-        // Only Normal mode supports count prefixes at this stage.
-        if matches!(mode, Mode::Normal) {
-            if let KeyCode::Char(c) = key.code {
+        if !matches!(mode, Mode::Normal) {
+            return legacy_map(mode, pending_command, key);
+        }
+
+        match key.code {
+            KeyCode::Esc => {
+                // Cancel any pending state.
+                self.reset();
+                return None;
+            }
+            KeyCode::Char(c) => {
+                // If we are currently waiting for a motion after an operator.
+                if let Some(op) = self.pending_operator {
+                    // Digits after operator may form a secondary count except leading '0'.
+                    if c.is_ascii_digit() {
+                        if c == '0' && self.post_op_count.is_none() {
+                            // Treat as motion LineStart (d0 behavior)
+                            let count_total = self
+                                .pending_count
+                                .unwrap_or(1)
+                                .saturating_mul(self.post_op_count.unwrap_or(1))
+                                .min(999_999);
+                            self.pending_operator = None;
+                            self.post_op_count = None;
+                            self.pending_count = None; // counts consumed
+                            return Some(Action::ApplyOperator {
+                                op,
+                                motion: MotionKind::LineStart,
+                                count: count_total,
+                            });
+                        }
+                        // Accumulate post-op count (digits 1-9 start, 0 allowed once started)
+                        let digit = (c as u8 - b'0') as u32;
+                        let new_val = self
+                            .post_op_count
+                            .unwrap_or(0)
+                            .saturating_mul(10)
+                            .saturating_add(digit)
+                            .min(999_999);
+                        self.post_op_count = Some(new_val);
+                        return None;
+                    }
+                    // Non-digit: attempt to map to a motion.
+                    if let Some(Action::Motion(m)) = legacy_map(mode, pending_command, key) {
+                        let prefix = self.pending_count.unwrap_or(1);
+                        let post = self.post_op_count.unwrap_or(1);
+                        let total = prefix.saturating_mul(post).min(999_999);
+                        self.pending_operator = None;
+                        self.post_op_count = None;
+                        self.pending_count = None; // counts consumed
+                        return Some(Action::ApplyOperator {
+                            op,
+                            motion: m,
+                            count: total,
+                        });
+                    } else {
+                        // Not a motion; cancel operator and treat key normally.
+                        self.pending_operator = None;
+                        self.post_op_count = None;
+                        // pending_count intentionally retained: e.g. 2d<non-motion> should ignore operator but still allow count-l motion later.
+                        return legacy_map(mode, pending_command, key);
+                    }
+                }
+
+                // No operator pending: maybe digit (count) or operator key or ordinary motion.
                 if c.is_ascii_digit() {
-                    // Vim rule: a solitary leading '0' with no accumulated count maps to LineStart motion.
+                    // Leading '0' with no current count -> motion LineStart
                     if c == '0' && self.pending_count.is_none() {
                         return Some(Action::Motion(MotionKind::LineStart));
                     }
@@ -75,27 +147,36 @@ impl KeyTranslator {
                         .unwrap_or(0)
                         .saturating_mul(10)
                         .saturating_add(digit)
-                        .min(999_999); // clamp safety consistent with design constant
+                        .min(999_999);
                     self.pending_count = Some(new_val);
-                    return None; // wait for following motion
+                    return None;
                 }
-                // Non-digit: if we have an accumulated count and this char is a motion, emit MotionWithCount.
+                // Operator keys begin pending operator sequence.
+                let op_kind = match c {
+                    'd' => Some(OperatorKind::Delete),
+                    'y' => Some(OperatorKind::Yank),
+                    'c' => Some(OperatorKind::Change),
+                    _ => None,
+                };
+                if let Some(kind) = op_kind {
+                    self.pending_operator = Some(kind);
+                    self.post_op_count = None;
+                    return None; // no immediate action emitted (BeginOperator variant kept inert)
+                }
+
+                // If a count was accumulated and this is now a motion, emit MotionWithCount.
                 if let Some(count) = self.pending_count.take() {
-                    let mapped = legacy_map(mode, pending_command, key);
-                    if let Some(Action::Motion(m)) = mapped {
+                    if let Some(Action::Motion(m)) = legacy_map(mode, pending_command, key) {
                         return Some(Action::MotionWithCount { motion: m, count });
                     } else {
-                        // Not a motion -> restore count? Vim typically treats e.g. 12i as entering insert with count ignored.
-                        // For simplicity breadth-first: fall back to mapped action; count discarded (will refine if needed).
-                        return mapped;
+                        // Non-motion after count (e.g. 12i) -> drop count breadth-first.
+                        return legacy_map(mode, pending_command, key);
                     }
                 }
             }
-            // Esc cancels pending count.
-            if matches!(key.code, KeyCode::Esc) {
-                self.pending_count = None;
-            }
+            _ => {}
         }
+        // Fallback: legacy mapping.
         legacy_map(mode, pending_command, key)
     }
 }
@@ -322,6 +403,100 @@ mod tests {
                 count,
             }) => assert_eq!(count, 10),
             other => panic!("expected MotionWithCount(10), got {:?}", other),
+        }
+    }
+
+    // --- Operator pending tests (Phase 4 Step 2) ---
+
+    #[test]
+    fn operator_simple_dw() {
+        let mut tr = KeyTranslator::new();
+        let d = kc('d');
+        assert!(tr.translate(Mode::Normal, "", &d).is_none()); // pending
+        let w = kc('w');
+        match tr.translate(Mode::Normal, "", &w) {
+            Some(Action::ApplyOperator { op, motion, count }) => {
+                assert!(matches!(op, OperatorKind::Delete));
+                assert_eq!(motion, MotionKind::WordForward);
+                assert_eq!(count, 1);
+            }
+            other => panic!("expected ApplyOperator(dw) got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn operator_prefix_count_2dw() {
+        let mut tr = KeyTranslator::new();
+        assert!(tr.translate(Mode::Normal, "", &kc('2')).is_none());
+        assert!(tr.translate(Mode::Normal, "", &kc('d')).is_none());
+        match tr.translate(Mode::Normal, "", &kc('w')) {
+            Some(Action::ApplyOperator { op, motion, count }) => {
+                assert!(matches!(op, OperatorKind::Delete));
+                assert_eq!(motion, MotionKind::WordForward);
+                assert_eq!(count, 2);
+            }
+            other => panic!("expected ApplyOperator(2dw) got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn operator_post_count_d2w() {
+        let mut tr = KeyTranslator::new();
+        assert!(tr.translate(Mode::Normal, "", &kc('d')).is_none());
+        assert!(tr.translate(Mode::Normal, "", &kc('2')).is_none());
+        match tr.translate(Mode::Normal, "", &kc('w')) {
+            Some(Action::ApplyOperator { op, motion, count }) => {
+                assert!(matches!(op, OperatorKind::Delete));
+                assert_eq!(motion, MotionKind::WordForward);
+                assert_eq!(count, 2);
+            }
+            other => panic!("expected ApplyOperator(d2w) got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn operator_multiplicative_2d3w() {
+        let mut tr = KeyTranslator::new();
+        assert!(tr.translate(Mode::Normal, "", &kc('2')).is_none());
+        assert!(tr.translate(Mode::Normal, "", &kc('d')).is_none());
+        assert!(tr.translate(Mode::Normal, "", &kc('3')).is_none());
+        match tr.translate(Mode::Normal, "", &kc('w')) {
+            Some(Action::ApplyOperator { op, motion, count }) => {
+                assert!(matches!(op, OperatorKind::Delete));
+                assert_eq!(motion, MotionKind::WordForward);
+                assert_eq!(count, 6);
+            }
+            other => panic!("expected ApplyOperator(2d3w) got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn operator_d0() {
+        let mut tr = KeyTranslator::new();
+        assert!(tr.translate(Mode::Normal, "", &kc('d')).is_none());
+        match tr.translate(Mode::Normal, "", &kc('0')) {
+            Some(Action::ApplyOperator { op, motion, count }) => {
+                assert!(matches!(op, OperatorKind::Delete));
+                assert_eq!(motion, MotionKind::LineStart);
+                assert_eq!(count, 1);
+            }
+            other => panic!("expected ApplyOperator(d0) got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn operator_esc_cancels() {
+        let mut tr = KeyTranslator::new();
+        assert!(tr.translate(Mode::Normal, "", &kc('d')).is_none());
+        let esc = KeyEvent {
+            code: KeyCode::Esc,
+            mods: KeyModifiers::empty(),
+        };
+        assert!(tr.translate(Mode::Normal, "", &esc).is_none());
+        // Subsequent motion should just be a plain motion (not operator)
+        match tr.translate(Mode::Normal, "", &kc('w')) {
+            Some(Action::Motion(MotionKind::WordForward)) => {}
+            other => panic!("expected plain motion after cancel, got {:?}", other),
         }
     }
 }
