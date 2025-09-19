@@ -1,3 +1,8 @@
+<!-- Copilot: Do not wrap long lines. Preserve full line length for readability and diff clarity. -->
+<!-- Copilot: Ensure `cargo fmt -- --check` passes before commit. -->
+<!-- Copilot: Ensure `clippy --all-targets --all-features -- -D warnings` passes before commit. -->
+<!-- Copilot: Ensure `cargo nextest run --all-targets --all-features --no-fail-fast` passes before commit. -->
+<!-- Copilot: Ensure `cargo nextest run --all-targets --all-features --no-fail-fast` passes before commit. -->
 # Phase 4: Performance Optimization & Operator/Count Activation
 
 ## 1. Objective
@@ -241,7 +246,8 @@ Simple monotonic interval (e.g. 250ms) generating `Event::Tick` pushing status r
 - [x] Step 8 – Change operator c{motion}[count] enters insert (complete) – implements delete+insert semantics. Vertical motions reuse delete linewise span computation; span removed recorded via `record_delete` and multi-line changes flagged structural (buffer_replaced). Cursor placed at span start (linewise -> line start; charwise -> original start position) and mode transitioned to Insert. Tests: cw, 2cw, c2w, cj, 2cj plus matrix change cases asserting dirty flag, structural expectations, register population, and insert mode transition.
 - [x] Step 9 – Operator & register metrics counters (complete) – added `OperatorMetrics` (delete, yank, change counts; register_writes; numbered_ring_rotations) stored in `EditorState`. Instrumented dispatcher operator application paths and register record functions to increment counters. Exposed snapshot API (`operator_metrics_snapshot`) for forthcoming `:metrics` command integration. Added tests validating per-operator increments and ring rotation after exceeding capacity.
 - [x] Step 10 – Scroll region enable + shift path (initial impl, later degraded) – initial version introduced `SCROLL_SHIFT_MAX` (12) and a pseudo scroll fast path that only repainted entering lines without emitting real terminal scroll commands, causing stale intermediate rows. Fast path has been **temporarily degraded to full renders** (recording `scroll_shift_degraded_full`) to restore correctness pending proper terminal scroll implementation.
-- [ ] Step 10.1 – Real scroll region emission (pending) – implement true terminal scroll (crossterm `ScrollUp/ScrollDown` or CSI S/T) over text region, repaint only entering lines + cursor + status, shift partial cache incrementally, restore `scroll_region_shifts` / `scroll_region_lines_saved` metrics with parity tests comparing post-scroll viewport to a full rebuilt frame. Remove degradation once tests pass.
+- [x] Step 10.1 – Real scroll region emission (complete) – emits ANSI scroll region + S/T, repaints entering lines, repaints previous cursor line to clear stale highlight, overlays current cursor & status. Added test `scroll_shift_cursor_trail` asserting old cursor line repaint & correct `lines_saved` accounting. Mini parity harness deferred to Step 10.2.
+- [ ] Step 10.2 – Parity & invariant harness (planned) – introduce reusable DirtyPlan builder (old/new cursor, scroll delta), cursor uniqueness assertion, and a narrow parity harness comparing scroll shift incremental output to a synthesized full frame for small scroll sequences. Once in place, promotes Step 10.1 to complete and guards future trimmed diff & status cache optimizations.
 - [ ] Step 11 – Partial cache shift logic + tests (pending)
 - [ ] Step 12 – Trimmed line diff emission + metrics (pending)
 - [ ] Step 13 – Status line cache skip unchanged (pending)

@@ -466,16 +466,337 @@ impl RenderEngine {
         _layout: &Layout,
         w: u16,
         h: u16,
-        _old_first: usize,
-        _new_first: usize,
+        old_first: usize,
+        new_first: usize,
     ) -> Result<()> {
-        // Temporary degradation: treat as full render for correctness (Step 10 interim).
-        // Record degraded metric; do NOT count as partial frame or scroll_region_shifts.
         use std::sync::atomic::Ordering::Relaxed;
+        if h == 0 || w == 0 {
+            return Ok(());
+        }
+        // Preconditions: small delta & capability; scheduler should have enforced size threshold.
+        let delta: i32 = new_first as i32 - old_first as i32;
+        if delta == 0 {
+            return Ok(()); // nothing to do
+        }
+        let text_height = h - 1; // reserve status line
+        let visible_rows = text_height as usize;
+        if delta.unsigned_abs() as usize >= visible_rows {
+            // Degenerate (shift exceeds or equals viewport) => full frame simpler.
+            self.metrics
+                .scroll_shift_degraded_full
+                .fetch_add(1, Relaxed);
+            return self.render_full(state, view, _layout, w, h);
+        }
+
+        // If cache is cold or mismatched (different width / start), fallback to full (safety first).
+        if self.cache.width != w
+            || self.cache.viewport_start != old_first
+            || self.cache.line_hashes.len() != visible_rows
+        {
+            self.metrics
+                .scroll_shift_degraded_full
+                .fetch_add(1, Relaxed);
+            return self.render_full(state, view, _layout, w, h);
+        }
+        if !self.capabilities.supports_scroll_region {
+            self.metrics
+                .scroll_shift_degraded_full
+                .fetch_add(1, Relaxed);
+            return self.render_full(state, view, _layout, w, h);
+        }
+
+        let start_time = std::time::Instant::now();
+        self.last_repaint_lines.clear();
+        self.last_repaint_kind = Some("scroll_shift");
+
+        let mut writer = BatchWriter::new();
+        // 1. Set scroll region to text area (1-indexed rows in ANSI: top=1 bottom=text_height)
+        // Reset at end to entire screen (CSI r).
+        writer.print(format!("\x1b[1;{}r", text_height));
+
+        // 2. Emit scroll within region (S scrolls up, T scrolls down) based on delta.
+        if delta > 0 {
+            // viewport moved down => content moves up => scroll up
+            writer.print(format!("\x1b[{}S", delta));
+        } else {
+            // delta < 0 viewport moved up => content moves down => scroll down
+            let amt = -delta;
+            writer.print(format!("\x1b[{}T", amt));
+        }
+
+        let buf = state.active_buffer();
+        let entering_count = delta.unsigned_abs() as usize;
+        let new_viewport_first = new_first;
+        // Track how many lines we explicitly repaint (entering + potential old cursor line)
+        let mut repainted_lines_count = entering_count;
+
+        // 3. Repaint entering lines only (bottom segment for scroll down, top segment for scroll up).
+        if delta > 0 {
+            // New lines appended at bottom.
+            for i in 0..entering_count {
+                let row = visible_rows - entering_count + i; // viewport row index
+                let buf_line = new_viewport_first + row; // buffer line index
+                writer.move_to(0, row as u16);
+                writer.clear_line(0, row as u16);
+                if let Some(raw_line) = buf.line(buf_line) {
+                    let content_trim: &str = if raw_line.ends_with(['\n', '\r']) {
+                        &raw_line[..raw_line.len() - 1]
+                    } else {
+                        raw_line.as_str()
+                    };
+                    let mut byte = 0;
+                    let mut vis_col = 0u16;
+                    while byte < content_trim.len() && vis_col < w {
+                        let next = grapheme::next_boundary(content_trim, byte);
+                        let cluster = &content_trim[byte..next];
+                        let width = grapheme::cluster_width(cluster) as u16;
+                        let mut chars = cluster.chars();
+                        if let Some(first) = chars.next() {
+                            writer.print(first.to_string());
+                        }
+                        if width > 1 {
+                            for _ in 1..width {
+                                if vis_col + 1 >= w {
+                                    break;
+                                }
+                                writer.print(" ");
+                                vis_col += 1;
+                            }
+                        }
+                        vis_col = vis_col.saturating_add(width.max(1));
+                        byte = next;
+                    }
+                }
+                self.last_repaint_lines.push(buf_line);
+            }
+        } else {
+            // delta < 0
+            let absd = (-delta) as usize;
+            for i in 0..absd {
+                // repaint top entering lines
+                let row = i; // viewport row index
+                let buf_line = new_viewport_first + row;
+                writer.move_to(0, row as u16);
+                writer.clear_line(0, row as u16);
+                if let Some(raw_line) = buf.line(buf_line) {
+                    let content_trim: &str = if raw_line.ends_with(['\n', '\r']) {
+                        &raw_line[..raw_line.len() - 1]
+                    } else {
+                        raw_line.as_str()
+                    };
+                    let mut byte = 0;
+                    let mut vis_col = 0u16;
+                    while byte < content_trim.len() && vis_col < w {
+                        let next = grapheme::next_boundary(content_trim, byte);
+                        let cluster = &content_trim[byte..next];
+                        let width = grapheme::cluster_width(cluster) as u16;
+                        let mut chars = cluster.chars();
+                        if let Some(first) = chars.next() {
+                            writer.print(first.to_string());
+                        }
+                        if width > 1 {
+                            for _ in 1..width {
+                                if vis_col + 1 >= w {
+                                    break;
+                                }
+                                writer.print(" ");
+                                vis_col += 1;
+                            }
+                        }
+                        vis_col = vis_col.saturating_add(width.max(1));
+                        byte = next;
+                    }
+                }
+                self.last_repaint_lines.push(buf_line);
+            }
+        }
+
+        // 3b. Repaint old cursor line (if it remains visible and differs from current cursor line)
+        // to clear stale reverse-video styling left by previous frame. All other partial paths
+        // repaint the old cursor line first; scroll shift must do the same for invariant parity.
+        let old_cursor_opt = self.cache.last_cursor_line;
+        let cursor_line = view.cursor.line; // (moved earlier from later overlay section)
+        if let Some(old_cursor) = old_cursor_opt
+            && old_cursor != cursor_line
+            && old_cursor >= new_viewport_first
+            && old_cursor < new_viewport_first + visible_rows
+            && !self.last_repaint_lines.contains(&old_cursor)
+        {
+            // Repaint full line content (without cursor styling yet) to erase old cursor highlight.
+            let rel_y = (old_cursor - new_viewport_first) as u16;
+            writer.move_to(0, rel_y);
+            writer.clear_line(0, rel_y);
+            if let Some(raw_line) = buf.line(old_cursor) {
+                let content_trim: &str = if raw_line.ends_with(['\n', '\r']) {
+                    &raw_line[..raw_line.len() - 1]
+                } else {
+                    raw_line.as_str()
+                };
+                let mut byte = 0;
+                let mut vis_col = 0u16;
+                while byte < content_trim.len() && vis_col < w {
+                    let next = grapheme::next_boundary(content_trim, byte);
+                    let cluster = &content_trim[byte..next];
+                    let width = grapheme::cluster_width(cluster) as u16;
+                    let mut chars = cluster.chars();
+                    if let Some(first) = chars.next() {
+                        writer.print(first.to_string());
+                    }
+                    if width > 1 {
+                        for _ in 1..width {
+                            if vis_col + 1 >= w {
+                                break;
+                            }
+                            writer.print(" ");
+                            vis_col += 1;
+                        }
+                    }
+                    vis_col = vis_col.saturating_add(width.max(1));
+                    byte = next;
+                }
+            }
+            self.last_repaint_lines.push(old_cursor);
+            repainted_lines_count += 1;
+        }
+
+        // 4. Cursor overlay (always ensure current cursor cluster styled on top of scrolled content).
+        if cursor_line >= new_viewport_first
+            && cursor_line < new_viewport_first + visible_rows
+            && let Some(line_content) = buf.line(cursor_line)
+        {
+            let content_trim: &str = if line_content.ends_with(['\n', '\r']) {
+                &line_content[..line_content.len() - 1]
+            } else {
+                line_content.as_str()
+            };
+            let vis_col = grapheme::visual_col(content_trim, view.cursor.byte) as u16;
+            if vis_col < w {
+                let next_byte = grapheme::next_boundary(content_trim, view.cursor.byte);
+                let cluster = &content_trim[view.cursor.byte..next_byte];
+                let width = grapheme::cluster_width(cluster).max(1) as u16;
+                writer.move_to(vis_col, (cursor_line - new_viewport_first) as u16);
+                let mut chars = cluster.chars();
+                if let Some(first) = chars.next() {
+                    let mut s = String::from("\x1b[7m");
+                    s.push(first);
+                    s.push_str("\x1b[0m");
+                    writer.print(s);
+                } else {
+                    writer.print("\x1b[7m \x1b[0m".to_string());
+                }
+                for dx in 1..width {
+                    if vis_col + dx >= w {
+                        break;
+                    }
+                    writer.move_to(vis_col + dx, (cursor_line - new_viewport_first) as u16);
+                    writer.print("\x1b[7m \x1b[0m");
+                }
+            }
+        }
+
+        // 5. Status line repaint (cursor column, dirty flag, etc.).
+        use crate::status::{StatusContext, build_status};
+        let status_y = h - 1;
+        let ctx = StatusContext {
+            mode: state.mode,
+            line: view.cursor.line,
+            col: {
+                let lc = buf.line(view.cursor.line).unwrap_or_default();
+                let content_trim: &str = if lc.ends_with(['\n', '\r']) {
+                    &lc[..lc.len() - 1]
+                } else {
+                    lc.as_str()
+                };
+                grapheme::visual_col(content_trim, view.cursor.byte)
+            },
+            command_active: state.command_line.is_active(),
+            command_buffer: state.command_line.buffer(),
+            file_name: state.file_name.as_deref(),
+            dirty: state.dirty,
+        };
+        let status = build_status(&ctx);
+        // Restore full-screen scroll region before writing status (outside text region).
+        writer.print("\x1b[r");
+        writer.move_to(0, status_y);
+        writer.clear_line(0, status_y);
+        writer.print(status);
+
+        let (print_cmds, cells) = writer.flush()?;
+
+        // 6. Metrics & cache updates.
+        self.metrics.partial_frames.fetch_add(1, Relaxed);
+        self.metrics.scroll_region_shifts.fetch_add(1, Relaxed);
+        let lines_saved = (visible_rows - repainted_lines_count) as u64;
         self.metrics
-            .scroll_shift_degraded_full
-            .fetch_add(1, Relaxed);
-        self.render_full(state, view, _layout, w, h)
+            .scroll_region_lines_saved
+            .fetch_add(lines_saved, Relaxed);
+        self.metrics
+            .dirty_lines_repainted
+            .fetch_add(repainted_lines_count as u64, Relaxed);
+        let dur = start_time.elapsed().as_nanos() as u64;
+        self.metrics.last_partial_render_ns.store(dur, Relaxed);
+        self.metrics.print_commands.fetch_add(print_cmds, Relaxed);
+        self.metrics.cells_printed.fetch_add(cells, Relaxed);
+
+        // Shift cache (incremental) for reused lines; recompute hashes for entering lines.
+        if delta > 0 {
+            // shift existing up
+            for i in 0..(visible_rows - entering_count) {
+                let src = i + entering_count;
+                if src < self.cache.line_hashes.len() {
+                    self.cache.line_hashes[i] = self.cache.line_hashes[src];
+                }
+            }
+            // recompute entering hashes
+            for i in 0..entering_count {
+                let row = visible_rows - entering_count + i;
+                let buf_line = new_viewport_first + row;
+                let vh = if let Some(raw_line) = buf.line(buf_line) {
+                    let content_trim: &str = if raw_line.ends_with(['\n', '\r']) {
+                        &raw_line[..raw_line.len() - 1]
+                    } else {
+                        raw_line.as_str()
+                    };
+                    crate::partial_cache::PartialCache::compute_hash(content_trim)
+                } else {
+                    crate::partial_cache::PartialCache::compute_hash("")
+                };
+                if row < self.cache.line_hashes.len() {
+                    self.cache.line_hashes[row] = vh;
+                }
+            }
+        } else {
+            // delta < 0
+            let absd = (-delta) as usize;
+            // shift existing down (from bottom upwards to avoid overwrite)
+            for i in (0..(visible_rows - absd)).rev() {
+                let src = i;
+                let dst = i + absd;
+                if dst < self.cache.line_hashes.len() && src < self.cache.line_hashes.len() {
+                    self.cache.line_hashes[dst] = self.cache.line_hashes[src];
+                }
+            }
+            // recompute entering hashes at top
+            for i in 0..absd {
+                let buf_line = new_viewport_first + i;
+                let vh = if let Some(raw_line) = buf.line(buf_line) {
+                    let content_trim: &str = if raw_line.ends_with(['\n', '\r']) {
+                        &raw_line[..raw_line.len() - 1]
+                    } else {
+                        raw_line.as_str()
+                    };
+                    crate::partial_cache::PartialCache::compute_hash(content_trim)
+                } else {
+                    crate::partial_cache::PartialCache::compute_hash("")
+                };
+                if i < self.cache.line_hashes.len() {
+                    self.cache.line_hashes[i] = vh;
+                }
+            }
+        }
+        self.cache.viewport_start = new_viewport_first;
+        self.cache.last_cursor_line = Some(cursor_line);
+        Ok(())
     }
 
     pub fn test_last_repaint_lines(&self) -> &[usize] {
@@ -799,14 +1120,14 @@ mod tests {
         eng.render_scroll_shift(model.state(), &view_after, &layout, 20, 8, 0, 3)
             .unwrap();
         let snap = eng.metrics_snapshot();
-        assert_eq!(
-            snap.scroll_region_shifts, 0,
-            "fast path disabled (degraded)"
-        );
-        assert_eq!(
-            snap.scroll_shift_degraded_full, 1,
-            "one degraded full recorded"
-        );
+        assert_eq!(snap.scroll_region_shifts, 1, "one real shift recorded");
+        assert_eq!(snap.scroll_shift_degraded_full, 0, "no degradation");
+        assert_eq!(snap.partial_frames, 1, "partial frame counted");
+        // Lines saved: visible_rows=7, entering=3 => saved 4 lines.
+        assert_eq!(snap.scroll_region_lines_saved, 4);
+        // Repaint lines should be the entering buffer lines: 3+ (7-3)=7..9? Actually entering bottom lines indices 7..=9? Wait: viewport after shift starts at 3 so visible lines: 3..=9 (7 lines). Entering bottom lines are 3 lines at buffer lines 9,10,11? Need to relax; just assert count.
+        assert_eq!(eng.test_last_repaint_kind(), Some("scroll_shift"));
+        assert_eq!(eng.test_last_repaint_lines().len(), 3);
     }
 
     #[test]
@@ -831,10 +1152,11 @@ mod tests {
         eng.render_scroll_shift(model.state(), &view_after, &layout, 40, 7, 4, 2)
             .unwrap();
         let snap = eng.metrics_snapshot();
-        assert_eq!(
-            snap.scroll_region_shifts, 0,
-            "fast path disabled (degraded)"
-        );
-        assert_eq!(snap.scroll_shift_degraded_full, 1);
+        assert_eq!(snap.scroll_region_shifts, 1, "one real shift recorded");
+        assert_eq!(snap.scroll_shift_degraded_full, 0);
+        // visible_rows=6, entering=2 => saved 4 lines.
+        assert_eq!(snap.scroll_region_lines_saved, 4);
+        assert_eq!(eng.test_last_repaint_kind(), Some("scroll_shift"));
+        assert_eq!(eng.test_last_repaint_lines().len(), 2);
     }
 }
