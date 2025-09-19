@@ -175,7 +175,7 @@ Proceeding with R3 reduces complexity for all Phase 4 tracks, confines structura
 - [x] Step 4 – Action operator pre-variants (2025-09-18)
 - [x] Step 5 – StatusLine delta (2025-09-18)
 - [x] Step 6 – Status-only detection (2025-09-18)
-- [ ] Step 7 – BatchWriter
+- [x] Step 7 – BatchWriter (2025-09-18) – introduces conservative batching (plain single-width cell run aggregation) + metrics (print_commands, cells_printed) and baseline test.
 - [ ] Step 8 – UndoEngine extraction
 - [ ] Step 9 – Layout scaffold
 - [ ] Step 10 – TerminalCapabilities stub

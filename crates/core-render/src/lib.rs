@@ -153,6 +153,7 @@ impl Renderer {
     }
 }
 
+pub mod batch_writer; // Refactor R3 Step 7: batching writer wrapper
 pub mod dirty; // Phase 3 Step 1: dirty line tracking (external to RenderDelta)
 pub mod partial_cache; // Phase 3 Step 2: line hash + cache skeleton
 pub mod partial_diff; // New module for partial differences

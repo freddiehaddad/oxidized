@@ -2,10 +2,10 @@
 //! dispatch. Step 2 separates content assembly from cursor/status overlay and stores prior
 //! cursor span metadata (no behavioral change yet).
 
+use crate::batch_writer::BatchWriter;
 use crate::partial_cache::PartialCache;
 use crate::partial_diff::classify_viewport_changes;
 use crate::partial_metrics::{RenderPathMetrics, RenderPathMetricsSnapshot};
-use crate::writer::Writer;
 use crate::{CellFlags, Frame};
 use anyhow::Result;
 use core_model::View;
@@ -66,17 +66,16 @@ impl RenderEngine {
         self.apply_cursor_overlay(state, view, &mut frame, w, h);
         apply_status_line(state, view, &mut frame, w, h);
         // Phase 3 Step 6: translate Frame into writer commands (still full repaint)
-        let res = self.render_via_writer(&frame);
+        let (print_cmds, cells) = self.render_via_writer(&frame)?;
         // Update last cursor line in cache.
         self.cache.last_cursor_line = Some(view.cursor.line);
         let dur = start.elapsed().as_nanos() as u64;
-        self.metrics
-            .full_frames
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.metrics
-            .last_full_render_ns
-            .store(dur, std::sync::atomic::Ordering::Relaxed);
-        res
+        use std::sync::atomic::Ordering::Relaxed;
+        self.metrics.full_frames.fetch_add(1, Relaxed);
+        self.metrics.last_full_render_ns.store(dur, Relaxed);
+        self.metrics.print_commands.fetch_add(print_cmds, Relaxed);
+        self.metrics.cells_printed.fetch_add(cells, Relaxed);
+        Ok(())
     }
 
     /// Phase 3 Step 9: external resize invalidation. Clears partial cache so the next
@@ -122,7 +121,7 @@ impl RenderEngine {
         let buf = state.active_buffer();
         let viewport_first = view.viewport_first_line;
         let viewport_last_excl = viewport_first + text_height as usize;
-        let mut writer = Writer::new();
+        let mut writer = BatchWriter::new();
 
         // Determine previous & current cursor lines.
         let prev_line_opt = self.cache.last_cursor_line;
@@ -248,13 +247,15 @@ impl RenderEngine {
         writer.move_to(0, status_y);
         writer.clear_line(0, status_y);
         writer.print(status);
-        writer.flush()?;
+        let (print_cmds, cells) = writer.flush()?;
         // Update metrics
         let dur = start_time.elapsed().as_nanos() as u64;
         use std::sync::atomic::Ordering::Relaxed;
         self.metrics.partial_frames.fetch_add(1, Relaxed);
         self.metrics.cursor_only_frames.fetch_add(1, Relaxed);
         self.metrics.last_partial_render_ns.store(dur, Relaxed);
+        self.metrics.print_commands.fetch_add(print_cmds, Relaxed);
+        self.metrics.cells_printed.fetch_add(cells, Relaxed);
         // Update last cursor line cache for next cursor-only diff.
         self.cache.last_cursor_line = Some(curr_line);
         Ok(())
@@ -288,7 +289,7 @@ impl RenderEngine {
             return self.render_full(state, view, w, h);
         }
 
-        let mut writer = Writer::new();
+        let mut writer = BatchWriter::new();
         let buf = state.active_buffer();
         // Collect dirty lines inside viewport.
         let mut candidates = dirty_tracker.take_in_viewport(viewport_first, visible_rows);
@@ -421,12 +422,14 @@ impl RenderEngine {
                 }
             }
         }
-        writer.flush()?;
+        let (print_cmds, cells) = writer.flush()?;
         self.metrics
             .dirty_lines_repainted
             .fetch_add(repainted, Relaxed);
         let dur = start_time.elapsed().as_nanos() as u64;
         self.metrics.last_partial_render_ns.store(dur, Relaxed);
+        self.metrics.print_commands.fetch_add(print_cmds, Relaxed);
+        self.metrics.cells_printed.fetch_add(cells, Relaxed);
         self.cache.last_cursor_line = Some(curr_cursor);
         Ok(())
     }
@@ -512,12 +515,12 @@ impl RenderEngine {
 
     /// Temporary full-frame translation using Writer (Step 6). Keeps behavior identical
     /// to legacy Renderer::render while establishing the abstraction for later partial path.
-    fn render_via_writer(&self, frame: &Frame) -> Result<()> {
+    fn render_via_writer(&self, frame: &Frame) -> Result<(u64, u64)> {
         // Step 6.1 hotfix: row-major iteration with explicit MoveTo at each row start
         // eliminates reliance on terminal implicit wrap behavior (prevents content
         // bleeding into subsequent rows or the status line). Slightly more commands
         // (one MoveTo per row) but guarantees alignment correctness.
-        let mut writer = Writer::new();
+        let mut writer = BatchWriter::new();
         for y in 0..frame.height {
             writer.move_to(0, y);
             let row_start = y as usize * frame.width as usize;

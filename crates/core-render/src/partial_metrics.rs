@@ -33,6 +33,10 @@ pub struct RenderPathMetrics {
     pub last_full_render_ns: AtomicU64,
     /// Duration (ns) of the most recent partial frame render (cursor-only or lines).
     pub last_partial_render_ns: AtomicU64,
+    /// Number of terminal Print commands emitted after batching (Step 7 baseline).
+    pub print_commands: AtomicU64,
+    /// Logical cells printed (batched plain chars + styled/multi-char units).
+    pub cells_printed: AtomicU64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +52,8 @@ pub struct RenderPathMetricsSnapshot {
     pub dirty_lines_repainted: u64,
     pub last_full_render_ns: u64,
     pub last_partial_render_ns: u64,
+    pub print_commands: u64,
+    pub cells_printed: u64,
 }
 
 impl RenderPathMetrics {
@@ -64,6 +70,8 @@ impl RenderPathMetrics {
             dirty_lines_repainted: self.dirty_lines_repainted.load(Ordering::Relaxed),
             last_full_render_ns: self.last_full_render_ns.load(Ordering::Relaxed),
             last_partial_render_ns: self.last_partial_render_ns.load(Ordering::Relaxed),
+            print_commands: self.print_commands.load(Ordering::Relaxed),
+            cells_printed: self.cells_printed.load(Ordering::Relaxed),
         }
     }
 }
