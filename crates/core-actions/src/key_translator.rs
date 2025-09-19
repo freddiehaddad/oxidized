@@ -75,6 +75,23 @@ impl KeyTranslator {
             return legacy_map(mode, pending_command, key);
         }
 
+        // Step 6.1: Ctrl-D / Ctrl-U precedence fix.
+        // These half-page motions must be interpreted BEFORE any operator
+        // pending or count accumulation logic (e.g. Vim's behavior: typing
+        // `d` then <C-d> should scroll half a page down and NOT trigger a
+        // delete). We therefore short-circuit here. Any pending operator or
+        // counts are canceled (breadth-first safety: explicit over implicit).
+        if key.mods.contains(KeyModifiers::CTRL) {
+            if let KeyCode::Char('d') = key.code {
+                self.reset();
+                return Some(Action::Motion(MotionKind::PageHalfDown));
+            }
+            if let KeyCode::Char('u') = key.code {
+                self.reset();
+                return Some(Action::Motion(MotionKind::PageHalfUp));
+            }
+        }
+
         match key.code {
             KeyCode::Esc => {
                 // Cancel any pending state.
@@ -497,6 +514,65 @@ mod tests {
         match tr.translate(Mode::Normal, "", &kc('w')) {
             Some(Action::Motion(MotionKind::WordForward)) => {}
             other => panic!("expected plain motion after cancel, got {:?}", other),
+        }
+    }
+
+    // --- Step 6.1: Ctrl-D / Ctrl-U precedence tests ---
+
+    fn ctrl(c: char) -> KeyEvent {
+        KeyEvent {
+            code: KeyCode::Char(c),
+            mods: KeyModifiers::CTRL,
+        }
+    }
+
+    #[test]
+    fn ctrl_d_half_page_down_basic() {
+        let mut tr = KeyTranslator::new();
+        match tr.translate(Mode::Normal, "", &ctrl('d')) {
+            Some(Action::Motion(MotionKind::PageHalfDown)) => {}
+            other => panic!("expected PageHalfDown, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ctrl_u_half_page_up_basic() {
+        let mut tr = KeyTranslator::new();
+        match tr.translate(Mode::Normal, "", &ctrl('u')) {
+            Some(Action::Motion(MotionKind::PageHalfUp)) => {}
+            other => panic!("expected PageHalfUp, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ctrl_d_cancels_pending_operator() {
+        let mut tr = KeyTranslator::new();
+        assert!(tr.translate(Mode::Normal, "", &kc('d')).is_none()); // pending delete
+        // Now ctrl-d should scroll and NOT apply operator.
+        match tr.translate(Mode::Normal, "", &ctrl('d')) {
+            Some(Action::Motion(MotionKind::PageHalfDown)) => {}
+            other => panic!("expected PageHalfDown after pending op, got {:?}", other),
+        }
+        // Following motion should be plain (operator canceled)
+        match tr.translate(Mode::Normal, "", &kc('w')) {
+            Some(Action::Motion(MotionKind::WordForward)) => {}
+            other => panic!("expected plain motion after ctrl-d cancel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ctrl_d_drops_prefix_count() {
+        let mut tr = KeyTranslator::new();
+        assert!(tr.translate(Mode::Normal, "", &kc('2')).is_none());
+        // ctrl-d should ignore the accumulated count (like Vim: 2<C-d> scrolls one half page).
+        match tr.translate(Mode::Normal, "", &ctrl('d')) {
+            Some(Action::Motion(MotionKind::PageHalfDown)) => {}
+            other => panic!("expected PageHalfDown with ignored count, got {:?}", other),
+        }
+        // New motion after should not inherit old count
+        match tr.translate(Mode::Normal, "", &kc('l')) {
+            Some(Action::Motion(MotionKind::Right)) => {}
+            other => panic!("expected simple Right motion post ctrl-d, got {:?}", other),
         }
     }
 }
