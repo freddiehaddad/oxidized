@@ -11,7 +11,10 @@
 //! * Any `Full` present => `Full`.
 //! * Multiple `Lines` coalesce into a single inclusive/exclusive range.
 //! * Multiple `Scroll` deltas coalesce (earliest `old_first`, latest `new_first`).
-//! * Precedence when heterogeneous: `Lines` > `Scroll` > `StatusLine` > `CursorOnly`.
+//! * Precedence when heterogeneous (Refactor R3 Step 5):
+//!   `Scroll` > `Lines` > `StatusLine` > `CursorOnly`.
+//!   (Previously `Lines` outranked `Scroll`; changed to favor scroll semantics so
+//!   future scroll‑region fast path can avoid unnecessary line hashing work.)
 //! * `CursorOnly` + `StatusLine` collapses to `StatusLine` (unless `Lines`/`Scroll` present).
 //!
 //! Refactor R2 policy: renderer still performs a full redraw (flicker-free
@@ -63,7 +66,7 @@ pub struct RenderDeltaMetrics {
     status_line: std::sync::atomic::AtomicU64,
     cursor_only: std::sync::atomic::AtomicU64,
     collapsed_scroll: std::sync::atomic::AtomicU64,
-    suppressed_scroll: std::sync::atomic::AtomicU64,
+    suppressed_scroll: std::sync::atomic::AtomicU64, // Refactor R3 Step 5: now counts Lines suppressed by Scroll precedence.
     /// Number of semantic collapse cycles processed (may diverge from
     /// executed frame strategy counts in `RenderPathMetrics`).
     semantic_frames: std::sync::atomic::AtomicU64,
@@ -148,6 +151,14 @@ impl RenderScheduler {
         self.pending.push(delta);
     }
 
+    /// Convenience API (Refactor R3 Step 5): mark status line dirty explicitly
+    /// without the caller constructing the enum variant. Intended for mode /
+    /// command buffer changes (Step 6 logic) while keeping breadth-first stub
+    /// inert until that step wires detection.
+    pub fn mark_status(&mut self) {
+        self.mark(RenderDelta::StatusLine);
+    }
+
     /// Collapse queued deltas and return a `RenderDecision`.
     ///
     /// Refactor R2 behavior: always sets `effective = RenderDelta::Full` while still reporting the
@@ -211,24 +222,24 @@ impl RenderScheduler {
                 }
             }
         }
-        // Precedence: Lines outrank all other semantic kinds.
-        if let Some(r) = line_range {
-            if scroll_events > 0 {
-                self.metrics.incr_suppressed_scroll();
-            }
-            return RenderDelta::Lines(r);
-        }
-        // Next: Scroll (if any recorded and not superseded by Lines).
+        // New precedence (Refactor R3 Step 5): Scroll outranks Lines.
         if let (Some(of), Some(nf)) = (scroll_old_first, scroll_new_first) {
             if scroll_events > 1 {
                 for _ in 1..scroll_events {
                     self.metrics.incr_collapsed_scroll();
                 }
             }
+            if line_range.is_some() {
+                // Lines suppressed by scroll precedence (repurpose metric name).
+                self.metrics.incr_suppressed_scroll();
+            }
             return RenderDelta::Scroll {
                 old_first: of,
                 new_first: nf,
             };
+        }
+        if let Some(r) = line_range {
+            return RenderDelta::Lines(r);
         }
         if have_status {
             return RenderDelta::StatusLine;
@@ -316,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn lines_suppress_scroll() {
+    fn scroll_precedence_over_lines() {
         let mut s = RenderScheduler::new();
         s.mark(RenderDelta::Scroll {
             old_first: 3,
@@ -324,7 +335,13 @@ mod tests {
         });
         s.mark(RenderDelta::Lines(10..11));
         let merged = s.collapse();
-        assert_eq!(merged, RenderDelta::Lines(10..11));
+        assert!(matches!(
+            merged,
+            RenderDelta::Scroll {
+                old_first: 3,
+                new_first: 5
+            }
+        ));
     }
 
     #[test]
@@ -388,19 +405,25 @@ mod tests {
             snap.collapsed_scroll, 2,
             "expected two collapsed increments (three events -> two collapses)"
         );
-        // Now add a scroll then a lines edit suppressing scroll semantics.
+        // Now add a scroll then a lines edit (lines suppressed by scroll precedence).
         s.mark(RenderDelta::Scroll {
             old_first: 3,
             new_first: 4,
         });
         s.mark(RenderDelta::Lines(10..11));
         let d2 = s.consume().unwrap();
-        assert!(matches!(d2.semantic, RenderDelta::Lines(_)));
+        assert!(matches!(
+            d2.semantic,
+            RenderDelta::Scroll {
+                old_first: 3,
+                new_first: 4
+            }
+        ));
         let snap2 = s.metrics_snapshot();
-        assert_eq!(snap2.lines, 1);
+        assert_eq!(snap2.scroll, 2, "two scroll semantic frames");
         assert_eq!(
             snap2.suppressed_scroll, 1,
-            "one scroll sequence suppressed by lines"
+            "one lines set suppressed by scroll"
         );
         // Frames rendered should equal number of consume decisions (2 here)
         assert_eq!(snap2.semantic_frames, 2);

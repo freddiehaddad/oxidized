@@ -57,18 +57,25 @@ fn multiple_scrolls_coalesce_single_semantic() {
 }
 
 #[test]
-fn scroll_followed_by_lines_suppresses_scroll() {
+fn scroll_precedence_suppresses_lines() {
+    // Refactor R3 Step 5 precedence change: scroll outranks lines.
     let mut sch = RenderScheduler::new();
     sch.mark(RenderDelta::Scroll {
         old_first: 0,
         new_first: 1,
     });
     sch.mark(RenderDelta::Lines(20..21));
-    assert!(matches!(semantic(&mut sch), Some(RenderDelta::Lines(r)) if r == (20..21)));
+    assert!(matches!(
+        semantic(&mut sch),
+        Some(RenderDelta::Scroll {
+            old_first: 0,
+            new_first: 1
+        })
+    ));
     let snap = sch.metrics_snapshot();
-    assert_eq!(snap.lines, 1);
-    assert_eq!(snap.suppressed_scroll, 1);
-    assert_eq!(snap.scroll, 0);
+    assert_eq!(snap.scroll, 1, "scroll semantic recorded");
+    assert_eq!(snap.lines, 0, "lines suppressed by scroll precedence");
+    assert_eq!(snap.suppressed_scroll, 1, "suppressed metric increments");
 }
 
 #[test]
