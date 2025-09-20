@@ -141,19 +141,23 @@ Planned (implementation in progress).
 Each commit corresponds to one completed step (breadth-first, always building). This section will be updated and re-committed as steps complete.
 
 - [x] Step 1 – Design plan authored (`unicode-cluster-refactor.md`) and agreed.
-- [ ] Step 2 – Data structure refactor: introduce cluster-aware `Cell` + `Frame::set_cluster` (remove legacy single-scalar setters).
-- [ ] Step 3 – Frame builders updated (`build_content_frame`, cursor overlay, status line) to populate leader + continuation cells.
-- [ ] Step 4 – Full-frame emission rewrite (`render_via_writer`) to emit clusters once, skipping continuation cells.
-- [ ] Step 5 – Partial path consistency sweep (ensure helpers align with new invariants / comments updated).
-- [ ] Step 6 – Module & crate docs updated (remove obsolete notes; document invariants & future styling hooks).
-- [ ] Step 7 – Test helpers added (`Frame::line_clusters`, maybe `plain_text_line`).
-- [ ] Step 8 – Unicode cluster correctness test suite (`unicode_clusters.rs`).
-- [ ] Step 9 – Formatting & lint pass (`cargo fmt`, `clippy -D warnings`).
-- [ ] Step 10 – Full workspace test run (including new tests) green.
-- [ ] Step 11 – Commit: structures (refactor(render): cluster-aware cell model — unicode refactor step 1).
-- [ ] Step 12 – Commit: builders & emission (refactor(render): build+emit full clusters — unicode refactor step 2).
-- [ ] Step 13 – Commit: docs & helpers (docs(render): module invariants & helpers — unicode refactor step 3).
-- [ ] Step 14 – Commit: tests (test(render): unicode cluster correctness suite — unicode refactor step 4).
-- [ ] Step 15 – (Optional) Consolidation or squash per maintainer preference.
+- [x] Step 2 – Data structure refactor: introduce cluster-aware `Cell` + `Frame::set_cluster` (remove legacy single-scalar setters).
+- [x] Step 3 – Frame builders updated (`build_content_frame`, cursor overlay, status line) to populate leader + continuation cells.
+- [x] Step 4 – Full-frame emission rewrite (`render_via_writer`) to emit clusters once, skipping continuation cells.
+- [x] Step 5 – Partial path consistency sweep (helpers updated: partial overlay emits full cluster; wide cluster padding removed for parity).
+- [x] Step 6 – Module & crate docs updated (remove obsolete notes; document invariants & future styling hooks).
+- [x] Step 7 – Test helpers added (`Frame::line_clusters`, maybe `plain_text_line`).
+- [x] Step 8 – Unicode cluster correctness test suite (`unicode_clusters.rs`).
+- [x] Step 9 – Formatting & lint pass (`cargo fmt`, `clippy -D warnings`).
+- [x] Step 10 – Full workspace test run (including new tests) green.
+- [x] Step 11 – Commit: structures (refactor(render): cluster-aware cell model — unicode refactor step 1).
+- [x] Step 12 – Commit: builders & emission (refactor(render): build+emit full clusters — unicode refactor step 2).
+- [x] Step 13 – Commit: docs & helpers (docs(render): module invariants & helpers — unicode refactor step 3).
+- [x] Step 14 – Commit: tests (test(render): unicode cluster correctness suite — unicode refactor step 4).
+- [x] Step 15 – (Optional) Consolidation or squash per maintainer preference.
+
+### Consolidation Note
+
+All implementation steps (1–15) were ultimately consolidated into a **single squashed commit** to preserve atomic introduction of the cluster-aware model and its tests. Individual planned commit boundaries are documented above for historical rationale and future archaeology. Date of consolidation: 2025-09-20.
 
 ---

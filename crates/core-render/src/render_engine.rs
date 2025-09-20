@@ -763,26 +763,12 @@ impl RenderEngine {
                 meta.start_col = Some(vis_col as u16);
                 meta.width = Some(width);
                 if (vis_col as u16) < w {
-                    let mut chars = cluster.chars();
-                    let first_char = chars.next().unwrap_or(' ');
-                    frame.set_with_flags(
+                    frame.apply_flags_span(
                         vis_col as u16,
                         rel_line,
-                        first_char,
+                        width,
                         CellFlags::REVERSE | CellFlags::CURSOR,
                     );
-                    for fill_dx in 1..width {
-                        let col = vis_col as u16 + fill_dx;
-                        if col >= w {
-                            break;
-                        }
-                        frame.set_with_flags(
-                            col,
-                            rel_line,
-                            ' ',
-                            CellFlags::REVERSE | CellFlags::CURSOR,
-                        );
-                    }
                 }
             }
         }
@@ -792,26 +778,16 @@ impl RenderEngine {
     // Phase 4 Step 16: helper to emit a trimmed line's content to the BatchWriter.
     // Mirrors logic previously duplicated across partial paths (cursor-only, lines, scroll).
     fn paint_content_trim(writer: &mut BatchWriter, content_trim: &str, w: u16) {
-        let mut byte = 0;
-        let mut vis_col = 0u16;
+        let mut byte = 0usize;
+        let mut vis_col: u16 = 0;
         while byte < content_trim.len() && vis_col < w {
             let next = grapheme::next_boundary(content_trim, byte);
             let cluster = &content_trim[byte..next];
-            let width = grapheme::cluster_width(cluster) as u16;
-            let mut chars = cluster.chars();
-            if let Some(first) = chars.next() {
-                writer.print(first.to_string());
-            }
-            if width > 1 {
-                for _ in 1..width {
-                    if vis_col + 1 >= w {
-                        break;
-                    }
-                    writer.print(" ");
-                    vis_col = vis_col.saturating_add(1);
-                }
-            }
-            vis_col = vis_col.saturating_add(width.max(1));
+            let width = grapheme::cluster_width(cluster).max(1) as u16;
+            // Cluster-aware parity: emit the full cluster exactly once. Wide clusters
+            // occupy multiple terminal columns intrinsically; no synthetic space padding.
+            writer.print(cluster.to_string());
+            vis_col += width;
             byte = next;
         }
     }
@@ -841,24 +817,11 @@ impl RenderEngine {
             if vis_col < w {
                 let next_byte = grapheme::next_boundary(content_trim, cursor_byte);
                 let cluster = &content_trim[cursor_byte..next_byte];
-                let width = grapheme::cluster_width(cluster).max(1) as u16;
+                // Emit entire cluster inside a single reverse-video sequence (matches
+                // full-frame flag-based emission parity and preserves variation selectors
+                // / combining marks that previously were truncated in partial paths).
                 writer.move_to(vis_col, (cursor_line - viewport_first) as u16);
-                let mut chars = cluster.chars();
-                if let Some(first) = chars.next() {
-                    let mut s = String::from("\x1b[7m");
-                    s.push(first);
-                    s.push_str("\x1b[0m");
-                    writer.print(s);
-                } else {
-                    writer.print("\x1b[7m \x1b[0m".to_string());
-                }
-                for dx in 1..width {
-                    if vis_col + dx >= w {
-                        break;
-                    }
-                    writer.move_to(vis_col + dx, (cursor_line - viewport_first) as u16);
-                    writer.print("\x1b[7m \x1b[0m");
-                }
+                writer.print(format!("\x1b[7m{cluster}\x1b[0m"));
             }
         }
     }
@@ -912,23 +875,25 @@ impl RenderEngine {
     /// serves as the canonical full-frame emission path (until scroll-region +
     /// diff optimizations arrive). Behavior remains stable and parity-tested.
     fn render_via_writer(&self, frame: &Frame) -> Result<(u64, u64)> {
-        // Step 6.1 hotfix: row-major iteration with explicit MoveTo at each row start
-        // eliminates reliance on terminal implicit wrap behavior (prevents content
-        // bleeding into subsequent rows or the status line). Slightly more commands
-        // (one MoveTo per row) but guarantees alignment correctness.
+        // Cluster-aware emission (Unicode Cluster Refactor Step 4): iterate only
+        // leader cells per row (skipping continuation cells) and emit each full
+        // grapheme cluster exactly once. Any styling (e.g., REVERSE cursor span)
+        // is applied to the leader; continuation cells inherit flags during
+        // overlay application so no separate emission required.
+        //
+        // NOTE: We do not emit extra spaces for wide clusters here; terminal
+        // width semantics handle multi-column glyphs directly. Partial writer
+        // helpers (paint_content_trim) still pad wide clusters with spaces for
+        // now; that will be reconciled in the subsequent "Adjust partial paths"
+        // step to unify behavior.
         let mut writer = BatchWriter::new();
         for y in 0..frame.height {
             writer.move_to(0, y);
-            let row_start = y as usize * frame.width as usize;
-            let row_end = row_start + frame.width as usize;
-            for cell in &frame.cells[row_start..row_end] {
-                if cell.flags.contains(CellFlags::REVERSE) {
-                    let mut s = String::from("\x1b[7m");
-                    s.push(cell.ch);
-                    s.push_str("\x1b[0m");
-                    writer.print(s);
+            for (cluster, _w, flags, _x) in frame.row_leaders(y) {
+                if flags.contains(CellFlags::REVERSE) {
+                    writer.print(format!("\x1b[7m{cluster}\x1b[0m"));
                 } else {
-                    writer.print(cell.ch.to_string());
+                    writer.print(cluster.to_string());
                 }
             }
         }
@@ -964,24 +929,14 @@ pub fn build_content_frame(state: &EditorState, view: &View, w: u16, h: u16) -> 
             } else {
                 &line
             };
-            let mut byte = 0;
-            let mut vis_col = 0u16;
+            let mut byte = 0usize;
+            let mut vis_col: u16 = 0;
             while byte < content_trim.len() && vis_col < w {
                 let next = core_text::grapheme::next_boundary(content_trim, byte);
                 let cluster = &content_trim[byte..next];
-                let width = grapheme::cluster_width(cluster) as u16;
-                let mut chars = cluster.chars();
-                if let Some(first) = chars.next() {
-                    frame.set(vis_col, screen_y as u16, first);
-                }
-                if width > 1 {
-                    for dx in 1..width {
-                        if vis_col + dx < w {
-                            frame.set(vis_col + dx, screen_y as u16, ' ');
-                        }
-                    }
-                }
-                vis_col = vis_col.saturating_add(width.max(1));
+                let width = grapheme::cluster_width(cluster).max(1) as u16;
+                frame.set_cluster(vis_col, screen_y as u16, cluster, width, CellFlags::empty());
+                vis_col = vis_col.saturating_add(width);
                 byte = next;
             }
         }
@@ -1015,7 +970,8 @@ fn apply_status_line(state: &EditorState, view: &View, frame: &mut Frame, w: u16
     });
     for (i, ch) in status.chars().enumerate() {
         if (i as u16) < w {
-            frame.set(i as u16, y, ch);
+            let s = ch.to_string();
+            frame.set_cluster(i as u16, y, &s, 1, CellFlags::empty());
         }
     }
     if !state.command_line.is_active()
@@ -1028,7 +984,8 @@ fn apply_status_line(state: &EditorState, view: &View, frame: &mut Frame, w: u16
             for (i, ch) in text.chars().enumerate() {
                 let col2 = start_col + i as u16;
                 if col2 < w {
-                    frame.set(col2, y, ch);
+                    let s = ch.to_string();
+                    frame.set_cluster(col2, y, &s, 1, CellFlags::empty());
                 }
             }
         }

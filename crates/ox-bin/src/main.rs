@@ -578,8 +578,9 @@ mod tests {
         let _ = eng.render_full(&state, &view, &layout, 20, 4);
         let frame = build_content_frame(&state, &view, 20, 4);
         let idx = 1; // (y * width) + x
-        let cell = frame.cells[idx];
-        assert_eq!(cell.ch, 'b');
+        let cell = &frame.cells[idx];
+        assert!(cell.is_leader(), "expected leader cell at cursor position");
+        assert_eq!(cell.cluster.as_str(), "b");
     }
 
     #[test]
@@ -599,12 +600,16 @@ mod tests {
         // Visual column after 'a' is 1
         let base_col = 1usize; // leading cell of wide emoji
         let idx_first = base_col; // row 0 so direct index
-        let first = frame.cells[idx_first];
-        assert_eq!(first.ch, '😀');
-        // Second cell of span should be a space but still flagged
+        let first = &frame.cells[idx_first];
+        assert!(first.is_leader(), "emoji leader should be leader cell");
+        assert_eq!(first.cluster.as_str(), "😀");
+        // Second cell is a continuation (width==0)
         let idx_second = base_col + 1;
-        let second = frame.cells[idx_second];
-        assert_eq!(second.ch, ' ');
+        let second = &frame.cells[idx_second];
+        assert!(
+            !second.is_leader(),
+            "expected continuation cell for wide emoji"
+        );
     }
 
     #[test]
@@ -620,12 +625,15 @@ mod tests {
         view.cursor.byte = 0;
         let frame = build_content_frame(&state, &view, 20, 4);
         let idx = 0;
-        let cell = frame.cells[idx];
-        assert_eq!(cell.ch, 'e'); // first scalar of cluster
-        // Next cell should be the 'x' not flagged (cursor span width=1)
+        let cell = &frame.cells[idx];
+        // Entire combining sequence should exist in the leader cluster string.
+        assert!(cell.is_leader());
+        assert_eq!(cell.cluster.as_str(), "e\u{301}"); // e + combining acute accent
+        // Next visual cell should be the 'x' leader.
         let idx_next = 1;
-        let next = frame.cells[idx_next];
-        assert_eq!(next.ch, 'x');
+        let next = &frame.cells[idx_next];
+        assert!(next.is_leader());
+        assert_eq!(next.cluster.as_str(), "x");
         assert!(!next.flags.contains(core_render::CellFlags::CURSOR));
     }
 
@@ -648,8 +656,9 @@ mod tests {
         let frame = build_content_frame(&state, &view, 20, 4);
         // Visual column == 3
         let idx = 3;
-        let cell = frame.cells[idx];
-        assert_eq!(cell.ch, ' '); // synthesized space
+        let cell = &frame.cells[idx];
+        assert!(cell.is_leader());
+        assert_eq!(cell.cluster.as_str(), " "); // synthesized space
     }
 
     #[tokio::test]

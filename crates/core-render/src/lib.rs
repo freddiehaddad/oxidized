@@ -1,5 +1,23 @@
 //! Rendering primitives + frame assembly + partial repaint engine.
 //!
+//! Unicode Cluster Refactor: `Cell` stores the full grapheme cluster for leader
+//! cells along with its visual width; continuation cells (width==0) occupy the
+//! remaining columns of a multi-column cluster and never print text. All
+//! emission paths (full + partial) print only leader clusters exactly once.
+//!
+//! Invariants:
+//! - Leader: width >= 1, `cluster` non-empty.
+//! - Continuation: width == 0, `cluster` empty.
+//! - Continuations immediately follow their leader horizontally; no gaps.
+//! - Styling flags applied over spans (`apply_flags_span`) mark leader + continuations,
+//!   but emission derives printable content solely from leaders.
+//! - Reverse-video / cursor overlays wrap the entire cluster, never truncating
+//!   combining marks, variation selectors, or ZWJ sequences.
+//!
+//! Parity Note: Partial repaint helpers previously padded wide clusters with
+//! spaces; they now emit identical cluster sequences to the full-frame path,
+//! relying on terminal width semantics (ensuring consistent visual columns).
+//!
 //! Post Refactor R3 (Step 12) the legacy one-shot `Renderer` was removed; all
 //! paths flow through `RenderEngine` which owns metrics, hashing, scheduling,
 //! and writer emission. This concentrates optimization and future scroll-region
@@ -88,7 +106,7 @@
 //! - Unicode correctness: grapheme cluster boundaries & display width respected in all
 //!   paths (status column fix hotfix Steps 8.1/8.2).
 //!
-//! See Phase 3 design document (Step 14) for extended narrative & rationale.
+//! See `design/unicode-cluster-refactor.md` for extended narrative & rationale.
 
 use bitflags::bitflags;
 
@@ -100,16 +118,52 @@ bitflags! {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cell {
-    pub ch: char,
+    /// Full grapheme cluster string (leader cells only). Empty for continuation cells.
+    pub cluster: String,
+    /// Visual width in terminal columns. `0` designates a continuation cell.
+    pub width: u8,
     pub flags: CellFlags,
+}
+
+impl Cell {
+    #[inline]
+    pub fn leader(cluster: &str, width: u16, flags: CellFlags) -> Self {
+        Self {
+            cluster: cluster.to_string(),
+            width: width.max(1) as u8,
+            flags,
+        }
+    }
+    #[inline]
+    pub fn continuation(flags: CellFlags) -> Self {
+        Self {
+            cluster: String::new(),
+            width: 0,
+            flags,
+        }
+    }
+    #[inline]
+    pub fn is_leader(&self) -> bool {
+        self.width > 0
+    }
+    #[inline]
+    pub fn visual_width(&self) -> u16 {
+        self.width as u16
+    }
+    #[inline]
+    pub fn cluster(&self) -> &str {
+        &self.cluster
+    }
 }
 
 impl Default for Cell {
     fn default() -> Self {
-        Self {
-            ch: ' ',
+        // Default is a single space leader cell for blank areas.
+        Cell {
+            cluster: " ".to_string(),
+            width: 1,
             flags: CellFlags::empty(),
         }
     }
@@ -131,19 +185,74 @@ impl Frame {
         }
     }
 
-    pub fn set(&mut self, x: u16, y: u16, ch: char) {
+    #[inline]
+    fn index(&self, x: u16, y: u16) -> Option<usize> {
         if x < self.width && y < self.height {
-            let idx = y as usize * self.width as usize + x as usize;
-            self.cells[idx].ch = ch;
+            Some(y as usize * self.width as usize + x as usize)
+        } else {
+            None
         }
     }
 
-    pub fn set_with_flags(&mut self, x: u16, y: u16, ch: char, flags: CellFlags) {
-        if x < self.width && y < self.height {
-            let idx = y as usize * self.width as usize + x as usize;
-            self.cells[idx].ch = ch;
-            self.cells[idx].flags = flags;
+    /// Set a full cluster at (x,y) and populate continuation cells for its width.
+    pub fn set_cluster(&mut self, x: u16, y: u16, cluster: &str, width: u16, flags: CellFlags) {
+        if x >= self.width || y >= self.height {
+            return;
         }
+        let w = width.max(1).min(self.width - x);
+        if let Some(idx) = self.index(x, y) {
+            self.cells[idx] = Cell::leader(cluster, w, flags);
+        }
+        // Continuations
+        for dx in 1..w {
+            if let Some(c_idx) = self.index(x + dx, y) {
+                // Preserve flags (e.g., reverse) for potential future per-cell styling.
+                self.cells[c_idx] = Cell::continuation(flags);
+            }
+        }
+    }
+
+    /// Apply additional flags over an existing span (leader + continuations).
+    pub fn apply_flags_span(&mut self, x: u16, y: u16, span_width: u16, flags: CellFlags) {
+        let span = span_width.min(self.width.saturating_sub(x));
+        for dx in 0..span {
+            if let Some(idx) = self.index(x + dx, y) {
+                self.cells[idx].flags |= flags;
+            }
+        }
+    }
+
+    /// Iterate leader cells of a row, yielding (&str, width, flags, start_x).
+    pub fn row_leaders<'a>(
+        &'a self,
+        y: u16,
+    ) -> impl Iterator<Item = (&'a str, u16, CellFlags, u16)> + 'a {
+        let width = self.width;
+        let start = y as usize * width as usize;
+        let mut x = 0u16;
+        std::iter::from_fn(move || {
+            while x < width {
+                let idx = start + x as usize;
+                let cell = &self.cells[idx];
+                if cell.is_leader() {
+                    let w = cell.visual_width();
+                    let out = (&*cell.cluster, w, cell.flags, x);
+                    x = x.saturating_add(w); // skip continuation cells
+                    return Some(out);
+                } else {
+                    x += 1; // continuation => advance
+                }
+            }
+            None
+        })
+    }
+
+    /// Collect leader cluster strings for a given row (testing / diagnostics only).
+    pub fn line_clusters(&self, y: u16) -> Vec<&str> {
+        if y >= self.height {
+            return Vec::new();
+        }
+        self.row_leaders(y).map(|(c, _, _, _)| c).collect()
     }
 }
 

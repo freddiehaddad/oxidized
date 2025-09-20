@@ -12,18 +12,19 @@ What works today:
 
 * Classic movement: `h j k l 0 $` plus naive `w / b` word hops.
 * Half‑page motions: `Ctrl-D` (down) / `Ctrl-U` (up) honoring vertical margin.
-* Insert text (full Unicode grapheme clusters — emoji families, combining marks, CJK) without shredding them.
+* Insert text (full Unicode grapheme clusters — emoji families, combining marks, ZWJ sequences, skin tone modifiers, CJK) without shredding them.
 * Backspace removes whole clusters (no half‑emoji horror show).
 * Undo / Redo with sensible insert run coalescing (Esc or newline = boundary) + duplicate snapshot dedupe (skips redundant undo states).
 * Command line stub: `:q` exits; others smile and vanish (buffer replacement `:e <path>` triggers a full repaint correctly).
-* Grapheme‑aware cursor placement (still learning every wide glyph nuance, but earnest).
-* Partial rendering pipeline:
+* Grapheme‑aware cursor placement (cluster‑accurate; visual polish for some terminals still evolving).
+* Partial rendering pipeline (cluster‑aware):
   * Cursor‑only path repaints just old/new cursor lines + status line.
   * Lines path selectively repaints changed lines via line hash diff + dirty tracking.
   * Scroll-region shift path emits real ANSI scroll commands and repaints only entering lines (+ old cursor line) saving lines per frame.
   * Trimmed diff emission repaints only interior mutations (prefix/suffix skip) for large unchanged line regions.
   * Safe full redraw fallback for resize, cold cache, structural edits, or large dirty sets (>=60% of viewport).
   * Status line skip cache avoids repaint when content unchanged (increments metric).
+  * Cluster‑aware full + partial emission: every path prints complete clusters (no truncated variation selectors or combining marks).
   * Status‑only semantic delta classification (mode switch, command typing) avoids marking unrelated lines dirty.
 * Writer batching foundation: consecutive plain single‑width cells coalesced (lower print command count baseline).
 * Resize + buffer replacement invalidation (cache clears; next frame full + rebuild).
@@ -81,10 +82,10 @@ Right now the best help is feedback on architecture, clarity of crate boundaries
 3. **Will it embed Vimscript / Lua?** Probably not directly. Expect a lean capability‑scoped extension / plugin layer in a later phase.
 4. **Why rewrite instead of contribute to Neovim?** Different experiment: explore how far a clean, aggressively modular Rust design can go sans legacy ballast.
 5. **Should I daily‑drive it?** Not yet. Follow along, kick the tires, file crisp issues.
-6. **Why is the cursor sometimes bashful with super wide emoji?** Terminal quirks + early width handling. We’re Unicode‑correct logically; visual polish will keep improving.
+6. **Why is the cursor sometimes bashful with super wide emoji?** Terminal quirks & differing width heuristics. The internal model is fully cluster‑aware; remaining issues are presentation polish.
 7. **Does it still redraw the whole screen every keypress?** No. Cursor moves repaint just the affected lines; small edits repaint only changed lines. Scroll/resize/large edit bursts still force a full frame (on purpose) until scroll region optimization lands.
-8. **What’s next?** Phase 4 will target scroll performance (scroll region commands), output batching, and early groundwork for splits & syntax.
-9. **How do I see performance metrics?** Internally tracked (frame counts, dirty funnel, timings) but not exposed yet — a dashboard command is on the backlog.
+8. **What’s next?** Deeper scroll performance & batching refinements, multi‑viewport layout groundwork, then early syntax / styling layers atop the cluster model.
+9. **How do I see performance metrics?** Internally tracked (frame counts, dirty funnel, timings, cluster render stats) but not exposed yet — a dashboard command is on the backlog.
 10. **Will there be LSP / completion / git soon?** Yes, but only after core rendering + windowing are sturdier. Foundation first.
 
 ## Dual License
