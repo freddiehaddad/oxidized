@@ -172,6 +172,11 @@ pub struct EditorState {
     pub config_vertical_margin: usize,
     pub registers: Registers, // Phase 4 Step 3 scaffold now integrated (Step 6 uses delete)
     pub operator_metrics: OperatorMetrics, // Phase 4 Step 9 counters
+    // Phase 4 Step 15: last render/scheduler metrics snapshots captured post-render.
+    // To avoid a circular dependency (`core-render` depends on `core-state`), we store
+    // lightweight copies of the snapshot data instead of the original types.
+    pub last_render_path: Option<RenderPathSnapshotLite>,
+    pub last_render_delta: Option<RenderDeltaSnapshotLite>,
 }
 
 /// Line ending style detected from source file (Phase 2 Step 9).
@@ -190,6 +195,46 @@ impl LineEnding {
             LineEnding::Crlf => "\r\n",
         }
     }
+}
+
+// Lightweight, non-atomic copies of render path metrics (subset mirror of
+// `core_render::partial_metrics::RenderPathMetricsSnapshot`). Keeping this here
+// avoids a circular dependency while letting higher layers (commands) expose
+// snapshot data without reaching into the renderer crate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RenderPathSnapshotLite {
+    pub full_frames: u64,
+    pub partial_frames: u64,
+    pub cursor_only_frames: u64,
+    pub lines_frames: u64,
+    pub escalated_large_set: u64,
+    pub resize_invalidations: u64,
+    pub dirty_lines_marked: u64,
+    pub dirty_candidate_lines: u64,
+    pub dirty_lines_repainted: u64,
+    pub last_full_render_ns: u64,
+    pub last_partial_render_ns: u64,
+    pub print_commands: u64,
+    pub cells_printed: u64,
+    pub scroll_region_shifts: u64,
+    pub scroll_region_lines_saved: u64,
+    pub scroll_shift_degraded_full: u64,
+    pub trim_attempts: u64,
+    pub trim_success: u64,
+    pub cols_saved_total: u64,
+    pub status_skipped: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RenderDeltaSnapshotLite {
+    pub full: u64,
+    pub lines: u64,
+    pub scroll: u64,
+    pub status_line: u64,
+    pub cursor_only: u64,
+    pub collapsed_scroll: u64,
+    pub suppressed_scroll: u64,
+    pub semantic_frames: u64,
 }
 
 /// Result of normalizing line endings (Phase 2 Step 9).
@@ -360,6 +405,8 @@ impl EditorState {
             config_vertical_margin: 0,
             registers: Registers::new(),
             operator_metrics: OperatorMetrics::default(),
+            last_render_path: None,  // Initialize last_render_path to None
+            last_render_delta: None, // Initialize last_render_delta to None
         }
     }
 

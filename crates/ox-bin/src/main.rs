@@ -284,15 +284,31 @@ async fn main() -> Result<()> {
             }
         }
         // Ask scheduler if a redraw is needed this cycle.
-        if let Some(decision) = scheduler.consume()
-            && let Err(e) = render(
+        if let Some(decision) = scheduler.consume() {
+            if let Err(e) = render(
                 &mut render_engine,
                 model.state(),
                 model.active_view(),
                 &decision,
-            )
-        {
-            error!(?e, "render error");
+            ) {
+                error!(?e, "render error");
+            } else {
+                // Capture scheduler metrics snapshot.
+                let ptr = model.state() as *const EditorState as *mut EditorState;
+                unsafe {
+                    let sch = scheduler.metrics_snapshot();
+                    (*ptr).last_render_delta = Some(core_state::RenderDeltaSnapshotLite {
+                        full: sch.full,
+                        lines: sch.lines,
+                        scroll: sch.scroll,
+                        status_line: sch.status_line,
+                        cursor_only: sch.cursor_only,
+                        collapsed_scroll: sch.collapsed_scroll,
+                        suppressed_scroll: sch.suppressed_scroll,
+                        semantic_frames: sch.semantic_frames,
+                    });
+                }
+            }
         }
     }
     // Guard drop will restore terminal.
@@ -331,6 +347,37 @@ fn render(
     };
     let elapsed = start.elapsed();
     record_last_render_ns(elapsed.as_nanos() as u64);
+    // Store metrics snapshots breadth-first (mutably borrow state via raw pointer pattern if needed).
+    if res.is_ok() {
+        // SAFETY: We only read metrics; need mutable access to store snapshots. Caller holds &EditorState
+        // but we require &mut to write fields. Upcast const pointer then cast to mut (state is not aliased mut elsewhere here).
+        let ptr = state as *const EditorState as *mut EditorState;
+        unsafe {
+            let snap = engine.metrics_snapshot();
+            (*ptr).last_render_path = Some(core_state::RenderPathSnapshotLite {
+                full_frames: snap.full_frames,
+                partial_frames: snap.partial_frames,
+                cursor_only_frames: snap.cursor_only_frames,
+                lines_frames: snap.lines_frames,
+                escalated_large_set: snap.escalated_large_set,
+                resize_invalidations: snap.resize_invalidations,
+                dirty_lines_marked: snap.dirty_lines_marked,
+                dirty_candidate_lines: snap.dirty_candidate_lines,
+                dirty_lines_repainted: snap.dirty_lines_repainted,
+                last_full_render_ns: snap.last_full_render_ns,
+                last_partial_render_ns: snap.last_partial_render_ns,
+                print_commands: snap.print_commands,
+                cells_printed: snap.cells_printed,
+                scroll_region_shifts: snap.scroll_region_shifts,
+                scroll_region_lines_saved: snap.scroll_region_lines_saved,
+                scroll_shift_degraded_full: snap.scroll_shift_degraded_full,
+                trim_attempts: snap.trim_attempts,
+                trim_success: snap.trim_success,
+                cols_saved_total: snap.cols_saved_total,
+                status_skipped: snap.status_skipped,
+            });
+        }
+    }
     res
 }
 

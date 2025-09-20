@@ -60,13 +60,121 @@ fn execute_command(raw: String, state: &mut EditorState, view: &mut View) -> Dis
         ParsedCommand::Write => handle_write(state),
         ParsedCommand::Edit(path) => handle_edit(path, state, view),
         ParsedCommand::Metrics => {
-            state.set_ephemeral("Metrics OK", std::time::Duration::from_secs(2));
+            let text = build_metrics_snapshot(state);
+            // Structured log emission (Phase 4 Step 15 augmentation): full metrics to log file.
+            if let Some(rp) = state.last_render_path {
+                tracing::info!(
+                    target: "metrics",
+                    kind = ":metrics",
+                    op_del = state.operator_metrics_snapshot().operator_delete,
+                    op_yank = state.operator_metrics_snapshot().operator_yank,
+                    op_change = state.operator_metrics_snapshot().operator_change,
+                    reg_writes = state.operator_metrics_snapshot().register_writes,
+                    reg_ring_rot = state.operator_metrics_snapshot().numbered_ring_rotations,
+                    rp_full = rp.full_frames,
+                    rp_partial = rp.partial_frames,
+                    rp_cursor = rp.cursor_only_frames,
+                    rp_lines = rp.lines_frames,
+                    rp_dirty_marked = rp.dirty_lines_marked,
+                    rp_dirty_cand = rp.dirty_candidate_lines,
+                    rp_dirty_repainted = rp.dirty_lines_repainted,
+                    rp_last_full_ns = rp.last_full_render_ns,
+                    rp_last_partial_ns = rp.last_partial_render_ns,
+                    rp_print_cmds = rp.print_commands,
+                    rp_cells = rp.cells_printed,
+                    rp_scroll_shifts = rp.scroll_region_shifts,
+                    rp_scroll_saved = rp.scroll_region_lines_saved,
+                    rp_scroll_degraded = rp.scroll_shift_degraded_full,
+                    rp_trim_attempts = rp.trim_attempts,
+                    rp_trim_success = rp.trim_success,
+                    rp_trim_cols_saved = rp.cols_saved_total,
+                    rp_status_skipped = rp.status_skipped,
+                    sem_full = state.last_render_delta.map(|d| d.full).unwrap_or(0),
+                    sem_lines = state.last_render_delta.map(|d| d.lines).unwrap_or(0),
+                    sem_scroll = state.last_render_delta.map(|d| d.scroll).unwrap_or(0),
+                    sem_status = state.last_render_delta.map(|d| d.status_line).unwrap_or(0),
+                    sem_cursor = state.last_render_delta.map(|d| d.cursor_only).unwrap_or(0),
+                    sem_collapsed_scroll = state.last_render_delta.map(|d| d.collapsed_scroll).unwrap_or(0),
+                    sem_suppressed_scroll = state.last_render_delta.map(|d| d.suppressed_scroll).unwrap_or(0),
+                    sem_frames = state.last_render_delta.map(|d| d.semantic_frames).unwrap_or(0),
+                    "metrics_snapshot"
+                );
+            } else {
+                tracing::info!(target: "metrics", kind=":metrics", rp="none", "metrics_snapshot_no_render_path");
+            }
+            // Longer TTL (5s) to allow user to read.
+            state.set_ephemeral(text, std::time::Duration::from_secs(5));
             DispatchResult::dirty()
         }
         ParsedCommand::Unknown(_) => DispatchResult::dirty(),
     };
     state.command_line.clear();
     result
+}
+
+// Phase 4 Step 15: Build multi-line metrics snapshot string. Conservative breadth-first: fixed
+// ordering, simple formatting, truncate to ~8 lines if extremely long (future overlay can paginate).
+fn build_metrics_snapshot(state: &EditorState) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let op = state.operator_metrics_snapshot();
+    let render_path = state.last_render_path;
+    let render_delta = state.last_render_delta;
+    writeln!(
+        out,
+        "Operators: del={} yank={} chg={}",
+        op.operator_delete, op.operator_yank, op.operator_change
+    )
+    .ok();
+    writeln!(
+        out,
+        "Registers: writes={} ring_rot={}",
+        op.register_writes, op.numbered_ring_rotations
+    )
+    .ok();
+    if let Some(rp) = render_path {
+        writeln!(
+            out,
+            "RenderPath: full={} partial={} cursor={} lines={}",
+            rp.full_frames, rp.partial_frames, rp.cursor_only_frames, rp.lines_frames
+        )
+        .ok();
+        writeln!(
+            out,
+            "DirtyFunnel: marked={} cand={} repainted={}",
+            rp.dirty_lines_marked, rp.dirty_candidate_lines, rp.dirty_lines_repainted
+        )
+        .ok();
+        writeln!(
+            out,
+            "Scroll: shifts={} lines_saved={} degraded={}",
+            rp.scroll_region_shifts, rp.scroll_region_lines_saved, rp.scroll_shift_degraded_full
+        )
+        .ok();
+        writeln!(
+            out,
+            "Trim: attempts={} success={} cols_saved={}",
+            rp.trim_attempts, rp.trim_success, rp.cols_saved_total
+        )
+        .ok();
+        writeln!(out, "Status: skipped={}", rp.status_skipped).ok();
+    } else {
+        writeln!(out, "RenderPath: <no snapshot yet>").ok();
+    }
+    if let Some(rd) = render_delta {
+        writeln!(
+            out,
+            "Semantic: full={} lines={} scroll={} status={} cursor={}",
+            rd.full, rd.lines, rd.scroll, rd.status_line, rd.cursor_only
+        )
+        .ok();
+    }
+    // Truncate to first 10 lines for safety (ephemeral area each line consumed by status builds).
+    let mut lines: Vec<&str> = out.lines().collect();
+    if lines.len() > 10 {
+        lines.truncate(10);
+    }
+    lines.join("\n")
 }
 
 fn handle_edit(
@@ -138,10 +246,24 @@ mod tests {
             res.dirty,
             "metrics command should mark dirty for status repaint"
         );
+        let eph = st.ephemeral_status.as_ref().expect("ephemeral status set");
+        // Should contain at least the Operators and RenderPath headings (RenderPath snapshot may be absent on first run)
         assert!(
-            st.ephemeral_status.is_some(),
-            "ephemeral status should be set"
+            eph.text.contains("Operators:"),
+            "expected Operators line in metrics output: {}",
+            eph.text
         );
-        assert_eq!(st.ephemeral_status.as_ref().unwrap().text, "Metrics OK");
+        // Render path may not yet exist (no render executed) so we only assert Registers present
+        assert!(
+            eph.text.contains("Registers:"),
+            "expected Registers line in metrics output: {}",
+            eph.text
+        );
+        // Ensure numeric counters formatted (simple regex-like contains a digit)
+        assert!(
+            eph.text.chars().any(|c| c.is_ascii_digit()),
+            "expected some digits in metrics output: {}",
+            eph.text
+        );
     }
 }
