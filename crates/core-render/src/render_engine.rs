@@ -301,29 +301,7 @@ impl RenderEngine {
                 } else {
                     raw_line.as_str()
                 };
-                // Walk grapheme clusters identical to build_content_frame (duplication acceptable for now; Step 8 may refactor).
-                let mut byte = 0;
-                let mut vis_col = 0u16;
-                while byte < content_trim.len() && vis_col < w {
-                    let next = grapheme::next_boundary(content_trim, byte);
-                    let cluster = &content_trim[byte..next];
-                    let width = grapheme::cluster_width(cluster) as u16;
-                    let mut chars = cluster.chars();
-                    if let Some(first) = chars.next() {
-                        writer.print(first.to_string());
-                    }
-                    if width > 1 {
-                        for _ in 1..width {
-                            if vis_col + 1 >= w {
-                                break;
-                            }
-                            writer.print(" ");
-                            vis_col = vis_col.saturating_add(1);
-                        }
-                    }
-                    vis_col = vis_col.saturating_add(width.max(1));
-                    byte = next;
-                }
+                Self::paint_content_trim(&mut writer, content_trim, w);
             }
         };
 
@@ -343,77 +321,18 @@ impl RenderEngine {
         // Reuse overlay logic by building a temporary mini Frame row representing current line
         // then emitting styled cells. Simpler: recompute cluster & append ANSI styled sequence.
         // Approach: MoveTo cursor visual start again and write styled cluster.
-        if curr_line >= viewport_first
-            && curr_line < viewport_last_excl
-            && let Some(line_content) = buf.line(curr_line)
-        {
-            let content_trim: &str = if line_content.ends_with(['\n', '\r']) {
-                &line_content[..line_content.len() - 1]
-            } else {
-                line_content.as_str()
-            };
-            let vis_col = grapheme::visual_col(content_trim, view.cursor.byte) as u16;
-            if vis_col < w {
-                let next_byte = grapheme::next_boundary(content_trim, view.cursor.byte);
-                let cluster = &content_trim[view.cursor.byte..next_byte];
-                let width = grapheme::cluster_width(cluster).max(1) as u16;
-                writer.move_to(vis_col, (curr_line - viewport_first) as u16);
-                // Styled first cell
-                let mut chars = cluster.chars();
-                if let Some(first) = chars.next() {
-                    let mut s = String::from("\x1b[7m");
-                    s.push(first);
-                    s.push_str("\x1b[0m");
-                    writer.print(s);
-                } else {
-                    let s = String::from("\x1b[7m \x1b[0m");
-                    writer.print(s);
-                }
-                // Fill remainder cells (wide cluster) with reversed spaces
-                for dx in 1..width {
-                    if vis_col + dx >= w {
-                        break;
-                    }
-                    writer.move_to(vis_col + dx, (curr_line - viewport_first) as u16);
-                    writer.print("\x1b[7m \x1b[0m");
-                }
-            }
-        }
+        self.overlay_cursor_cluster(
+            &mut writer,
+            buf,
+            curr_line,
+            view.cursor.byte,
+            viewport_first,
+            viewport_last_excl,
+            w,
+        );
 
         // Step 8.1 Hotfix: also repaint status line (cursor column displayed there changes on any motion).
-        use crate::status::{StatusContext, build_status};
-        let status_y = h - 1;
-        let ctx = StatusContext {
-            mode: state.mode,
-            line: view.cursor.line,
-            // Phase 3 Step 8.2: use grapheme-aware visual column instead of raw byte index
-            // to ensure Unicode correctness for wide/combining/ZWJ clusters. Future optimization
-            // may cache this per line; for now a direct computation preserves breadth-first goals.
-            col: {
-                let line_content = buf.line(view.cursor.line).unwrap_or_default();
-                let content_trim: &str = if line_content.ends_with(['\n', '\r']) {
-                    &line_content[..line_content.len() - 1]
-                } else {
-                    line_content.as_str()
-                };
-                grapheme::visual_col(content_trim, view.cursor.byte)
-            },
-            command_active: state.command_line.is_active(),
-            command_buffer: state.command_line.buffer(),
-            file_name: state.file_name.as_deref(),
-            dirty: state.dirty,
-        };
-        let status = build_status(&ctx);
-        if status != self.prev_status {
-            writer.move_to(0, status_y);
-            writer.clear_line(0, status_y);
-            writer.print(status.clone());
-            self.prev_status = status;
-        } else {
-            // Increment skip metric.
-            use std::sync::atomic::Ordering::Relaxed;
-            self.metrics.status_skipped.fetch_add(1, Relaxed);
-        }
+        self.maybe_repaint_status(&mut writer, state, view, w, h);
         let (print_cmds, cells) = writer.flush()?;
         // Update metrics
         let dur = start_time.elapsed().as_nanos() as u64;
@@ -542,31 +461,9 @@ impl RenderEngine {
                         trimmed_success = true;
                     }
                     if !trimmed_success {
-                        // Fallback: repaint full line.
                         writer.move_to(0, rel_y);
                         writer.clear_line(0, rel_y);
-                        let mut byte = 0;
-                        let mut vis_col = 0u16;
-                        while byte < content_trim.len() && vis_col < w {
-                            let next = grapheme::next_boundary(content_trim, byte);
-                            let cluster = &content_trim[byte..next];
-                            let width = grapheme::cluster_width(cluster) as u16;
-                            let mut chars = cluster.chars();
-                            if let Some(first) = chars.next() {
-                                writer.print(first.to_string());
-                            }
-                            if width > 1 {
-                                for _ in 1..width {
-                                    if vis_col + 1 >= w {
-                                        break;
-                                    }
-                                    writer.print(" ");
-                                    vis_col += 1;
-                                }
-                            }
-                            vis_col = vis_col.saturating_add(width.max(1));
-                            byte = next;
-                        }
+                        Self::paint_content_trim(&mut writer, content_trim, w);
                     }
                     // Update cache hash entry & stored text (store entire new content string).
                     if cache_row < self.cache.line_hashes.len()
@@ -583,68 +480,16 @@ impl RenderEngine {
             }
         }
 
-        // Cursor overlay on current cursor line.
-        if curr_cursor >= viewport_first && curr_cursor < viewport_last_excl {
-            let line_content = buf.line(curr_cursor).unwrap_or_default();
-            let content_trim: &str = if line_content.ends_with(['\n', '\r']) {
-                &line_content[..line_content.len() - 1]
-            } else {
-                line_content.as_str()
-            };
-            let vis_col = grapheme::visual_col(content_trim, view.cursor.byte) as u16;
-            if vis_col < w {
-                let next_byte = grapheme::next_boundary(content_trim, view.cursor.byte);
-                let cluster = &content_trim[view.cursor.byte..next_byte];
-                let width = grapheme::cluster_width(cluster).max(1) as u16;
-                writer.move_to(vis_col, (curr_cursor - viewport_first) as u16);
-                let mut chars = cluster.chars();
-                if let Some(first) = chars.next() {
-                    let mut s = String::from("\x1b[7m");
-                    s.push(first);
-                    s.push_str("\x1b[0m");
-                    writer.print(s);
-                } else {
-                    writer.print("\x1b[7m \x1b[0m".to_string());
-                }
-                for dx in 1..width {
-                    if vis_col + dx >= w {
-                        break;
-                    }
-                    writer.move_to(vis_col + dx, (curr_cursor - viewport_first) as u16);
-                    writer.print("\x1b[7m \x1b[0m");
-                }
-            }
-        }
-        // Status line repaint logic (skip if unchanged).
-        use crate::status::{StatusContext, build_status};
-        let status_y = h - 1;
-        let ctx = StatusContext {
-            mode: state.mode,
-            line: view.cursor.line,
-            col: {
-                let line_content = buf.line(view.cursor.line).unwrap_or_default();
-                let content_trim: &str = if line_content.ends_with(['\n', '\r']) {
-                    &line_content[..line_content.len() - 1]
-                } else {
-                    line_content.as_str()
-                };
-                grapheme::visual_col(content_trim, view.cursor.byte)
-            },
-            command_active: state.command_line.is_active(),
-            command_buffer: state.command_line.buffer(),
-            file_name: state.file_name.as_deref(),
-            dirty: state.dirty,
-        };
-        let status = build_status(&ctx);
-        if status != self.prev_status {
-            writer.move_to(0, status_y);
-            writer.clear_line(0, status_y);
-            writer.print(status.clone());
-            self.prev_status = status;
-        } else {
-            use std::sync::atomic::Ordering::Relaxed;
-            self.metrics.status_skipped.fetch_add(1, Relaxed);
-        }
+        self.overlay_cursor_cluster(
+            &mut writer,
+            buf,
+            curr_cursor,
+            view.cursor.byte,
+            viewport_first,
+            viewport_last_excl,
+            w,
+        );
+        self.maybe_repaint_status(&mut writer, state, view, w, h);
 
         let (print_cmds, cells) = writer.flush()?;
         self.metrics
@@ -748,28 +593,7 @@ impl RenderEngine {
                     } else {
                         raw_line.as_str()
                     };
-                    let mut byte = 0;
-                    let mut vis_col = 0u16;
-                    while byte < content_trim.len() && vis_col < w {
-                        let next = grapheme::next_boundary(content_trim, byte);
-                        let cluster = &content_trim[byte..next];
-                        let width = grapheme::cluster_width(cluster) as u16;
-                        let mut chars = cluster.chars();
-                        if let Some(first) = chars.next() {
-                            writer.print(first.to_string());
-                        }
-                        if width > 1 {
-                            for _ in 1..width {
-                                if vis_col + 1 >= w {
-                                    break;
-                                }
-                                writer.print(" ");
-                                vis_col += 1;
-                            }
-                        }
-                        vis_col = vis_col.saturating_add(width.max(1));
-                        byte = next;
-                    }
+                    Self::paint_content_trim(&mut writer, content_trim, w);
                     if row < self.cache.prev_text.len() {
                         self.cache.set_prev_text(row, content_trim.to_string());
                     }
@@ -791,28 +615,7 @@ impl RenderEngine {
                     } else {
                         raw_line.as_str()
                     };
-                    let mut byte = 0;
-                    let mut vis_col = 0u16;
-                    while byte < content_trim.len() && vis_col < w {
-                        let next = grapheme::next_boundary(content_trim, byte);
-                        let cluster = &content_trim[byte..next];
-                        let width = grapheme::cluster_width(cluster) as u16;
-                        let mut chars = cluster.chars();
-                        if let Some(first) = chars.next() {
-                            writer.print(first.to_string());
-                        }
-                        if width > 1 {
-                            for _ in 1..width {
-                                if vis_col + 1 >= w {
-                                    break;
-                                }
-                                writer.print(" ");
-                                vis_col += 1;
-                            }
-                        }
-                        vis_col = vis_col.saturating_add(width.max(1));
-                        byte = next;
-                    }
+                    Self::paint_content_trim(&mut writer, content_trim, w);
                     if row < self.cache.prev_text.len() {
                         self.cache.set_prev_text(row, content_trim.to_string());
                     }
@@ -842,28 +645,7 @@ impl RenderEngine {
                 } else {
                     raw_line.as_str()
                 };
-                let mut byte = 0;
-                let mut vis_col = 0u16;
-                while byte < content_trim.len() && vis_col < w {
-                    let next = grapheme::next_boundary(content_trim, byte);
-                    let cluster = &content_trim[byte..next];
-                    let width = grapheme::cluster_width(cluster) as u16;
-                    let mut chars = cluster.chars();
-                    if let Some(first) = chars.next() {
-                        writer.print(first.to_string());
-                    }
-                    if width > 1 {
-                        for _ in 1..width {
-                            if vis_col + 1 >= w {
-                                break;
-                            }
-                            writer.print(" ");
-                            vis_col += 1;
-                        }
-                    }
-                    vis_col = vis_col.saturating_add(width.max(1));
-                    byte = next;
-                }
+                Self::paint_content_trim(&mut writer, content_trim, w);
                 let rel_row = old_cursor - new_viewport_first;
                 if rel_row < self.cache.prev_text.len() {
                     self.cache.set_prev_text(rel_row, content_trim.to_string());
@@ -874,72 +656,19 @@ impl RenderEngine {
         }
 
         // 4. Cursor overlay (always ensure current cursor cluster styled on top of scrolled content).
-        if cursor_line >= new_viewport_first
-            && cursor_line < new_viewport_first + visible_rows
-            && let Some(line_content) = buf.line(cursor_line)
-        {
-            let content_trim: &str = if line_content.ends_with(['\n', '\r']) {
-                &line_content[..line_content.len() - 1]
-            } else {
-                line_content.as_str()
-            };
-            let vis_col = grapheme::visual_col(content_trim, view.cursor.byte) as u16;
-            if vis_col < w {
-                let next_byte = grapheme::next_boundary(content_trim, view.cursor.byte);
-                let cluster = &content_trim[view.cursor.byte..next_byte];
-                let width = grapheme::cluster_width(cluster).max(1) as u16;
-                writer.move_to(vis_col, (cursor_line - new_viewport_first) as u16);
-                let mut chars = cluster.chars();
-                if let Some(first) = chars.next() {
-                    let mut s = String::from("\x1b[7m");
-                    s.push(first);
-                    s.push_str("\x1b[0m");
-                    writer.print(s);
-                } else {
-                    writer.print("\x1b[7m \x1b[0m".to_string());
-                }
-                for dx in 1..width {
-                    if vis_col + dx >= w {
-                        break;
-                    }
-                    writer.move_to(vis_col + dx, (cursor_line - new_viewport_first) as u16);
-                    writer.print("\x1b[7m \x1b[0m");
-                }
-            }
-        }
+        self.overlay_cursor_cluster(
+            &mut writer,
+            buf,
+            cursor_line,
+            view.cursor.byte,
+            new_viewport_first,
+            new_viewport_first + visible_rows,
+            w,
+        );
 
         // 5. Status line repaint (cursor column, dirty flag, etc.) with skip logic.
-        use crate::status::{StatusContext, build_status};
-        let status_y = h - 1;
-        let ctx = StatusContext {
-            mode: state.mode,
-            line: view.cursor.line,
-            col: {
-                let lc = buf.line(view.cursor.line).unwrap_or_default();
-                let content_trim: &str = if lc.ends_with(['\n', '\r']) {
-                    &lc[..lc.len() - 1]
-                } else {
-                    lc.as_str()
-                };
-                grapheme::visual_col(content_trim, view.cursor.byte)
-            },
-            command_active: state.command_line.is_active(),
-            command_buffer: state.command_line.buffer(),
-            file_name: state.file_name.as_deref(),
-            dirty: state.dirty,
-        };
-        let status = build_status(&ctx);
-        // Restore full-screen scroll region before potential status write.
         writer.print("\x1b[r");
-        if status != self.prev_status {
-            writer.move_to(0, status_y);
-            writer.clear_line(0, status_y);
-            writer.print(status.clone());
-            self.prev_status = status;
-        } else {
-            use std::sync::atomic::Ordering::Relaxed;
-            self.metrics.status_skipped.fetch_add(1, Relaxed);
-        }
+        self.maybe_repaint_status(&mut writer, state, view, w, h);
 
         let (print_cmds, cells) = writer.flush()?;
 
@@ -1058,6 +787,124 @@ impl RenderEngine {
             }
         }
         self.last_cursor = meta;
+    }
+
+    // Phase 4 Step 16: helper to emit a trimmed line's content to the BatchWriter.
+    // Mirrors logic previously duplicated across partial paths (cursor-only, lines, scroll).
+    fn paint_content_trim(writer: &mut BatchWriter, content_trim: &str, w: u16) {
+        let mut byte = 0;
+        let mut vis_col = 0u16;
+        while byte < content_trim.len() && vis_col < w {
+            let next = grapheme::next_boundary(content_trim, byte);
+            let cluster = &content_trim[byte..next];
+            let width = grapheme::cluster_width(cluster) as u16;
+            let mut chars = cluster.chars();
+            if let Some(first) = chars.next() {
+                writer.print(first.to_string());
+            }
+            if width > 1 {
+                for _ in 1..width {
+                    if vis_col + 1 >= w {
+                        break;
+                    }
+                    writer.print(" ");
+                    vis_col = vis_col.saturating_add(1);
+                }
+            }
+            vis_col = vis_col.saturating_add(width.max(1));
+            byte = next;
+        }
+    }
+
+    // Phase 4 Step 16: overlay cursor cluster (reverse video) for partial ANSI writer paths.
+    #[allow(clippy::too_many_arguments)]
+    fn overlay_cursor_cluster(
+        &self,
+        writer: &mut BatchWriter,
+        buf: &core_text::Buffer,
+        cursor_line: usize,
+        cursor_byte: usize,
+        viewport_first: usize,
+        viewport_last_excl: usize,
+        w: u16,
+    ) {
+        if cursor_line < viewport_first || cursor_line >= viewport_last_excl {
+            return;
+        }
+        if let Some(line_content) = buf.line(cursor_line) {
+            let content_trim: &str = if line_content.ends_with(['\n', '\r']) {
+                &line_content[..line_content.len() - 1]
+            } else {
+                line_content.as_str()
+            };
+            let vis_col = grapheme::visual_col(content_trim, cursor_byte) as u16;
+            if vis_col < w {
+                let next_byte = grapheme::next_boundary(content_trim, cursor_byte);
+                let cluster = &content_trim[cursor_byte..next_byte];
+                let width = grapheme::cluster_width(cluster).max(1) as u16;
+                writer.move_to(vis_col, (cursor_line - viewport_first) as u16);
+                let mut chars = cluster.chars();
+                if let Some(first) = chars.next() {
+                    let mut s = String::from("\x1b[7m");
+                    s.push(first);
+                    s.push_str("\x1b[0m");
+                    writer.print(s);
+                } else {
+                    writer.print("\x1b[7m \x1b[0m".to_string());
+                }
+                for dx in 1..width {
+                    if vis_col + dx >= w {
+                        break;
+                    }
+                    writer.move_to(vis_col + dx, (cursor_line - viewport_first) as u16);
+                    writer.print("\x1b[7m \x1b[0m");
+                }
+            }
+        }
+    }
+
+    // Phase 4 Step 16: unified status repaint with skip logic & metric.
+    fn maybe_repaint_status(
+        &mut self,
+        writer: &mut BatchWriter,
+        state: &EditorState,
+        view: &View,
+        _w: u16,
+        h: u16,
+    ) {
+        use crate::status::{StatusContext, build_status};
+        if h == 0 {
+            return;
+        }
+        let buf = state.active_buffer();
+        let status_y = h - 1;
+        let ctx = StatusContext {
+            mode: state.mode,
+            line: view.cursor.line,
+            col: {
+                let line_content = buf.line(view.cursor.line).unwrap_or_default();
+                let content_trim: &str = if line_content.ends_with(['\n', '\r']) {
+                    &line_content[..line_content.len() - 1]
+                } else {
+                    line_content.as_str()
+                };
+                grapheme::visual_col(content_trim, view.cursor.byte)
+            },
+            command_active: state.command_line.is_active(),
+            command_buffer: state.command_line.buffer(),
+            file_name: state.file_name.as_deref(),
+            dirty: state.dirty,
+        };
+        let status = build_status(&ctx);
+        if status != self.prev_status {
+            writer.move_to(0, status_y);
+            writer.clear_line(0, status_y);
+            writer.print(status.clone());
+            self.prev_status = status;
+        } else {
+            use std::sync::atomic::Ordering::Relaxed;
+            self.metrics.status_skipped.fetch_add(1, Relaxed);
+        }
     }
 
     /// Full-frame translation using Writer (originally introduced in Step 6 as a
