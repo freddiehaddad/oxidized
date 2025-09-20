@@ -32,6 +32,8 @@ pub struct RenderEngine {
     // Overhead is negligible: small Vec cleared/pushed only for partial paths.
     last_repaint_lines: Vec<usize>, // buffer line indices repainted in last partial frame
     last_repaint_kind: Option<&'static str>,
+    /// Cached last rendered status line text for skip optimization (Phase 4 Step 13).
+    prev_status: String,
 }
 
 /// Phase 3 Step 10: proportion of visible text rows whose inclusion in the
@@ -142,6 +144,7 @@ impl RenderEngine {
             capabilities: TerminalCapabilities::detect(),
             last_repaint_lines: Vec::new(),
             last_repaint_kind: None,
+            prev_status: String::new(),
         }
     }
 
@@ -168,7 +171,33 @@ impl RenderEngine {
         let _caps = self.capabilities; // reserved for scroll-region path gating (future)
         let mut frame = build_content_frame(state, view, w, h);
         self.apply_cursor_overlay(state, view, &mut frame, w, h);
-        apply_status_line(state, view, &mut frame, w, h);
+        // Build status line string first so we can reuse exact text for cache (avoids
+        // discrepancies when reconstructing from Frame cell padding). Then write it into frame.
+        let status_string = if h > 0 {
+            let buf = state.active_buffer();
+            let line_content = buf.line(view.cursor.line).unwrap_or_default();
+            let content_trim: &str = if line_content.ends_with("\r\n") {
+                &line_content[..line_content.len() - 2]
+            } else if line_content.ends_with(['\n', '\r']) {
+                &line_content[..line_content.len() - 1]
+            } else {
+                &line_content
+            };
+            let col = grapheme::visual_col(content_trim, view.cursor.byte);
+            crate::status::build_status(&crate::status::StatusContext {
+                mode: state.mode,
+                line: view.cursor.line,
+                col,
+                command_active: state.command_line.is_active(),
+                command_buffer: state.command_line.buffer(),
+                file_name: state.file_name.as_deref(),
+                dirty: state.dirty,
+            })
+        } else {
+            String::new()
+        };
+        apply_status_line(state, view, &mut frame, w, h); // still paints into frame for full path
+        self.prev_status = status_string;
         // Phase 3 Step 6: translate Frame into writer commands (still full repaint)
         let (print_cmds, cells) = self.render_via_writer(&frame)?;
         // Update last cursor line in cache.
@@ -375,9 +404,16 @@ impl RenderEngine {
             dirty: state.dirty,
         };
         let status = build_status(&ctx);
-        writer.move_to(0, status_y);
-        writer.clear_line(0, status_y);
-        writer.print(status);
+        if status != self.prev_status {
+            writer.move_to(0, status_y);
+            writer.clear_line(0, status_y);
+            writer.print(status.clone());
+            self.prev_status = status;
+        } else {
+            // Increment skip metric.
+            use std::sync::atomic::Ordering::Relaxed;
+            self.metrics.status_skipped.fetch_add(1, Relaxed);
+        }
         let (print_cmds, cells) = writer.flush()?;
         // Update metrics
         let dur = start_time.elapsed().as_nanos() as u64;
@@ -579,6 +615,37 @@ impl RenderEngine {
                 }
             }
         }
+        // Status line repaint logic (skip if unchanged).
+        use crate::status::{StatusContext, build_status};
+        let status_y = h - 1;
+        let ctx = StatusContext {
+            mode: state.mode,
+            line: view.cursor.line,
+            col: {
+                let line_content = buf.line(view.cursor.line).unwrap_or_default();
+                let content_trim: &str = if line_content.ends_with(['\n', '\r']) {
+                    &line_content[..line_content.len() - 1]
+                } else {
+                    line_content.as_str()
+                };
+                grapheme::visual_col(content_trim, view.cursor.byte)
+            },
+            command_active: state.command_line.is_active(),
+            command_buffer: state.command_line.buffer(),
+            file_name: state.file_name.as_deref(),
+            dirty: state.dirty,
+        };
+        let status = build_status(&ctx);
+        if status != self.prev_status {
+            writer.move_to(0, status_y);
+            writer.clear_line(0, status_y);
+            writer.print(status.clone());
+            self.prev_status = status;
+        } else {
+            use std::sync::atomic::Ordering::Relaxed;
+            self.metrics.status_skipped.fetch_add(1, Relaxed);
+        }
+
         let (print_cmds, cells) = writer.flush()?;
         self.metrics
             .dirty_lines_repainted
@@ -841,7 +908,7 @@ impl RenderEngine {
             }
         }
 
-        // 5. Status line repaint (cursor column, dirty flag, etc.).
+        // 5. Status line repaint (cursor column, dirty flag, etc.) with skip logic.
         use crate::status::{StatusContext, build_status};
         let status_y = h - 1;
         let ctx = StatusContext {
@@ -862,11 +929,17 @@ impl RenderEngine {
             dirty: state.dirty,
         };
         let status = build_status(&ctx);
-        // Restore full-screen scroll region before writing status (outside text region).
+        // Restore full-screen scroll region before potential status write.
         writer.print("\x1b[r");
-        writer.move_to(0, status_y);
-        writer.clear_line(0, status_y);
-        writer.print(status);
+        if status != self.prev_status {
+            writer.move_to(0, status_y);
+            writer.clear_line(0, status_y);
+            writer.print(status.clone());
+            self.prev_status = status;
+        } else {
+            use std::sync::atomic::Ordering::Relaxed;
+            self.metrics.status_skipped.fetch_add(1, Relaxed);
+        }
 
         let (print_cmds, cells) = writer.flush()?;
 
@@ -1267,5 +1340,50 @@ mod tests {
         assert_eq!(snap.scroll_region_lines_saved, 4);
         assert_eq!(eng.test_last_repaint_kind(), Some("scroll_shift"));
         assert_eq!(eng.test_last_repaint_lines().len(), 2);
+    }
+
+    #[test]
+    fn status_line_skip_metric_increments_when_unchanged_cursor_only() {
+        let model = mk_state("alpha\n");
+        let mut eng = RenderEngine::new();
+        let layout = core_model::Layout::single(80, 5);
+        let view0 = model.active_view().clone();
+        eng.render_full(model.state(), &view0, &layout, 80, 5)
+            .unwrap();
+        let snap0 = eng.metrics_snapshot();
+        // Perform a cursor-only render without moving cursor (status identical).
+        eng.render_cursor_only(model.state(), &view0, &layout, 80, 5)
+            .unwrap();
+        let snap1 = eng.metrics_snapshot();
+        assert_eq!(snap1.status_skipped, snap0.status_skipped + 1);
+    }
+
+    #[test]
+    fn status_line_repaints_when_dirty_flag_changes() {
+        let mut model = mk_state("alpha\n");
+        let mut eng = RenderEngine::new();
+        let layout = core_model::Layout::single(80, 5);
+        let view0 = model.active_view().clone();
+        eng.render_full(model.state(), &view0, &layout, 80, 5)
+            .unwrap();
+        // Mark buffer dirty by inserting a character.
+        {
+            let buf = model.state_mut().active_buffer_mut();
+            let mut pos = core_text::Position::new(0, 0);
+            buf.insert_grapheme(&mut pos, "x");
+            // Explicitly mark state dirty so status line reflects change (adds '*').
+            model.state_mut().dirty = true;
+        }
+        // Move cursor so we take cursor-only path and status differs due to dirty flag.
+        let mut view_move = view0.clone();
+        view_move.cursor.line = 0; // unchanged line but status changes because dirty=true
+        let before = eng.metrics_snapshot().status_skipped;
+        eng.render_cursor_only(model.state(), &view_move, &layout, 80, 5)
+            .unwrap();
+        let after = eng.metrics_snapshot();
+        assert_eq!(
+            after.status_skipped, before,
+            "should not increment skip when status changed"
+        );
     }
 }

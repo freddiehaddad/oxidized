@@ -49,6 +49,8 @@ pub struct RenderPathMetrics {
     pub trim_success: AtomicU64,
     /// Total columns saved across successful trims.
     pub cols_saved_total: AtomicU64,
+    /// Status line repaints skipped because content unchanged (Phase 4 Step 13).
+    pub status_skipped: AtomicU64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +74,7 @@ pub struct RenderPathMetricsSnapshot {
     pub trim_attempts: u64,
     pub trim_success: u64,
     pub cols_saved_total: u64,
+    pub status_skipped: u64,
 }
 
 impl RenderPathMetrics {
@@ -96,6 +99,7 @@ impl RenderPathMetrics {
             trim_attempts: self.trim_attempts.load(Ordering::Relaxed),
             trim_success: self.trim_success.load(Ordering::Relaxed),
             cols_saved_total: self.cols_saved_total.load(Ordering::Relaxed),
+            status_skipped: self.status_skipped.load(Ordering::Relaxed),
         }
     }
 }
