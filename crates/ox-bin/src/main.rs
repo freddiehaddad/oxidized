@@ -128,6 +128,18 @@ async fn main() -> Result<()> {
     // Phase 2 Step 16: bounded channel activation (natural backpressure via blocking_send).
     let (tx, mut rx) = mpsc::channel::<Event>(EVENT_CHANNEL_CAP);
     let _input_handle = core_input::spawn_input_thread(tx.clone());
+    // Phase 4 Step 14: spawn monotonic ticker task emitting Event::Tick every 250ms.
+    let tick_tx = tx.clone();
+    let _tick_handle = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(250));
+        loop {
+            interval.tick().await;
+            // Ignore send errors if channel closed (shutdown path).
+            if tick_tx.send(Event::Tick).await.is_err() {
+                break;
+            }
+        }
+    });
 
     // Command line now stored within EditorState (Refactor R1 Step 2)
 
@@ -236,6 +248,13 @@ async fn main() -> Result<()> {
                 }
             }
             Event::RenderRequested => {}
+            Event::Tick => {
+                // Ephemeral expiry driven by tick (no busy waiting). If expired mark status delta.
+                if model.state_mut().tick_ephemeral() {
+                    scheduler.mark(RenderDelta::StatusLine);
+                }
+                // Future: metrics overlay refresh or cursor blink logic can hook here.
+            }
             Event::Command(CommandEvent::Quit) => {
                 break;
             }
@@ -243,11 +262,7 @@ async fn main() -> Result<()> {
                 break;
             }
         }
-        // Expire ephemeral status if needed (breadth-first synchronous check)
-        if model.state_mut().tick_ephemeral() {
-            // Ephemeral expiry changes status content; mark status-only delta.
-            scheduler.mark(RenderDelta::StatusLine);
-        }
+        // Ephemeral expiry moved into Tick handling above.
         // Auto-scroll (Phase 2 Step 8): keep cursor visible.
         if let Ok((_, h)) = crossterm::terminal::size() {
             let text_height = if h > 0 { (h - 1) as usize } else { 0 };
@@ -588,5 +603,32 @@ mod tests {
         let idx = 3;
         let cell = frame.cells[idx];
         assert_eq!(cell.ch, ' '); // synthesized space
+    }
+
+    #[tokio::test]
+    async fn tick_event_expires_ephemeral_and_schedules_status() {
+        // Set up minimal channel and model, inject ephemeral already expired to trigger path.
+        let (tx, mut rx) = mpsc::channel::<Event>(8);
+        // Send a Tick after creating state with expired ephemeral.
+        let buffer = Buffer::from_str("t", "hello").unwrap();
+        let mut model = EditorModel::new(EditorState::new(buffer));
+        {
+            let st = model.state_mut();
+            st.set_ephemeral("Temp", std::time::Duration::from_millis(1));
+            // Force expiration by rewinding expires_at.
+            if let Some(m) = &mut st.ephemeral_status {
+                m.expires_at = std::time::Instant::now() - std::time::Duration::from_millis(5);
+            }
+        }
+        let mut scheduler = RenderScheduler::new();
+        tx.send(Event::Tick).await.unwrap();
+        if let Some(Event::Tick) = rx.recv().await
+            && model.state_mut().tick_ephemeral()
+        {
+            scheduler.mark(RenderDelta::StatusLine);
+        }
+        // Consume scheduler decision and ensure it's StatusLine.
+        let decision = scheduler.consume().expect("expected decision");
+        matches!(decision.effective, RenderDelta::StatusLine);
     }
 }

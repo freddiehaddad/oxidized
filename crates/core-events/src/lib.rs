@@ -34,6 +34,9 @@ pub enum Event {
     Input(InputEvent),
     Command(CommandEvent),
     RenderRequested,
+    /// Periodic monotonic tick (Phase 4 Step 14) used to drive ephemeral expiry
+    /// and future lightweight refresh tasks without busy polling.
+    Tick,
     Shutdown,
 }
 
