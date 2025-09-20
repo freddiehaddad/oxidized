@@ -16,11 +16,19 @@
 //! - Evolution over legacy: deprecated stateless translator path shims to the new
 //!   stateful version and can be removed once Phase 4 count/operator work lands.
 //!
-//! Forward (Phase 4+) Roadmap:
-//! - Implement numeric prefixes accumulation (e.g. `3dw`).
-//! - Operator-pending state machine (BeginOperator -> motion -> ApplyOperator).
-//! - Register/yank integration and macro recording observer hooks.
-//! - Async command execution hooks (LSP, formatting) via observer or dispatcher extension.
+//! Phase 4 Status:
+//! - Numeric count prefixes (Step 1) now accumulate into `MotionWithCount` and are
+//!   internally expanded by dispatcher logic (preserving one Action per keypress).
+//! - Operator-pending + application variants (`BeginOperator`, `ApplyOperator`) are
+//!   live; delete/yank/change semantics integrate with register + undo layers.
+//! - Motion span resolution (Step 4) centralizes grapheme/word iteration rules so
+//!   operator engines and future visual selections share identical span semantics.
+//! - Future: register selection, paste, macro recording, and async action hooks.
+//!
+//! Forward (Phase 5+ Roadmap):
+//! - Explicit register selection (`"a`), paste operators, macro record/replay.
+//! - Async command execution hooks (LSP formatting, code actions) via observer
+//!   extension point.
 
 use core_events::KeyEvent;
 use core_state::Mode;

@@ -37,19 +37,14 @@ pub mod undo;
 use undo::UndoEngine;
 pub use undo::{InsertRun, SnapshotKind, UNDO_HISTORY_MAX};
 
-// Phase 4 Step 3: Registers scaffold
-// Breadth-first: Introduces an in-memory register ring storing text captured
-// by yank/delete/change operators. Integration (population on operator
-// application and paste semantics) will follow in later steps. This module
-// intentionally keeps the data structure minimal and cheap.
-//
-// Model (subset of Vim semantics):
-// - Unnamed register ("") always mirrors the most recent yank/delete/change.
-// - Numbered ring (0..=9) rotates; newest textual content pushed at index 0.
-// - Capacity fixed at 10 for now; future expansion can generalize via const.
-// - Change operations behave like delete + enter-insert (population handled
-//   by operator engine later).
-// - Paste & explicit register selection are deferred (Phase 5+ per design).
+// Registers & Operator Metrics (Phase 4 Steps 3,6–9):
+// - Registers are now fully populated by delete/yank/change operators; unnamed
+//   always mirrors the latest textual payload; numbered ring rotates with fixed
+//   capacity (10) discarding oldest on overflow.
+// - Operator metrics track counts & register writes enabling `:metrics` surface
+//   correlation between editing patterns and repaint pipeline cost.
+// - Paste & explicit register selection remain deferred (Phase 5) preserving
+//   breadth-first progress while ensuring current operator semantics are testable.
 #[derive(Debug, Default, Clone)]
 pub struct Registers {
     pub unnamed: String,
@@ -170,8 +165,8 @@ pub struct EditorState {
     pub original_line_ending: LineEnding,
     pub had_trailing_newline: bool,
     pub config_vertical_margin: usize,
-    pub registers: Registers, // Phase 4 Step 3 scaffold now integrated (Step 6 uses delete)
-    pub operator_metrics: OperatorMetrics, // Phase 4 Step 9 counters
+    pub registers: Registers, // Phase 4: populated by yank/delete/change
+    pub operator_metrics: OperatorMetrics, // Phase 4: operator + register counters
     // Phase 4 Step 15: last render/scheduler metrics snapshots captured post-render.
     // To avoid a circular dependency (`core-render` depends on `core-state`), we store
     // lightweight copies of the snapshot data instead of the original types.

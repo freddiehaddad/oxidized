@@ -64,8 +64,21 @@
 //! - Cold cache (viewport start or width change) => Full (caller or internal fallback).
 //! - Cursor-only path relies on prior full frame correctness (no hashing each motion).
 //!
-//! Deferred (Future Phases): scroll region exploitation, prefix/suffix diff trimming,
-//! command batching, moving average latency metrics, Unicode width caching.
+//! Phase 4 Additions:
+//! - Scroll region shift path (real S/T emission) with entering line repaints
+//!   and reuse of partial cache via `shift_for_scroll` (lines saved metric).
+//! - Trimmed line diff heuristic (prefix/suffix skip) storing prior line text
+//!   (`prev_text`) and emitting only interior mutations when savings threshold met.
+//! - Status line skip cache (`prev_status`) increments `status_skipped` when content
+//!   unchanged across partial frames.
+//! - Unified helpers (`paint_content_trim`, `overlay_cursor_cluster`,
+//!   `maybe_repaint_status`) reduced duplicated ANSI emission logic across partial
+//!   strategies.
+//! - Performance parity tests (Step 17) assert structural metric invariants for the
+//!   optimized paths without relying on timing.
+//!
+//! Deferred (Future Phases): multi-line segmented diff trimming, command batching,
+//! moving average latency metrics, Unicode width caching, multi-viewport fan-out.
 //!
 //! Architectural Tenets Applied:
 //! - Breadth-first: feature order prioritized correctness & instrumentation before micro

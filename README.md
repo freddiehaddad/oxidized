@@ -20,25 +20,27 @@ What works today:
 * Partial rendering pipeline:
   * Cursor‑only path repaints just old/new cursor lines + status line.
   * Lines path selectively repaints changed lines via line hash diff + dirty tracking.
-  * Safe full redraw fallback for scroll, resize, buffer replace, or large dirty sets (>=60% of viewport).
+  * Scroll-region shift path emits real ANSI scroll commands and repaints only entering lines (+ old cursor line) saving lines per frame.
+  * Trimmed diff emission repaints only interior mutations (prefix/suffix skip) for large unchanged line regions.
+  * Safe full redraw fallback for resize, cold cache, structural edits, or large dirty sets (>=60% of viewport).
+  * Status line skip cache avoids repaint when content unchanged (increments metric).
   * Status‑only semantic delta classification (mode switch, command typing) avoids marking unrelated lines dirty.
 * Writer batching foundation: consecutive plain single‑width cells coalesced (lower print command count baseline).
 * Resize + buffer replacement invalidation (cache clears; next frame full + rebuild).
-* Metrics instrumentation (full vs partial frame counts, dirty line funnel, escalation, timings).
+* Metrics instrumentation (full vs partial frame counts, dirty line funnel, scroll shifts + lines saved, trim attempts/success, status skips, timings).
 * Multi‑view scaffolding (internal single active view; real splits later) + `Layout` abstraction.
 * Terminal capability probe stub (scroll region support flag) readying scroll optimization work.
-* `:metrics` command stub (placeholder message) — real snapshot coming later.
+* Real `:metrics` snapshot (multi-line counters: frames, operators, trim, scroll, status skips, print commands, cells printed).
 * Tracing spans for motions & edits for future profiling.
 
 Still missing / deferred:
 
-* Scroll region optimization (scroll still triggers full redraw; capability stub in place).
+* Advanced batching, multi-region layouts, segmented diff trimming improvements.
 * Multiple simultaneously visible splits / window layout (layout regions beyond 1).
 * Search, syntax highlighting, theming, plugins, LSP/DAP, completion, git integration.
 * Smarter word motions (current word logic intentionally naive).
 * Time‑based undo coalescing.
-* Status line repaint skip when content identical (delta type exists; no diff suppression yet).
-* Performance dashboard / real metrics surface (`:metrics` only a stub today).
+* Performance dashboard overlay mode (current snapshot only ephemeral); richer UI pending.
 
 If that sounds fun rather than disappointing — you get the vibe.
 
