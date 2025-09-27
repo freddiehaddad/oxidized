@@ -1,0 +1,46 @@
+# Next-Gen Input (NGI) Overview
+
+The NGI pipeline is Oxidized's end-to-end bridge from terminal events to high-level editing actions. It focuses on three promises: keep user intent intact (including multi-codepoint graphemes), keep latency predictable, and keep observability rich without leaking sensitive payloads.
+
+## Goals
+
+- **Unicode fidelity**: normalize and buffer text commits without breaking grapheme clusters, emoji families, or width overrides.
+- **Deterministic mapping**: translate raw events into Vim-compatible actions with explicit timeout handling and replayable sequences.
+- **Streaming safety**: treat bracketed paste as a first-class session so large payloads move efficiently while staying redacted in logs.
+- **Telemetry-first**: surface trace spans and counters for input threads, translator states, and paste statistics without exposing raw content.
+
+## Event flow
+
+1. **Terminal thread (`core-input`)** enables bracketed paste and blocks on `crossterm::event::read`.
+2. Events enter a bounded `tokio::mpsc` channel as `core_events::Event::Input`, maintaining backpressure and metrics (`CHANNEL_BLOCKING_SENDS`, `PASTE_*`).
+3. **Paste FSM** distinguishes between normal keypresses and bracketed paste sessions, emitting `PasteStart`, `PasteChunk`, and `PasteEnd` markers while tracing only lengths.
+4. **NGI translator (`core-keymap`)** consumes `InputEvent` values and resolves counts, register prefixes, and multi-key sequences into high-level actions via a trie-based state machine with explicit timeout deadlines.
+5. **Dispatcher (`core-actions`)** applies resolved actions to the editor state, keeping undo, registers, and render scheduling in sync with Vim parity expectations.
+
+## Unicode handling
+
+- Keycodes are normalized through `core_events::normalize_keycode` so control characters and printable text share the same downstream rules.
+- Text commits are funneled through the centralized normalization and segmentation adapter established in the Vim parity plan (Step 4), keeping grapheme boundaries intact for undo coalescing and rendering.
+- Paste chunks flush once buffers reach configurable thresholds, ensuring large emoji-rich payloads stay chunk-aligned without splitting clusters.
+
+## Timeout & resolution
+
+- The translator tracks whether a pending sequence requires more input (e.g., distinguishing `d` vs. `dw`).
+- `NgiResolution` exposes the resolved action, any pending state, and an optional deadline so the host (e.g., `ox-bin`) can trigger timeouts deterministically.
+- Literal sequences (like `<C-v>` inserts) are replayed exactly as Vim would, keeping parity scenarios reliable.
+
+## Observability
+
+- Each stage emits structured tracing:
+  - `input.thread` wraps the blocking reader lifecycle.
+  - `input.paste` logs session start/end and chunk lengths.
+  - `actions.translate` and `actions.dispatch` capture translator decisions and dispatcher outcomes.
+- Counters in `core-events` record channel pressure and paste throughput; the metrics overlay surfaces these values live inside the TUI.
+
+## Extending the pipeline
+
+- New key sequences: add trie entries in `core-keymap` and cover them with NGI translation tests (`crates/core-actions/tests/ngi_*`).
+- Additional event sources (mouse, focus, IME composition) can enqueue new `InputEvent` variants before translation.
+- When broadening command coverage, record real Vim keystrokes and add scenarios to `tests/vim_regressions.rs` so NGI changes stay parity-safe.
+
+For logging guidelines, see `docs/logging.md`. Use the regression harness documented in `docs/commands.md` to verify end-to-end behavior.
