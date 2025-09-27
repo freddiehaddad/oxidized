@@ -75,6 +75,11 @@ pub enum ComposedAction {
         count: u32,
         register: Option<char>,
     },
+    LinewiseOperator {
+        op: char,
+        count: u32,
+        register: Option<char>,
+    },
     PasteAfter {
         register: Option<char>,
     },
@@ -152,6 +157,27 @@ pub fn compose_with_context(ctx: &mut PendingContext, out: &MappingOutput) -> Co
             ComposedAction::Motion { motion: '0', count }
         }
         MappingOutput::Operator(op) => {
+            if let Some(prev) = ctx.operator
+                && prev == *op
+            {
+                let prefix = ctx.count_prefix.take().unwrap_or(1);
+                let post = ctx.post_op_count.take().unwrap_or(1);
+                let total = prefix.saturating_mul(post).min(999_999);
+                let reg = ctx.register.take();
+                ctx.operator = None;
+                debug!(
+                    target = "input.context",
+                    operator = %op,
+                    count = total,
+                    register = ?reg,
+                    "linewise_operator_emit"
+                );
+                return ComposedAction::LinewiseOperator {
+                    op: *op,
+                    count: total,
+                    register: reg,
+                };
+            }
             ctx.operator = Some(*op);
             ctx.post_op_count = None;
             debug!(target="input.context", operator=%op, "operator_pending");
@@ -675,6 +701,58 @@ mod tests {
                 motion: 'w',
                 count: 2,
                 register: None
+            }]
+        );
+    }
+
+    #[test]
+    fn compose_double_operator_dd() {
+        let acts = feed("dd");
+        assert_eq!(
+            acts,
+            vec![ComposedAction::LinewiseOperator {
+                op: 'd',
+                count: 1,
+                register: None
+            }]
+        );
+    }
+
+    #[test]
+    fn compose_prefix_count_double_operator_3dd() {
+        let acts = feed("3dd");
+        assert_eq!(
+            acts,
+            vec![ComposedAction::LinewiseOperator {
+                op: 'd',
+                count: 3,
+                register: None
+            }]
+        );
+    }
+
+    #[test]
+    fn compose_post_count_double_operator_d2d() {
+        let acts = feed("d2d");
+        assert_eq!(
+            acts,
+            vec![ComposedAction::LinewiseOperator {
+                op: 'd',
+                count: 2,
+                register: None
+            }]
+        );
+    }
+
+    #[test]
+    fn compose_register_prefixed_double_operator() {
+        let acts = feed("\"add");
+        assert_eq!(
+            acts,
+            vec![ComposedAction::LinewiseOperator {
+                op: 'd',
+                count: 1,
+                register: Some('a')
             }]
         );
     }

@@ -288,6 +288,83 @@ pub fn dispatch(
                 }
             }
         }
+        Action::LinewiseOperator {
+            op,
+            count,
+            register,
+        } => {
+            use crate::OperatorKind;
+            let Some((start_line, end_exclusive, abs_start, abs_end)) =
+                linewise_range(state, view.cursor.line, count)
+            else {
+                return DispatchResult::clean();
+            };
+            if abs_start == abs_end {
+                return DispatchResult::clean();
+            }
+            match op {
+                OperatorKind::Delete => {
+                    let mut cursor = view.cursor;
+                    let removed = state.delete_span_with_snapshot(&mut cursor, abs_start, abs_end);
+                    {
+                        let mut regs = state.registers_facade();
+                        regs.write_delete(removed.clone(), register);
+                    }
+                    cursor.byte = 0;
+                    view.cursor = cursor;
+                    if !state.dirty {
+                        state.dirty = true;
+                    }
+                    DispatchResult::buffer_replaced()
+                }
+                OperatorKind::Yank => {
+                    let buffer = state.active_buffer();
+                    let mut collected = String::new();
+                    for line in start_line..end_exclusive {
+                        if let Some(seg) = buffer.line(line) {
+                            collected.push_str(&seg);
+                        }
+                    }
+                    {
+                        let mut regs = state.registers_facade();
+                        regs.write_yank(collected.clone(), register);
+                    }
+                    DispatchResult::dirty()
+                }
+                OperatorKind::Change => {
+                    let mut cursor = view.cursor;
+                    let removed = state.delete_span_with_snapshot(&mut cursor, abs_start, abs_end);
+                    {
+                        let mut regs = state.registers_facade();
+                        regs.write_change(removed.clone(), register);
+                    }
+                    let lines_to_insert =
+                        std::cmp::max(1, end_exclusive.saturating_sub(start_line));
+                    cursor.byte = 0;
+                    for _ in 0..lines_to_insert {
+                        state.active_buffer_mut().insert_newline(&mut cursor);
+                    }
+                    let mut new_cursor = core_text::Position {
+                        line: start_line,
+                        byte: 0,
+                    };
+                    let total_lines = state.active_buffer().line_count();
+                    if total_lines == 0 {
+                        new_cursor.line = 0;
+                        new_cursor.byte = 0;
+                    } else if new_cursor.line >= total_lines {
+                        new_cursor.line = total_lines.saturating_sub(1);
+                        new_cursor.byte = 0;
+                    }
+                    view.cursor = new_cursor;
+                    state.mode = core_state::Mode::Insert;
+                    if !state.dirty {
+                        state.dirty = true;
+                    }
+                    DispatchResult::buffer_replaced()
+                }
+            }
+        }
         Action::VisualOperator { op, register } => {
             use crate::OperatorKind;
             use core_state::SelectionKind;
@@ -428,6 +505,43 @@ fn selection_abs_byte_range(
     let a = to_abs(start);
     let b = to_abs(end);
     if a <= b { (a, b) } else { (b, a) }
+}
+
+fn linewise_range(
+    state: &core_state::EditorState,
+    cursor_line: usize,
+    count: u32,
+) -> Option<(usize, usize, usize, usize)> {
+    let buffer = state.active_buffer();
+    let total_lines = buffer.line_count();
+    if total_lines == 0 {
+        return None;
+    }
+    let start_line = cursor_line.min(total_lines.saturating_sub(1));
+    let lines = count.max(1) as usize;
+    let mut end_line = start_line.saturating_add(lines);
+    if end_line > total_lines {
+        end_line = total_lines;
+    }
+    let mut abs_start = 0usize;
+    for line in 0..start_line {
+        abs_start += buffer.line_byte_len(line);
+        if let Some(l) = buffer.line(line)
+            && l.ends_with('\n')
+        {
+            abs_start += 1;
+        }
+    }
+    let mut abs_end = abs_start;
+    for line in start_line..end_line {
+        abs_end += buffer.line_byte_len(line);
+        if let Some(l) = buffer.line(line)
+            && l.ends_with('\n')
+        {
+            abs_end += 1;
+        }
+    }
+    Some((start_line, end_line, abs_start, abs_end))
 }
 
 fn adjust_change_range(
@@ -1241,6 +1355,242 @@ mod tests {
         assert_eq!(b.line(0).unwrap(), "b4\n");
         assert_eq!(b.line(1).unwrap(), "b5\n");
         assert!(model.state().registers.unnamed.starts_with("b1\nb2\nb3"));
+    }
+
+    #[test]
+    fn operator_delete_linewise_dd() {
+        let buffer = Buffer::from_str("t", "l1\nl2\nl3\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        assert!(
+            translate_key(
+                model.state().mode,
+                model.state().command_line.buffer(),
+                &key('d')
+            )
+            .is_none()
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('d'),
+        )
+        .unwrap();
+        if let Action::LinewiseOperator { op, count, .. } = &act {
+            assert!(matches!(op, OperatorKind::Delete));
+            assert_eq!(*count, 1);
+        } else {
+            panic!("expected linewise delete for dd");
+        }
+        let res = dispatch(act, &mut model, &mut sticky, &[]);
+        assert!(res.buffer_replaced);
+        let b = model.state().active_buffer();
+        assert_eq!(b.line(0).unwrap(), "l2\n");
+        assert_eq!(b.line(1).unwrap(), "l3\n");
+        assert!(model.state().registers.unnamed.starts_with("l1\n"));
+        assert_eq!(model.active_view().cursor.byte, 0);
+        assert_eq!(model.state().mode, core_state::Mode::Normal);
+    }
+
+    #[test]
+    fn operator_delete_linewise_3dd() {
+        let buffer = Buffer::from_str("t", "a1\na2\na3\na4\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        assert!(
+            translate_key(
+                model.state().mode,
+                model.state().command_line.buffer(),
+                &key('3')
+            )
+            .is_none()
+        );
+        assert!(
+            translate_key(
+                model.state().mode,
+                model.state().command_line.buffer(),
+                &key('d')
+            )
+            .is_none()
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('d'),
+        )
+        .unwrap();
+        if let Action::LinewiseOperator { op, count, .. } = &act {
+            assert!(matches!(op, OperatorKind::Delete));
+            assert_eq!(*count, 3);
+        } else {
+            panic!("expected linewise delete for 3dd");
+        }
+        dispatch(act, &mut model, &mut sticky, &[]);
+        let b = model.state().active_buffer();
+        assert_eq!(b.line(0).unwrap(), "a4\n");
+        assert!(model.state().registers.unnamed.starts_with("a1\na2\na3"));
+    }
+
+    #[test]
+    fn operator_yank_linewise_yy() {
+        let buffer = Buffer::from_str("t", "x1\nx2\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        assert!(
+            translate_key(
+                model.state().mode,
+                model.state().command_line.buffer(),
+                &key('y')
+            )
+            .is_none()
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('y'),
+        )
+        .unwrap();
+        if let Action::LinewiseOperator { op, count, .. } = &act {
+            assert!(matches!(op, OperatorKind::Yank));
+            assert_eq!(*count, 1);
+        } else {
+            panic!("expected linewise yank for yy");
+        }
+        let res = dispatch(act, &mut model, &mut sticky, &[]);
+        assert!(res.dirty);
+        assert!(!res.buffer_replaced);
+        let b = model.state().active_buffer();
+        assert_eq!(b.line(0).unwrap(), "x1\n");
+        assert_eq!(b.line(1).unwrap(), "x2\n");
+        assert_eq!(model.state().registers.unnamed, "x1\n");
+    }
+
+    #[test]
+    fn operator_yank_linewise_register_prefix() {
+        let buffer = Buffer::from_str("t", "r1\nr2\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        assert!(
+            translate_key(
+                model.state().mode,
+                model.state().command_line.buffer(),
+                &key('"')
+            )
+            .is_none()
+        );
+        assert!(
+            translate_key(
+                model.state().mode,
+                model.state().command_line.buffer(),
+                &key('a')
+            )
+            .is_none()
+        );
+        assert!(
+            translate_key(
+                model.state().mode,
+                model.state().command_line.buffer(),
+                &key('y')
+            )
+            .is_none()
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('y'),
+        )
+        .unwrap();
+        let res = dispatch(act, &mut model, &mut sticky, &[]);
+        assert!(res.dirty);
+        let reg = model.state().registers.get_named('a').unwrap_or("");
+        assert_eq!(reg, "r1\n");
+    }
+
+    #[test]
+    fn operator_change_linewise_cc() {
+        let buffer = Buffer::from_str("t", "m1\nm2\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        assert!(
+            translate_key(
+                model.state().mode,
+                model.state().command_line.buffer(),
+                &key('c')
+            )
+            .is_none()
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('c'),
+        )
+        .unwrap();
+        if let Action::LinewiseOperator { op, count, .. } = &act {
+            assert!(matches!(op, OperatorKind::Change));
+            assert_eq!(*count, 1);
+        } else {
+            panic!("expected linewise change for cc");
+        }
+        let res = dispatch(act, &mut model, &mut sticky, &[]);
+        assert!(res.buffer_replaced);
+        assert_eq!(model.state().mode, core_state::Mode::Insert);
+        let b = model.state().active_buffer();
+        assert_eq!(b.line(0).unwrap(), "\n");
+        assert_eq!(b.line(1).unwrap(), "m2\n");
+        assert_eq!(model.state().registers.unnamed, "m1\n");
+        assert_eq!(model.active_view().cursor.line, 0);
+        assert_eq!(model.active_view().cursor.byte, 0);
+    }
+
+    #[test]
+    fn operator_change_linewise_2cc() {
+        let buffer = Buffer::from_str("t", "z1\nz2\nz3\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        assert!(
+            translate_key(
+                model.state().mode,
+                model.state().command_line.buffer(),
+                &key('2')
+            )
+            .is_none()
+        );
+        assert!(
+            translate_key(
+                model.state().mode,
+                model.state().command_line.buffer(),
+                &key('c')
+            )
+            .is_none()
+        );
+        let act = translate_key(
+            model.state().mode,
+            model.state().command_line.buffer(),
+            &key('c'),
+        )
+        .unwrap();
+        if let Action::LinewiseOperator { op, count, .. } = &act {
+            assert!(matches!(op, OperatorKind::Change));
+            assert_eq!(*count, 2);
+        } else {
+            panic!("expected linewise change for 2cc");
+        }
+        let res = dispatch(act, &mut model, &mut sticky, &[]);
+        assert!(res.buffer_replaced);
+        let b = model.state().active_buffer();
+        assert_eq!(b.line(0).unwrap(), "\n");
+        assert_eq!(b.line(1).unwrap(), "\n");
+        assert_eq!(b.line(2).unwrap(), "z3\n");
+        assert!(model.state().registers.unnamed.starts_with("z1\nz2"));
+        assert_eq!(model.active_view().cursor.line, 0);
+        assert_eq!(model.active_view().cursor.byte, 0);
+        assert_eq!(model.state().mode, core_state::Mode::Insert);
     }
 
     #[test]

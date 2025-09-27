@@ -100,6 +100,14 @@ pub enum Action {
         count: u32,
         register: Option<char>,
     },
+    #[doc(hidden)]
+    /// Apply an operator to an implicit linewise span (double-operator shorthand like `dd`).
+    /// The translator resolves any counts and register prefixes before emitting this action.
+    LinewiseOperator {
+        op: OperatorKind,
+        count: u32,
+        register: Option<char>,
+    },
     /// Apply an operator directly to the current active visual selection (Phase 5 Step 4).
     /// Emitted when pressing d/y/c while in VisualChar mode. The dispatcher will
     /// interpret the current selection span (if non-empty) and perform the operator
@@ -510,6 +518,18 @@ pub mod ngi_adapter {
                                             register,
                                         })
                                     }
+                                    ComposedAction::LinewiseOperator {
+                                        op,
+                                        count,
+                                        register,
+                                    } => {
+                                        let opk = map_operator(op)?;
+                                        Some(Action::LinewiseOperator {
+                                            op: opk,
+                                            count,
+                                            register,
+                                        })
+                                    }
                                     ComposedAction::PasteAfter { register } => {
                                         Some(Action::PasteAfter { register })
                                     }
@@ -779,6 +799,112 @@ mod tests {
             assert!(register.is_none());
         } else {
             panic!("ApplyOperator pattern mismatch");
+        }
+        let linewise = Action::LinewiseOperator {
+            op: OperatorKind::Delete,
+            count: 3,
+            register: Some('a'),
+        };
+        if let Action::LinewiseOperator {
+            op,
+            count,
+            register,
+        } = linewise
+        {
+            assert_eq!(op, OperatorKind::Delete);
+            assert_eq!(count, 3);
+            assert_eq!(register, Some('a'));
+        } else {
+            panic!("LinewiseOperator pattern mismatch");
+        }
+    }
+
+    #[test]
+    fn ngi_linewise_dd() {
+        assert!(translate_key(Mode::Normal, "", &kc('d')).is_none());
+        match translate_key(Mode::Normal, "", &kc('d')) {
+            Some(Action::LinewiseOperator {
+                op,
+                count,
+                register,
+            }) => {
+                assert!(matches!(op, OperatorKind::Delete));
+                assert_eq!(count, 1);
+                assert!(register.is_none());
+            }
+            other => panic!("expected LinewiseOperator(dd) got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ngi_linewise_prefix_count_3dd() {
+        assert!(translate_key(Mode::Normal, "", &kc('3')).is_none());
+        assert!(translate_key(Mode::Normal, "", &kc('d')).is_none());
+        match translate_key(Mode::Normal, "", &kc('d')) {
+            Some(Action::LinewiseOperator {
+                op,
+                count,
+                register,
+            }) => {
+                assert!(matches!(op, OperatorKind::Delete));
+                assert_eq!(count, 3);
+                assert!(register.is_none());
+            }
+            other => panic!("expected LinewiseOperator(3dd) got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ngi_linewise_post_count_d2d() {
+        assert!(translate_key(Mode::Normal, "", &kc('d')).is_none());
+        assert!(translate_key(Mode::Normal, "", &kc('2')).is_none());
+        match translate_key(Mode::Normal, "", &kc('d')) {
+            Some(Action::LinewiseOperator {
+                op,
+                count,
+                register,
+            }) => {
+                assert!(matches!(op, OperatorKind::Delete));
+                assert_eq!(count, 2);
+                assert!(register.is_none());
+            }
+            other => panic!("expected LinewiseOperator(d2d) got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ngi_linewise_register_yy() {
+        assert!(translate_key(Mode::Normal, "", &kc('"')).is_none());
+        assert!(translate_key(Mode::Normal, "", &kc('a')).is_none());
+        assert!(translate_key(Mode::Normal, "", &kc('y')).is_none());
+        match translate_key(Mode::Normal, "", &kc('y')) {
+            Some(Action::LinewiseOperator {
+                op,
+                count,
+                register,
+            }) => {
+                assert!(matches!(op, OperatorKind::Yank));
+                assert_eq!(count, 1);
+                assert_eq!(register, Some('a'));
+            }
+            other => panic!("expected LinewiseOperator(\"ayy) got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ngi_linewise_cc_change() {
+        assert!(translate_key(Mode::Normal, "", &kc('c')).is_none());
+        match translate_key(Mode::Normal, "", &kc('c')) {
+            Some(Action::LinewiseOperator {
+                op,
+                count,
+                register,
+            }) => {
+                assert!(matches!(op, OperatorKind::Change));
+                assert_eq!(count, 1);
+                assert!(register.is_none());
+            }
+            other => panic!("expected LinewiseOperator(cc) got {:?}", other),
         }
     }
 

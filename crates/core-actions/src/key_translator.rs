@@ -165,6 +165,19 @@ impl KeyTranslator {
                         self.post_op_count = Some(new_val);
                         return None;
                     }
+                    if c == operator_char(op) {
+                        let prefix = self.pending_count.unwrap_or(1);
+                        let post = self.post_op_count.unwrap_or(1);
+                        let total = prefix.saturating_mul(post).min(999_999);
+                        self.pending_operator = None;
+                        self.post_op_count = None;
+                        self.pending_count = None;
+                        return Some(Action::LinewiseOperator {
+                            op,
+                            count: total.max(1),
+                            register: self.pending_register.take(),
+                        });
+                    }
                     // Non-digit: attempt to map to a motion.
                     if let Some(Action::Motion(m)) = legacy_map(mode, pending_command, key) {
                         let prefix = self.pending_count.unwrap_or(1);
@@ -255,6 +268,14 @@ impl KeyTranslator {
             }
         }
         act
+    }
+}
+
+fn operator_char(op: OperatorKind) -> char {
+    match op {
+        OperatorKind::Delete => 'd',
+        OperatorKind::Yank => 'y',
+        OperatorKind::Change => 'c',
     }
 }
 
@@ -588,6 +609,100 @@ mod tests {
                 assert_eq!(count, 2);
             }
             other => panic!("expected ApplyOperator(d2w) got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn operator_double_dd_linewise() {
+        let mut tr = KeyTranslator::new();
+        assert!(tr.translate(Mode::Normal, "", &kc('d')).is_none());
+        match tr.translate(Mode::Normal, "", &kc('d')) {
+            Some(Action::LinewiseOperator {
+                op,
+                count,
+                register,
+            }) => {
+                assert!(matches!(op, OperatorKind::Delete));
+                assert_eq!(count, 1);
+                assert!(register.is_none());
+            }
+            other => panic!("expected LinewiseOperator(dd) got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn operator_double_prefix_count_3dd() {
+        let mut tr = KeyTranslator::new();
+        assert!(tr.translate(Mode::Normal, "", &kc('3')).is_none());
+        assert!(tr.translate(Mode::Normal, "", &kc('d')).is_none());
+        match tr.translate(Mode::Normal, "", &kc('d')) {
+            Some(Action::LinewiseOperator {
+                op,
+                count,
+                register,
+            }) => {
+                assert!(matches!(op, OperatorKind::Delete));
+                assert_eq!(count, 3);
+                assert!(register.is_none());
+            }
+            other => panic!("expected LinewiseOperator(3dd) got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn operator_double_post_count_d2d() {
+        let mut tr = KeyTranslator::new();
+        assert!(tr.translate(Mode::Normal, "", &kc('d')).is_none());
+        assert!(tr.translate(Mode::Normal, "", &kc('2')).is_none());
+        match tr.translate(Mode::Normal, "", &kc('d')) {
+            Some(Action::LinewiseOperator {
+                op,
+                count,
+                register,
+            }) => {
+                assert!(matches!(op, OperatorKind::Delete));
+                assert_eq!(count, 2);
+                assert!(register.is_none());
+            }
+            other => panic!("expected LinewiseOperator(d2d) got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn operator_double_yank_with_register() {
+        let mut tr = KeyTranslator::new();
+        assert!(tr.translate(Mode::Normal, "", &kc('"')).is_none());
+        assert!(tr.translate(Mode::Normal, "", &kc('a')).is_none());
+        assert!(tr.translate(Mode::Normal, "", &kc('y')).is_none());
+        match tr.translate(Mode::Normal, "", &kc('y')) {
+            Some(Action::LinewiseOperator {
+                op,
+                count,
+                register,
+            }) => {
+                assert!(matches!(op, OperatorKind::Yank));
+                assert_eq!(count, 1);
+                assert_eq!(register, Some('a'));
+            }
+            other => panic!("expected LinewiseOperator(\"ayy) got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn operator_double_cc_change() {
+        let mut tr = KeyTranslator::new();
+        assert!(tr.translate(Mode::Normal, "", &kc('c')).is_none());
+        match tr.translate(Mode::Normal, "", &kc('c')) {
+            Some(Action::LinewiseOperator {
+                op,
+                count,
+                register,
+            }) => {
+                assert!(matches!(op, OperatorKind::Change));
+                assert_eq!(count, 1);
+                assert!(register.is_none());
+            }
+            other => panic!("expected LinewiseOperator(cc) got {:?}", other),
         }
     }
 
