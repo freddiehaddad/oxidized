@@ -292,9 +292,14 @@ impl KeyTranslator {
                         count,
                         register: Some(reg),
                     },
-                    Action::VisualOperator { op, register: _ } => Action::VisualOperator {
+                    Action::VisualOperator {
+                        op,
+                        register: _,
+                        count,
+                    } => Action::VisualOperator {
                         op,
                         register: Some(reg),
+                        count,
                     },
                     // For motions or others, we just store register and continue (in Vim register prefix must precede an operation).
                     other => other,
@@ -398,14 +403,17 @@ fn legacy_map(mode: Mode, pending_command: &str, key: &KeyEvent) -> Option<Actio
                     'd' => Some(Action::VisualOperator {
                         op: OperatorKind::Delete,
                         register: None,
+                        count: 1,
                     }),
                     'y' => Some(Action::VisualOperator {
                         op: OperatorKind::Yank,
                         register: None,
+                        count: 1,
                     }),
                     'c' => Some(Action::VisualOperator {
                         op: OperatorKind::Change,
                         register: None,
+                        count: 1,
                     }),
                     'v' => Some(Action::ModeChange(ModeChange::LeaveVisualChar)), // toggle exit like Vim
                     'i' => None, // 'i' not active in VisualChar yet (text object placeholder)

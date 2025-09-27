@@ -117,12 +117,21 @@ pub enum Action {
         register: Option<char>,
     },
     /// Apply an operator directly to the current active visual selection (Phase 5 Step 4).
-    /// Emitted when pressing d/y/c while in VisualChar mode. The dispatcher will
+    /// Emitted when pressing d/y/c (or x alias) while in VisualChar mode. The dispatcher will
     /// interpret the current selection span (if non-empty) and perform the operator
-    /// semantics, then clear the selection (entering Insert for Change).
+    /// semantics, then clear the selection (entering Insert for Change when applicable).
     VisualOperator {
         op: OperatorKind,
         register: Option<char>,
+        count: u32,
+    },
+    /// Replace the current visual selection with register contents (`p`/`P` in Visual modes).
+    /// `before` mirrors Normal-mode semantics (`P` inserts before, `p` after). Counts repeat
+    /// the inserted text, and explicit registers mirror Vim prefix rules.
+    VisualPaste {
+        before: bool,
+        register: Option<char>,
+        count: u32,
     },
     // Command line actions (Task 7.1 Action Enum Refinement)
     CommandStart,           // begin command line (inserts leading ':')
@@ -197,7 +206,7 @@ pub mod ngi_adapter {
     };
     use std::cell::RefCell;
     use std::time::{Duration, Instant};
-    use tracing::trace;
+    use tracing::{debug, trace};
 
     thread_local! {
         static TRIE: MappingTrie = MappingTrie::build(baseline_normal_specs());
@@ -315,75 +324,104 @@ pub mod ngi_adapter {
         }
         // VisualChar: motions apply to selection; d/y/c operate on selection; 'v' toggles exit.
         if matches!(mode, Mode::VisualChar) {
-            let action = match key.code {
-                KeyCode::Esc => {
-                    trace!(target = "actions.translate", kind = "leave_visual_char");
-                    Some(Action::ModeChange(ModeChange::LeaveVisualChar))
+            BUFFER.with(|b| b.borrow_mut().clear());
+            PARTIAL_TIMER.with(|pt| pt.borrow_mut().clear());
+            let action = CTX.with(|ctx_cell| {
+                let mut ctx = ctx_cell.borrow_mut();
+                if key.mods.contains(KeyModifiers::CTRL) {
+                    return match key.code {
+                        KeyCode::Char('d') => {
+                            trace!(target = "actions.translate", motion = ?MotionKind::PageHalfDown, "visual_half_page");
+                            Some(emit_visual_motion(MotionKind::PageHalfDown, &mut ctx))
+                        }
+                        KeyCode::Char('u') => {
+                            trace!(target = "actions.translate", motion = ?MotionKind::PageHalfUp, "visual_half_page");
+                            Some(emit_visual_motion(MotionKind::PageHalfUp, &mut ctx))
+                        }
+                        _ => None,
+                    };
                 }
-                // Half-page motions in VisualChar (Ctrl-D/U)
-                KeyCode::Char('d') if key.mods.contains(KeyModifiers::CTRL) => {
-                    trace!(target = "actions.translate", motion = ?MotionKind::PageHalfDown, "visual_half_page");
-                    Some(Action::Motion(MotionKind::PageHalfDown))
+                match key.code {
+                    KeyCode::Esc => {
+                        ctx.reset_transient();
+                        ctx.register = None;
+                        trace!(target = "actions.translate", kind = "leave_visual_char");
+                        Some(Action::ModeChange(ModeChange::LeaveVisualChar))
+                    }
+                    KeyCode::Char('"') => {
+                        ctx.awaiting_register = true;
+                        ctx.register = None;
+                        debug!(target = "input.context", awaiting_register = true, "visual_register_prefix");
+                        None
+                    }
+                    KeyCode::Char(c) if ctx.awaiting_register => {
+                        if c.is_ascii_alphanumeric() {
+                            ctx.register = Some(c);
+                            ctx.awaiting_register = false;
+                            debug!(target = "input.context", register = %c, "visual_register_set");
+                        }
+                        None
+                    }
+                    KeyCode::Char(c @ '1'..='9') => {
+                        extend_visual_count(&mut ctx, c);
+                        None
+                    }
+                    KeyCode::Char('0') => {
+                        if ctx.count_prefix.is_some() {
+                            extend_visual_count(&mut ctx, '0');
+                            None
+                        } else {
+                            Some(emit_visual_motion(MotionKind::LineStart, &mut ctx))
+                        }
+                    }
+                    KeyCode::Char('$') => Some(emit_visual_motion(MotionKind::LineEnd, &mut ctx)),
+                    KeyCode::Char('h') => Some(emit_visual_motion(MotionKind::Left, &mut ctx)),
+                    KeyCode::Char('l') => Some(emit_visual_motion(MotionKind::Right, &mut ctx)),
+                    KeyCode::Char('j') => Some(emit_visual_motion(MotionKind::Down, &mut ctx)),
+                    KeyCode::Char('k') => Some(emit_visual_motion(MotionKind::Up, &mut ctx)),
+                    KeyCode::Char('w') => Some(emit_visual_motion(MotionKind::WordForward, &mut ctx)),
+                    KeyCode::Char('b') => Some(emit_visual_motion(MotionKind::WordBackward, &mut ctx)),
+                    KeyCode::Char('d') | KeyCode::Char('y') | KeyCode::Char('c') | KeyCode::Char('x') => {
+                        let op = match key.code {
+                            KeyCode::Char('d') | KeyCode::Char('x') => OperatorKind::Delete,
+                            KeyCode::Char('y') => OperatorKind::Yank,
+                            KeyCode::Char('c') => OperatorKind::Change,
+                            _ => unreachable!(),
+                        };
+                        let (count, register) = take_visual_prefix(&mut ctx);
+                        trace!(target = "actions.translate", op = ?op, count, register = ?register, "visual_operator");
+                        Some(Action::VisualOperator {
+                            op,
+                            register,
+                            count,
+                        })
+                    }
+                    KeyCode::Char('p') => {
+                        let (count, register) = take_visual_prefix(&mut ctx);
+                        trace!(target = "actions.translate", before = false, count, register = ?register, "visual_paste");
+                        Some(Action::VisualPaste {
+                            before: false,
+                            register,
+                            count,
+                        })
+                    }
+                    KeyCode::Char('P') => {
+                        let (count, register) = take_visual_prefix(&mut ctx);
+                        trace!(target = "actions.translate", before = true, count, register = ?register, "visual_paste");
+                        Some(Action::VisualPaste {
+                            before: true,
+                            register,
+                            count,
+                        })
+                    }
+                    KeyCode::Char('v') => {
+                        ctx.reset_transient();
+                        ctx.register = None;
+                        Some(Action::ModeChange(ModeChange::LeaveVisualChar))
+                    }
+                    _ => None,
                 }
-                KeyCode::Char('u') if key.mods.contains(KeyModifiers::CTRL) => {
-                    trace!(target = "actions.translate", motion = ?MotionKind::PageHalfUp, "visual_half_page");
-                    Some(Action::Motion(MotionKind::PageHalfUp))
-                }
-                KeyCode::Char('h') => Some(Action::Motion(MotionKind::Left)),
-                KeyCode::Char('l') => Some(Action::Motion(MotionKind::Right)),
-                KeyCode::Char('j') => Some(Action::Motion(MotionKind::Down)),
-                KeyCode::Char('k') => Some(Action::Motion(MotionKind::Up)),
-                KeyCode::Char('0') => Some(Action::Motion(MotionKind::LineStart)),
-                KeyCode::Char('$') => Some(Action::Motion(MotionKind::LineEnd)),
-                KeyCode::Char('w') => Some(Action::Motion(MotionKind::WordForward)),
-                KeyCode::Char('b') => Some(Action::Motion(MotionKind::WordBackward)),
-                // Only treat plain 'd' (no modifiers) as Visual Delete operator.
-                KeyCode::Char('d')
-                    if !key.mods.contains(KeyModifiers::CTRL)
-                        && !key.mods.contains(KeyModifiers::ALT) =>
-                {
-                    trace!(target = "actions.translate", op = ?OperatorKind::Delete, "visual_operator");
-                    Some(Action::VisualOperator {
-                        op: OperatorKind::Delete,
-                        register: None,
-                    })
-                }
-                // Only plain 'y' (no modifiers) as Visual Yank operator.
-                KeyCode::Char('y')
-                    if !key.mods.contains(KeyModifiers::CTRL)
-                        && !key.mods.contains(KeyModifiers::ALT) =>
-                {
-                    trace!(target = "actions.translate", op = ?OperatorKind::Yank, "visual_operator");
-                    Some(Action::VisualOperator {
-                        op: OperatorKind::Yank,
-                        register: None,
-                    })
-                }
-                // Only plain 'c' (no modifiers) as Visual Change operator.
-                KeyCode::Char('c')
-                    if !key.mods.contains(KeyModifiers::CTRL)
-                        && !key.mods.contains(KeyModifiers::ALT) =>
-                {
-                    trace!(target = "actions.translate", op = ?OperatorKind::Change, "visual_operator");
-                    Some(Action::VisualOperator {
-                        op: OperatorKind::Change,
-                        register: None,
-                    })
-                }
-                // Alias: Visual 'x' behaves like delete (no modifiers)
-                KeyCode::Char('x')
-                    if !key.mods.contains(KeyModifiers::CTRL)
-                        && !key.mods.contains(KeyModifiers::ALT) =>
-                {
-                    trace!(target = "actions.translate", op = ?OperatorKind::Delete, "visual_operator");
-                    Some(Action::VisualOperator {
-                        op: OperatorKind::Delete,
-                        register: None,
-                    })
-                }
-                KeyCode::Char('v') => Some(Action::ModeChange(ModeChange::LeaveVisualChar)),
-                _ => None,
-            };
+            });
             return finalize_resolution(action, cfg);
         }
         // Early Insert-mode coverage: plain text insert, newline, backspace.
@@ -699,6 +737,39 @@ pub mod ngi_adapter {
             'c' => OperatorKind::Change,
             _ => return None,
         })
+    }
+
+    fn extend_visual_count(ctx: &mut core_keymap::PendingContext, digit: char) {
+        let value = (digit as u8 - b'0') as u32;
+        let new_val = ctx
+            .count_prefix
+            .unwrap_or(0)
+            .saturating_mul(10)
+            .saturating_add(value)
+            .min(999_999);
+        ctx.count_prefix = Some(new_val);
+        debug!(target = "input.context", count_prefix = new_val, digit = %digit, "visual_count_extend");
+    }
+
+    fn take_visual_prefix(ctx: &mut core_keymap::PendingContext) -> (u32, Option<char>) {
+        let count = ctx.count_prefix.take().unwrap_or(1).max(1);
+        let register = ctx.register.take();
+        ctx.awaiting_register = false;
+        ctx.operator = None;
+        ctx.post_op_count = None;
+        (count, register)
+    }
+
+    fn emit_visual_motion(kind: MotionKind, ctx: &mut core_keymap::PendingContext) -> Action {
+        let (count, _) = take_visual_prefix(ctx);
+        if count > 1 {
+            Action::MotionWithCount {
+                motion: kind,
+                count,
+            }
+        } else {
+            Action::Motion(kind)
+        }
     }
 }
 

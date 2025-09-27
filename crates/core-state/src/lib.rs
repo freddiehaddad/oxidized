@@ -974,14 +974,18 @@ impl EditorState {
         }
         let text = self.registers_facade().read_paste(source)?;
         self.push_discrete_edit_snapshot(*cursor);
+        let structural = self.paste_with_text(&text, before, cursor);
+        Ok(structural)
+    }
+
+    /// Shared paste implementation that assumes an edit snapshot has already been pushed.
+    /// Returns true when the inserted text is structural (multi-line).
+    pub fn paste_with_text(&mut self, text: &str, before: bool, cursor: &mut Position) -> bool {
         let buffer = self.active_buffer_mut();
         let structural = text.contains('\n');
-        // Fast path: single-line (charwise) paste
         if !structural {
-            // Determine insertion point relative to current cursor grapheme.
             let mut insert_pos = *cursor;
             if !before {
-                // After: advance to next grapheme boundary (Vim 'p')
                 let line_len = buffer.line_byte_len(insert_pos.line);
                 if insert_pos.byte < line_len
                     && let Some(line_owned) = buffer.line(insert_pos.line)
@@ -992,11 +996,10 @@ impl EditorState {
                     insert_pos.byte = next.min(trimmed.len());
                 }
             }
-            // Insert grapheme-by-grapheme; final cursor should rest ON last inserted grapheme
             let mut idx = 0;
             let mut last_len = 0;
             while idx < text.len() {
-                let next = core_text::grapheme::next_boundary(&text, idx);
+                let next = core_text::grapheme::next_boundary(text, idx);
                 let g = &text[idx..next];
                 buffer.insert_grapheme(&mut insert_pos, g);
                 last_len = g.len();
@@ -1009,10 +1012,9 @@ impl EditorState {
             if !self.dirty {
                 self.dirty = true;
             }
-            return Ok(false);
+            return false;
         }
 
-        // Multi-line path (retain tail extraction logic). Insert starting at cursor (before: same; after: move one grapheme first).
         let mut insert_pos = *cursor;
         if !before {
             let line_len = buffer.line_byte_len(insert_pos.line);
@@ -1044,7 +1046,6 @@ impl EditorState {
                 None
             }
         };
-        // Insert multi-line content
         let mut last_insert_pos = insert_pos;
         for (i, segment) in text.split_inclusive('\n').enumerate() {
             if i > 0 {
@@ -1062,7 +1063,6 @@ impl EditorState {
                 idx = next;
             }
         }
-        // Reattach tail
         if let Some(t) = tail
             && !t.is_empty()
         {
@@ -1078,7 +1078,7 @@ impl EditorState {
         if !self.dirty {
             self.dirty = true;
         }
-        Ok(structural)
+        true
     }
 
     // ---------------- Overlay (Refactor R4 Step 13) ----------------

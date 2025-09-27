@@ -73,6 +73,20 @@ impl DispatchResult {
     }
 }
 
+fn paste_source_from_register(register: Option<char>) -> PasteSource {
+    register
+        .and_then(|c| {
+            if c.is_ascii_alphabetic() {
+                Some(PasteSource::Named(c))
+            } else if c.is_ascii_digit() {
+                Some(PasteSource::Numbered((c as u8 - b'0') as usize))
+            } else {
+                None
+            }
+        })
+        .unwrap_or(PasteSource::Unnamed)
+}
+
 /// Apply an action to editor state. Returns `DispatchResult` describing whether
 /// a render is needed (`dirty`) or the editor should exit (`quit`).
 pub fn dispatch(
@@ -160,19 +174,7 @@ pub fn dispatch(
             }
         }
         Action::PasteAfter { count, register } => {
-            // Step 7: allow explicit named (a–z/A–Z) and numbered (0–9) registers.
-            let source = register
-                .and_then(|c| {
-                    if c.is_ascii_alphabetic() {
-                        Some(PasteSource::Named(c))
-                    } else if c.is_ascii_digit() {
-                        // Map ASCII digit to ring index; '0' -> 0 newest, '9' -> 9 oldest (if present)
-                        Some(PasteSource::Numbered((c as u8 - b'0') as usize))
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(PasteSource::Unnamed);
+            let source = paste_source_from_register(register);
             let mut dirty = false;
             let mut structural = false;
             let repeats = count.max(1);
@@ -199,17 +201,7 @@ pub fn dispatch(
             }
         }
         Action::PasteBefore { count, register } => {
-            let source = register
-                .and_then(|c| {
-                    if c.is_ascii_alphabetic() {
-                        Some(PasteSource::Named(c))
-                    } else if c.is_ascii_digit() {
-                        Some(PasteSource::Numbered((c as u8 - b'0') as usize))
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(PasteSource::Unnamed);
+            let source = paste_source_from_register(register);
             let mut dirty = false;
             let mut structural = false;
             let repeats = count.max(1);
@@ -438,7 +430,11 @@ pub fn dispatch(
                 }
             }
         }
-        Action::VisualOperator { op, register } => {
+        Action::VisualOperator {
+            op,
+            register,
+            count,
+        } => {
             use crate::OperatorKind;
             use core_state::SelectionKind;
             if !matches!(state.mode, core_state::Mode::VisualChar) {
@@ -450,6 +446,7 @@ pub fn dispatch(
             if span.start == span.end {
                 return DispatchResult::clean();
             }
+            let _repeat = count.max(1);
             // Map selection to absolute byte indices. For characterwise selections we
             // must treat the visual representation as inclusive of the last grapheme.
             let (abs_start, abs_end) =
@@ -550,6 +547,72 @@ pub fn dispatch(
                         DispatchResult::dirty()
                     }
                 }
+            }
+        }
+        Action::VisualPaste {
+            before,
+            register,
+            count,
+        } => {
+            use core_state::SelectionKind;
+            if !matches!(state.mode, core_state::Mode::VisualChar) {
+                return DispatchResult::clean();
+            }
+            let Some(span) = state.selection.active else {
+                return DispatchResult::clean();
+            };
+            if span.start == span.end {
+                state.clear_selection();
+                return DispatchResult::clean();
+            }
+            let source = paste_source_from_register(register);
+            let text = {
+                let regs = state.registers_facade();
+                match regs.read_paste(source) {
+                    Ok(t) => t,
+                    Err(_) => return DispatchResult::clean(),
+                }
+            };
+            if text.is_empty() {
+                state.clear_selection();
+                return DispatchResult::clean();
+            }
+            let repeats = count.max(1) as usize;
+            let mut payload = String::with_capacity(text.len().saturating_mul(repeats));
+            for _ in 0..repeats {
+                payload.push_str(&text);
+            }
+            let (abs_start, abs_end) = if matches!(span.kind, SelectionKind::Characterwise) {
+                span.inclusive_byte_range(state.active_buffer())
+            } else {
+                selection_abs_byte_range(state, span.start, span.end)
+            };
+            if abs_start == abs_end {
+                state.clear_selection();
+                return DispatchResult::clean();
+            }
+            let mut cursor = view.cursor;
+            let removed = state.delete_span_with_snapshot(&mut cursor, abs_start, abs_end);
+            let structural_delete =
+                removed.contains('\n') || matches!(span.kind, SelectionKind::Linewise);
+            if !removed.is_empty() {
+                let mut regs = state.registers_facade();
+                regs.write_delete(removed.clone(), None);
+            }
+            state.clear_selection();
+            state.mode = core_state::Mode::Normal;
+            view.cursor = span.start;
+            let paste_before = if matches!(span.kind, SelectionKind::Characterwise) {
+                true
+            } else {
+                before
+            };
+            let structural_insert = state.paste_with_text(&payload, paste_before, &mut view.cursor);
+            let structural = structural_delete || structural_insert;
+            if structural {
+                DispatchResult::buffer_replaced()
+            } else {
+                DispatchResult::dirty()
             }
         }
     }
@@ -978,6 +1041,7 @@ mod tests {
             Action::VisualOperator {
                 op: OperatorKind::Delete,
                 register: None,
+                count: 1,
             },
             &mut model,
             &mut sticky,
@@ -1027,6 +1091,7 @@ mod tests {
             Action::VisualOperator {
                 op: OperatorKind::Delete,
                 register: None,
+                count: 1,
             },
             &mut model,
             &mut sticky,
@@ -1068,6 +1133,7 @@ mod tests {
             Action::VisualOperator {
                 op: OperatorKind::Delete,
                 register: None,
+                count: 1,
             },
             &mut model,
             &mut sticky,

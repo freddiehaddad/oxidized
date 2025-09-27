@@ -31,7 +31,10 @@ fn ngi_visual_x_maps_to_visual_delete() {
     let cfg = Config::default();
     let act = translate_ngi(Mode::VisualChar, "", &kc('x'), &cfg).action;
     match act {
-        Some(Action::VisualOperator { op, .. }) => assert!(matches!(op, OperatorKind::Delete)),
+        Some(Action::VisualOperator { op, count, .. }) => {
+            assert_eq!(count, 1, "visual x should default count to 1");
+            assert!(matches!(op, OperatorKind::Delete));
+        }
         other => panic!("unexpected: {:?}", other),
     }
 }
