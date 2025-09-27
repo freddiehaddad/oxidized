@@ -121,6 +121,14 @@ impl KeyTranslator {
                     self.pending_register = None; // reset previously captured register
                     return None;
                 }
+                if key.mods.contains(KeyModifiers::CTRL) {
+                    if c == 'r' {
+                        let count = self.pending_count.take().unwrap_or(1).max(1);
+                        self.pending_operator = None;
+                        self.post_op_count = None;
+                        return Some(Action::Redo { count });
+                    }
+                }
                 if self.awaiting_register {
                     self.awaiting_register = false;
                     // Valid registers: a-z (named) or A-Z (append). Numbered 0-9 accepted (deferred semantics for Step 7) but stored.
@@ -202,6 +210,33 @@ impl KeyTranslator {
                     }
                 }
 
+                if matches!(c, 'x' | 'X' | 'p' | 'P' | 'u') {
+                    let count = self.pending_count.take().unwrap_or(1).max(1);
+                    return Some(match c {
+                        'x' => Action::Edit(EditKind::DeleteUnder {
+                            count,
+                            register: self.pending_register.take(),
+                        }),
+                        'X' => Action::Edit(EditKind::DeleteLeft {
+                            count,
+                            register: self.pending_register.take(),
+                        }),
+                        'p' => Action::PasteAfter {
+                            count,
+                            register: self.pending_register.take(),
+                        },
+                        'P' => Action::PasteBefore {
+                            count,
+                            register: self.pending_register.take(),
+                        },
+                        'u' => {
+                            self.pending_register = None;
+                            Action::Undo { count }
+                        }
+                        _ => unreachable!(),
+                    });
+                }
+
                 // No operator pending: maybe digit (count) or operator key or ordinary motion.
                 if c.is_ascii_digit() {
                     // Leading '0' with no current count -> motion LineStart
@@ -249,10 +284,12 @@ impl KeyTranslator {
         if let Some(reg) = self.pending_register.take() {
             if let Some(a) = act.take() {
                 act = Some(match a {
-                    Action::PasteAfter { .. } => Action::PasteAfter {
+                    Action::PasteAfter { count, .. } => Action::PasteAfter {
+                        count,
                         register: Some(reg),
                     },
-                    Action::PasteBefore { .. } => Action::PasteBefore {
+                    Action::PasteBefore { count, .. } => Action::PasteBefore {
+                        count,
                         register: Some(reg),
                     },
                     Action::VisualOperator { op, register: _ } => Action::VisualOperator {
@@ -310,7 +347,7 @@ fn legacy_map(mode: Mode, pending_command: &str, key: &KeyEvent) -> Option<Actio
             match mode {
                 Mode::Normal => match c {
                     'v' => Some(Action::ModeChange(ModeChange::EnterVisualChar)),
-                    'r' if key.mods.contains(KeyModifiers::CTRL) => Some(Action::Redo),
+                    'r' if key.mods.contains(KeyModifiers::CTRL) => Some(Action::Redo { count: 1 }),
                     'h' => Some(Action::Motion(MotionKind::Left)),
                     'l' => Some(Action::Motion(MotionKind::Right)),
                     'j' => Some(Action::Motion(MotionKind::Down)),
@@ -320,10 +357,25 @@ fn legacy_map(mode: Mode, pending_command: &str, key: &KeyEvent) -> Option<Actio
                     'w' => Some(Action::Motion(MotionKind::WordForward)),
                     'b' => Some(Action::Motion(MotionKind::WordBackward)),
                     'i' => Some(Action::ModeChange(ModeChange::EnterInsert)),
-                    'u' if !key.mods.contains(KeyModifiers::CTRL) => Some(Action::Undo),
-                    'x' => Some(Action::Edit(EditKind::DeleteUnder)),
-                    'p' => Some(Action::PasteAfter { register: None }),
-                    'P' => Some(Action::PasteBefore { register: None }),
+                    'u' if !key.mods.contains(KeyModifiers::CTRL) => {
+                        Some(Action::Undo { count: 1 })
+                    }
+                    'x' => Some(Action::Edit(EditKind::DeleteUnder {
+                        count: 1,
+                        register: None,
+                    })),
+                    'X' => Some(Action::Edit(EditKind::DeleteLeft {
+                        count: 1,
+                        register: None,
+                    })),
+                    'p' => Some(Action::PasteAfter {
+                        count: 1,
+                        register: None,
+                    }),
+                    'P' => Some(Action::PasteBefore {
+                        count: 1,
+                        register: None,
+                    }),
                     _ => None,
                 },
                 Mode::Insert => {
@@ -478,7 +530,7 @@ mod tests {
         };
         assert!(matches!(
             tr.translate(Mode::Normal, "", &ctrl_r),
-            Some(Action::Redo)
+            Some(Action::Redo { count }) if count == 1
         ));
         let plain_r = KeyEvent {
             code: KeyCode::Char('r'),

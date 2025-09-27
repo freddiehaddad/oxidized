@@ -175,7 +175,8 @@ fn explicit_register_paste_uses_named() {
     let named = model.state().registers.get_named('b').unwrap().to_string();
     // Move cursor to end of line start (simulate position) then paste with explicit register b: "bp
     let paste = translate_seq(&mut model, "\"bp").expect("paste action");
-    if let Action::PasteAfter { register } = paste {
+    if let Action::PasteAfter { register, count } = paste {
+        assert_eq!(count, 1);
         assert_eq!(register, Some('b'));
     } else {
         panic!("expected PasteAfter struct")

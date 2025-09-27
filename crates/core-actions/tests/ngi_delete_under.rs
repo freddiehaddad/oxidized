@@ -15,7 +15,10 @@ fn ngi_normal_x_maps_delete_under() {
     let cfg = Config::default();
     let act = translate_ngi(Mode::Normal, "", &kc('x'), &cfg);
     match act.action {
-        Some(Action::Edit(EditKind::DeleteUnder)) => {}
+        Some(Action::Edit(EditKind::DeleteUnder { count, register })) => {
+            assert_eq!(count, 1);
+            assert!(register.is_none());
+        }
         other => panic!("unexpected: {:?}", other),
     }
 }

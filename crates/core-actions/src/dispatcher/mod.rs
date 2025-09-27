@@ -112,9 +112,54 @@ pub fn dispatch(
         | Action::CommandCancel
         | Action::CommandExecute(_) => command::handle_command_action(action, state, view),
         Action::Edit(kind) => edit::handle_edit(kind, state, view),
-        Action::Undo => undo::handle_undo(state, view),
-        Action::Redo => undo::handle_redo(state, view),
-        Action::PasteAfter { register } => {
+        Action::Undo { count } => {
+            let mut dirty = false;
+            let mut structural = false;
+            let repeats = count.max(1);
+            for idx in 0..repeats {
+                let res = undo::handle_undo(state, view);
+                dirty |= res.dirty;
+                structural |= res.buffer_replaced;
+                if !res.dirty && !res.buffer_replaced {
+                    // nothing to undo; stop early to mirror Vim's behavior
+                    if idx == 0 {
+                        return DispatchResult::clean();
+                    }
+                    break;
+                }
+            }
+            if structural {
+                DispatchResult::buffer_replaced()
+            } else if dirty {
+                DispatchResult::dirty()
+            } else {
+                DispatchResult::clean()
+            }
+        }
+        Action::Redo { count } => {
+            let mut dirty = false;
+            let mut structural = false;
+            let repeats = count.max(1);
+            for idx in 0..repeats {
+                let res = undo::handle_redo(state, view);
+                dirty |= res.dirty;
+                structural |= res.buffer_replaced;
+                if !res.dirty && !res.buffer_replaced {
+                    if idx == 0 {
+                        return DispatchResult::clean();
+                    }
+                    break;
+                }
+            }
+            if structural {
+                DispatchResult::buffer_replaced()
+            } else if dirty {
+                DispatchResult::dirty()
+            } else {
+                DispatchResult::clean()
+            }
+        }
+        Action::PasteAfter { count, register } => {
             // Step 7: allow explicit named (a–z/A–Z) and numbered (0–9) registers.
             let source = register
                 .and_then(|c| {
@@ -128,18 +173,32 @@ pub fn dispatch(
                     }
                 })
                 .unwrap_or(PasteSource::Unnamed);
-            match state.paste(source, false, &mut view.cursor) {
-                Ok(structural) => {
-                    if structural {
-                        DispatchResult::buffer_replaced()
-                    } else {
-                        DispatchResult::dirty()
+            let mut dirty = false;
+            let mut structural = false;
+            let repeats = count.max(1);
+            for idx in 0..repeats {
+                match state.paste(source, false, &mut view.cursor) {
+                    Ok(is_structural) => {
+                        dirty = true;
+                        structural |= is_structural;
+                    }
+                    Err(_) => {
+                        if idx == 0 {
+                            return DispatchResult::clean();
+                        }
+                        break;
                     }
                 }
-                Err(_) => DispatchResult::clean(),
+            }
+            if structural {
+                DispatchResult::buffer_replaced()
+            } else if dirty {
+                DispatchResult::dirty()
+            } else {
+                DispatchResult::clean()
             }
         }
-        Action::PasteBefore { register } => {
+        Action::PasteBefore { count, register } => {
             let source = register
                 .and_then(|c| {
                     if c.is_ascii_alphabetic() {
@@ -151,15 +210,29 @@ pub fn dispatch(
                     }
                 })
                 .unwrap_or(PasteSource::Unnamed);
-            match state.paste(source, true, &mut view.cursor) {
-                Ok(structural) => {
-                    if structural {
-                        DispatchResult::buffer_replaced()
-                    } else {
-                        DispatchResult::dirty()
+            let mut dirty = false;
+            let mut structural = false;
+            let repeats = count.max(1);
+            for idx in 0..repeats {
+                match state.paste(source, true, &mut view.cursor) {
+                    Ok(is_structural) => {
+                        dirty = true;
+                        structural |= is_structural;
+                    }
+                    Err(_) => {
+                        if idx == 0 {
+                            return DispatchResult::clean();
+                        }
+                        break;
                     }
                 }
-                Err(_) => DispatchResult::clean(),
+            }
+            if structural {
+                DispatchResult::buffer_replaced()
+            } else if dirty {
+                DispatchResult::dirty()
+            } else {
+                DispatchResult::clean()
             }
         }
         Action::Quit => DispatchResult::quit(),
@@ -616,7 +689,7 @@ mod tests {
         let mut sticky = None;
         // Simulate entering :q
         dispatch(Action::CommandStart, &mut model, &mut sticky, &[]);
-        dispatch(Action::CommandChar('q'), &mut model, &mut sticky, &[]);
+        dispatch(Action::Undo { count: 1 }, &mut model, &mut sticky, &[]);
         let res = dispatch(
             Action::CommandExecute(":q".into()),
             &mut model,
@@ -624,6 +697,212 @@ mod tests {
             &[],
         );
         assert!(res.quit && res.dirty);
+    }
+
+    #[test]
+    fn delete_under_count_updates_registers() {
+        let buffer = Buffer::from_str("t", "abcdef\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        let res = dispatch(
+            Action::Edit(EditKind::DeleteUnder {
+                count: 3,
+                register: None,
+            }),
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        assert!(res.dirty);
+        assert!(!res.buffer_replaced);
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "def\n");
+        assert_eq!(model.state().registers.unnamed, "abc");
+    }
+
+    #[test]
+    fn delete_under_named_register_prefix() {
+        let buffer = Buffer::from_str("t", "wxyz\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        let _ = dispatch(
+            Action::Edit(EditKind::DeleteUnder {
+                count: 2,
+                register: Some('b'),
+            }),
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "yz\n");
+        assert_eq!(model.state().registers.unnamed, "wx");
+        let named = model.state().registers.get_named('b').unwrap_or("");
+        assert_eq!(named, "wx");
+    }
+
+    #[test]
+    fn delete_left_count_and_register() {
+        let buffer = Buffer::from_str("t", "abcdef").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        // Move cursor to the end of "c"
+        dispatch(
+            Action::Motion(MotionKind::Right),
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        dispatch(
+            Action::Motion(MotionKind::Right),
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        dispatch(
+            Action::Motion(MotionKind::Right),
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        let res = dispatch(
+            Action::Edit(EditKind::DeleteLeft {
+                count: 2,
+                register: Some('a'),
+            }),
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        assert!(res.dirty);
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "adef");
+        assert_eq!(model.state().registers.unnamed, "bc");
+        let named = model.state().registers.get_named('a').unwrap_or("");
+        assert_eq!(named, "bc");
+    }
+
+    #[test]
+    fn paste_after_count_repeats() {
+        let buffer = Buffer::from_str("t", "X\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        {
+            let mut regs = model.state_mut().registers_facade();
+            regs.write_yank("Z", None);
+        }
+        let mut sticky = None;
+        let res = dispatch(
+            Action::PasteAfter {
+                count: 3,
+                register: None,
+            },
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        assert!(res.dirty);
+        assert!(!res.buffer_replaced);
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "XZZZ\n");
+        assert_eq!(model.state().registers.unnamed, "Z");
+    }
+
+    #[test]
+    fn paste_before_count_repeats() {
+        let buffer = Buffer::from_str("t", "123").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        {
+            let mut regs = model.state_mut().registers_facade();
+            regs.write_yank("A", Some('c'));
+        }
+        let mut sticky = None;
+        // Move cursor to index 2 (on '3')
+        dispatch(
+            Action::Motion(MotionKind::Right),
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        dispatch(
+            Action::Motion(MotionKind::Right),
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        let res = dispatch(
+            Action::PasteBefore {
+                count: 2,
+                register: Some('c'),
+            },
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        assert!(res.dirty);
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "12AA3");
+        let named = model.state().registers.get_named('c').unwrap_or("");
+        assert_eq!(named, "A");
+    }
+
+    #[test]
+    fn undo_repeats_count_times() {
+        let buffer = Buffer::from_str("t", "abcd").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        dispatch(
+            Action::Edit(EditKind::DeleteUnder {
+                count: 1,
+                register: None,
+            }),
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        dispatch(
+            Action::Edit(EditKind::DeleteUnder {
+                count: 1,
+                register: None,
+            }),
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "cd");
+        let res = dispatch(Action::Undo { count: 2 }, &mut model, &mut sticky, &[]);
+        assert!(res.dirty);
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "abcd");
+    }
+
+    #[test]
+    fn redo_repeats_count_times() {
+        let buffer = Buffer::from_str("t", "abcd").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        dispatch(
+            Action::Edit(EditKind::DeleteUnder {
+                count: 1,
+                register: None,
+            }),
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        dispatch(
+            Action::Edit(EditKind::DeleteUnder {
+                count: 1,
+                register: None,
+            }),
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        dispatch(Action::Undo { count: 2 }, &mut model, &mut sticky, &[]);
+        let res = dispatch(Action::Redo { count: 2 }, &mut model, &mut sticky, &[]);
+        assert!(res.dirty);
+        assert_eq!(model.state().active_buffer().line(0).unwrap(), "cd");
     }
 
     #[test]
@@ -1002,7 +1281,7 @@ mod tests {
             &[],
         );
         assert!(model.state().dirty);
-        dispatch(Action::Undo, &mut model, &mut sticky, &[]);
+        dispatch(Action::Undo { count: 1 }, &mut model, &mut sticky, &[]);
         assert!(model.state().dirty, "dirty should remain true after undo");
     }
 
@@ -1082,9 +1361,9 @@ mod tests {
             &mut sticky,
             &[],
         );
-        assert!(dispatch(Action::Undo, &mut model, &mut sticky, &[]).dirty);
+        assert!(dispatch(Action::Undo { count: 1 }, &mut model, &mut sticky, &[]).dirty);
         assert_eq!(model.state().active_buffer().line(0).unwrap(), "");
-        assert!(dispatch(Action::Redo, &mut model, &mut sticky, &[]).dirty);
+        assert!(dispatch(Action::Redo { count: 1 }, &mut model, &mut sticky, &[]).dirty);
         assert_eq!(model.state().active_buffer().line(0).unwrap(), "a");
     }
 
@@ -1639,7 +1918,7 @@ mod tests {
         let res = dispatch(act, &mut model, &mut sticky, &[]);
         assert!(res.buffer_replaced);
         // Undo
-        let undo_res = dispatch(Action::Undo, &mut model, &mut sticky, &[]);
+        let undo_res = dispatch(Action::Undo { count: 1 }, &mut model, &mut sticky, &[]);
         assert!(
             undo_res.buffer_replaced,
             "undo restoring lines must be structural"

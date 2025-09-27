@@ -81,16 +81,26 @@ pub enum ComposedAction {
         register: Option<char>,
     },
     PasteAfter {
+        count: u32,
         register: Option<char>,
     },
     PasteBefore {
+        count: u32,
         register: Option<char>,
     },
     EnterInsert,
-    Undo,
+    Undo {
+        count: u32,
+    },
     ModeToggleVisualChar,
-    DeleteUnder,
-    DeleteLeft,
+    DeleteUnder {
+        count: u32,
+        register: Option<char>,
+    },
+    DeleteLeft {
+        count: u32,
+        register: Option<char>,
+    },
     Literal(char),
     None, // no emission (still accumulating state)
 }
@@ -203,15 +213,38 @@ pub fn compose_with_context(ctx: &mut PendingContext, out: &MappingOutput) -> Co
                 ComposedAction::Motion { motion: *m, count }
             }
         }
-        MappingOutput::PasteAfter => ComposedAction::PasteAfter {
-            register: ctx.register.take(),
-        },
-        MappingOutput::PasteBefore => ComposedAction::PasteBefore {
-            register: ctx.register.take(),
-        },
+        MappingOutput::PasteAfter => {
+            let count = ctx.count_prefix.take().unwrap_or(1).max(1);
+            let reg = ctx.register.take();
+            debug!(
+                target = "input.context",
+                count,
+                register = ?reg,
+                "paste_after_emit"
+            );
+            ComposedAction::PasteAfter {
+                count,
+                register: reg,
+            }
+        }
+        MappingOutput::PasteBefore => {
+            let count = ctx.count_prefix.take().unwrap_or(1).max(1);
+            let reg = ctx.register.take();
+            debug!(
+                target = "input.context",
+                count,
+                register = ?reg,
+                "paste_before_emit"
+            );
+            ComposedAction::PasteBefore {
+                count,
+                register: reg,
+            }
+        }
         MappingOutput::Undo => {
-            debug!(target = "input.context", "undo_emit");
-            ComposedAction::Undo
+            let count = ctx.count_prefix.take().unwrap_or(1).max(1);
+            debug!(target = "input.context", count, "undo_emit");
+            ComposedAction::Undo { count }
         }
         MappingOutput::EnterInsert => {
             debug!(target = "input.context", "enter_insert_emit");
@@ -222,26 +255,32 @@ pub fn compose_with_context(ctx: &mut PendingContext, out: &MappingOutput) -> Co
             ComposedAction::ModeToggleVisualChar
         }
         MappingOutput::DeleteUnder => {
-            if let Some(n) = ctx.count_prefix.take() {
-                debug!(
-                    target = "input.context",
-                    dropped_count = n,
-                    "delete_under_count_dropped"
-                );
+            let count = ctx.count_prefix.take().unwrap_or(1).max(1);
+            let reg = ctx.register.take();
+            debug!(
+                target = "input.context",
+                count,
+                register = ?reg,
+                "delete_under_emit"
+            );
+            ComposedAction::DeleteUnder {
+                count,
+                register: reg,
             }
-            debug!(target = "input.context", "delete_under_emit");
-            ComposedAction::DeleteUnder
         }
         MappingOutput::DeleteLeft => {
-            if let Some(n) = ctx.count_prefix.take() {
-                debug!(
-                    target = "input.context",
-                    dropped_count = n,
-                    "delete_left_count_dropped"
-                );
+            let count = ctx.count_prefix.take().unwrap_or(1).max(1);
+            let reg = ctx.register.take();
+            debug!(
+                target = "input.context",
+                count,
+                register = ?reg,
+                "delete_left_emit"
+            );
+            ComposedAction::DeleteLeft {
+                count,
+                register: reg,
             }
-            debug!(target = "input.context", "delete_left_emit");
-            ComposedAction::DeleteLeft
         }
         MappingOutput::DeleteToLineEnd => {
             if let Some(n) = ctx.count_prefix.take() {

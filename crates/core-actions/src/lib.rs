@@ -77,14 +77,22 @@ pub enum Action {
     },
     Edit(EditKind),
     ModeChange(ModeChange),
-    Undo,
-    Redo,
-    /// Paste after cursor (Normal mode 'p'). Optional explicit register prefix.
+    /// Undo the last change. `count` repeats undo (`3u`).
+    Undo {
+        count: u32,
+    },
+    /// Redo the next change. `count` repeats redo (`3<C-r>`).
+    Redo {
+        count: u32,
+    },
+    /// Paste after cursor (Normal mode 'p'). Supports counts and optional register prefix.
     PasteAfter {
+        count: u32,
         register: Option<char>,
     },
-    /// Paste before cursor (Normal mode 'P'). Optional explicit register prefix.
+    /// Paste before cursor (Normal mode 'P'). Supports counts and optional register prefix.
     PasteBefore {
+        count: u32,
         register: Option<char>,
     },
     #[doc(hidden)]
@@ -146,8 +154,8 @@ pub enum EditKind {
     InsertGrapheme(String),
     InsertNewline,
     Backspace,
-    DeleteUnder,
-    DeleteLeft,
+    DeleteUnder { count: u32, register: Option<char> },
+    DeleteLeft { count: u32, register: Option<char> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -428,8 +436,17 @@ pub mod ngi_adapter {
                     return finalize_resolution(Some(Action::Motion(MotionKind::PageHalfUp)), cfg);
                 }
                 KeyCode::Char('r') if key.mods.contains(KeyModifiers::CTRL) => {
-                    trace!(target = "actions.translate", kind = "redo");
-                    return finalize_resolution(Some(Action::Redo), cfg);
+                    let count = CTX.with(|ctx_cell| {
+                        let mut ctx = ctx_cell.borrow_mut();
+                        let count = ctx.count_prefix.take().unwrap_or(1).max(1);
+                        ctx.operator = None;
+                        ctx.post_op_count = None;
+                        ctx.register = None;
+                        ctx.awaiting_register = false;
+                        count
+                    });
+                    trace!(target = "actions.translate", kind = "redo", count);
+                    return finalize_resolution(Some(Action::Redo { count }), cfg);
                 }
                 KeyCode::Esc => {
                     // Cancel any pending operator/count/register in NGI context to mirror legacy ESC behavior.
@@ -530,24 +547,27 @@ pub mod ngi_adapter {
                                             register,
                                         })
                                     }
-                                    ComposedAction::PasteAfter { register } => {
-                                        Some(Action::PasteAfter { register })
+                                    ComposedAction::PasteAfter { count, register } => {
+                                        Some(Action::PasteAfter { count, register })
                                     }
-                                    ComposedAction::PasteBefore { register } => {
-                                        Some(Action::PasteBefore { register })
+                                    ComposedAction::PasteBefore { count, register } => {
+                                        Some(Action::PasteBefore { count, register })
                                     }
                                     ComposedAction::EnterInsert => {
                                         Some(Action::ModeChange(ModeChange::EnterInsert))
                                     }
-                                    ComposedAction::Undo => Some(Action::Undo),
+                                    ComposedAction::Undo { count } => Some(Action::Undo { count }),
                                     ComposedAction::ModeToggleVisualChar => {
                                         Some(Action::ModeChange(ModeChange::EnterVisualChar))
                                     }
-                                    ComposedAction::DeleteUnder => {
-                                        Some(Action::Edit(EditKind::DeleteUnder))
+                                    ComposedAction::DeleteUnder { count, register } => {
+                                        Some(Action::Edit(EditKind::DeleteUnder {
+                                            count,
+                                            register,
+                                        }))
                                     }
-                                    ComposedAction::DeleteLeft => {
-                                        Some(Action::Edit(EditKind::DeleteLeft))
+                                    ComposedAction::DeleteLeft { count, register } => {
+                                        Some(Action::Edit(EditKind::DeleteLeft { count, register }))
                                     }
                                     ComposedAction::Literal(c) => Some(Action::CommandChar(c)),
                                 };
@@ -760,7 +780,7 @@ mod tests {
         };
         let act = translate_key(Mode::Normal, "", &evt);
         assert!(
-            matches!(act, Some(Action::Redo)),
+            matches!(act, Some(Action::Redo { count }) if count == 1),
             "Ctrl-R should map to Redo action"
         );
         // Ensure plain 'r' (no ctrl) is currently unbound (reserved for future replace semantics)
@@ -769,6 +789,169 @@ mod tests {
             mods: KeyModifiers::empty(),
         };
         assert!(translate_key(Mode::Normal, "", &plain).is_none());
+    }
+
+    #[test]
+    fn ctrl_r_respects_count_prefix() {
+        use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let esc = KeyEvent {
+            code: KeyCode::Esc,
+            mods: KeyModifiers::empty(),
+        };
+        let _ = translate_key(Mode::Normal, "", &esc);
+        assert!(translate_key(Mode::Normal, "", &kc('3')).is_none());
+        let ctrl_r = KeyEvent {
+            code: KeyCode::Char('r'),
+            mods: KeyModifiers::CTRL,
+        };
+        match translate_key(Mode::Normal, "", &ctrl_r) {
+            Some(Action::Redo { count }) => assert_eq!(count, 3),
+            other => panic!("expected Redo with count 3, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ngi_delete_under_count_prefix() {
+        use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let esc = KeyEvent {
+            code: KeyCode::Esc,
+            mods: KeyModifiers::empty(),
+        };
+        let _ = translate_key(Mode::Normal, "", &esc);
+        assert!(translate_key(Mode::Normal, "", &kc('3')).is_none());
+        match translate_key(Mode::Normal, "", &kc('x')) {
+            Some(Action::Edit(EditKind::DeleteUnder { count, register })) => {
+                assert_eq!(count, 3);
+                assert!(register.is_none());
+            }
+            other => panic!("expected DeleteUnder with count 3, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ngi_delete_under_register_prefix() {
+        use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let esc = KeyEvent {
+            code: KeyCode::Esc,
+            mods: KeyModifiers::empty(),
+        };
+        let _ = translate_key(Mode::Normal, "", &esc);
+        assert!(translate_key(Mode::Normal, "", &kc('"')).is_none());
+        assert!(translate_key(Mode::Normal, "", &kc('a')).is_none());
+        match translate_key(Mode::Normal, "", &kc('x')) {
+            Some(Action::Edit(EditKind::DeleteUnder { count, register })) => {
+                assert_eq!(count, 1);
+                assert_eq!(register, Some('a'));
+            }
+            other => panic!("expected DeleteUnder with register a, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ngi_delete_left_count_prefix() {
+        use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let esc = KeyEvent {
+            code: KeyCode::Esc,
+            mods: KeyModifiers::empty(),
+        };
+        let _ = translate_key(Mode::Normal, "", &esc);
+        assert!(translate_key(Mode::Normal, "", &kc('2')).is_none());
+        match translate_key(Mode::Normal, "", &kc('X')) {
+            Some(Action::Edit(EditKind::DeleteLeft { count, register })) => {
+                assert_eq!(count, 2);
+                assert!(register.is_none());
+            }
+            other => panic!("expected DeleteLeft with count 2, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ngi_paste_after_count_prefix() {
+        use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let esc = KeyEvent {
+            code: KeyCode::Esc,
+            mods: KeyModifiers::empty(),
+        };
+        let _ = translate_key(Mode::Normal, "", &esc);
+        assert!(translate_key(Mode::Normal, "", &kc('4')).is_none());
+        match translate_key(Mode::Normal, "", &kc('p')) {
+            Some(Action::PasteAfter { count, register }) => {
+                assert_eq!(count, 4);
+                assert!(register.is_none());
+            }
+            other => panic!("expected PasteAfter with count 4, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ngi_paste_after_register_prefix() {
+        use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let esc = KeyEvent {
+            code: KeyCode::Esc,
+            mods: KeyModifiers::empty(),
+        };
+        let _ = translate_key(Mode::Normal, "", &esc);
+        assert!(translate_key(Mode::Normal, "", &kc('"')).is_none());
+        assert!(translate_key(Mode::Normal, "", &kc('b')).is_none());
+        match translate_key(Mode::Normal, "", &kc('p')) {
+            Some(Action::PasteAfter { count, register }) => {
+                assert_eq!(count, 1);
+                assert_eq!(register, Some('b'));
+            }
+            other => panic!("expected PasteAfter with register b, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ngi_paste_before_count_prefix() {
+        use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let esc = KeyEvent {
+            code: KeyCode::Esc,
+            mods: KeyModifiers::empty(),
+        };
+        let _ = translate_key(Mode::Normal, "", &esc);
+        assert!(translate_key(Mode::Normal, "", &kc('2')).is_none());
+        match translate_key(Mode::Normal, "", &kc('P')) {
+            Some(Action::PasteBefore { count, register }) => {
+                assert_eq!(count, 2);
+                assert!(register.is_none());
+            }
+            other => panic!("expected PasteBefore with count 2, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ngi_paste_before_register_prefix() {
+        use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let esc = KeyEvent {
+            code: KeyCode::Esc,
+            mods: KeyModifiers::empty(),
+        };
+        let _ = translate_key(Mode::Normal, "", &esc);
+        assert!(translate_key(Mode::Normal, "", &kc('"')).is_none());
+        assert!(translate_key(Mode::Normal, "", &kc('C')).is_none());
+        match translate_key(Mode::Normal, "", &kc('P')) {
+            Some(Action::PasteBefore { count, register }) => {
+                assert_eq!(count, 1);
+                assert_eq!(register, Some('C'));
+            }
+            other => panic!("expected PasteBefore with register C, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn ngi_undo_count_prefix() {
+        use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let esc = KeyEvent {
+            code: KeyCode::Esc,
+            mods: KeyModifiers::empty(),
+        };
+        let _ = translate_key(Mode::Normal, "", &esc);
+        assert!(translate_key(Mode::Normal, "", &kc('5')).is_none());
+        match translate_key(Mode::Normal, "", &kc('u')) {
+            Some(Action::Undo { count }) => assert_eq!(count, 5),
+            other => panic!("expected Undo with count 5, got {:?}", other),
+        }
     }
 
     #[test]

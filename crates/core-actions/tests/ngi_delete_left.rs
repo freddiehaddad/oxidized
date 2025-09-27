@@ -15,7 +15,10 @@ fn ngi_normal_x_maps_delete_left() {
     let cfg = Config::default();
     let act = translate_ngi(Mode::Normal, "", &kc('X'), &cfg);
     match act.action {
-        Some(Action::Edit(EditKind::DeleteLeft)) => {}
+        Some(Action::Edit(EditKind::DeleteLeft { count, register })) => {
+            assert_eq!(count, 1);
+            assert!(register.is_none());
+        }
         other => panic!("unexpected: {:?}", other),
     }
 }

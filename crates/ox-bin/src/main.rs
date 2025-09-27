@@ -879,7 +879,15 @@ mod tests {
             &observers,
         );
         // Undo should revert entire sequence (buffer empty)
-        assert!(dispatch(Action::Undo, &mut model, &mut sticky, &observers).dirty);
+        assert!(
+            dispatch(
+                Action::Undo { count: 1 },
+                &mut model,
+                &mut sticky,
+                &observers
+            )
+            .dirty
+        );
         assert_eq!(model.state().active_buffer().line(0).unwrap(), "");
     }
 
@@ -890,7 +898,10 @@ mod tests {
         // Delete 'a'
         let observers: Vec<Box<dyn ActionObserver>> = Vec::new();
         dispatch(
-            Action::Edit(EditKind::DeleteUnder),
+            Action::Edit(EditKind::DeleteUnder {
+                count: 1,
+                register: None,
+            }),
             &mut model,
             &mut sticky,
             &observers,
@@ -900,7 +911,15 @@ mod tests {
         // Register should now contain removed grapheme 'a'
         assert!(model.state().registers.unnamed.starts_with('a'));
         // Undo
-        assert!(dispatch(Action::Undo, &mut model, &mut sticky, &observers).dirty);
+        assert!(
+            dispatch(
+                Action::Undo { count: 1 },
+                &mut model,
+                &mut sticky,
+                &observers
+            )
+            .dirty
+        );
         assert_eq!(model.state().active_buffer().line(0).unwrap(), "abc");
     }
 
@@ -911,7 +930,10 @@ mod tests {
         let observers: Vec<Box<dyn ActionObserver>> = Vec::new();
         // Delete 'x'
         dispatch(
-            Action::Edit(EditKind::DeleteUnder),
+            Action::Edit(EditKind::DeleteUnder {
+                count: 1,
+                register: None,
+            }),
             &mut model,
             &mut sticky,
             &observers,
@@ -922,7 +944,10 @@ mod tests {
         // Move cursor to start (already at 0) and paste after -> should insert after cursor producing x y z order restored as xyzz? Wait semantics: Step1 paste inserts at cursor (simplified) so we adjust expectation.
         // For now simplified paste inserts at cursor; ensure we at least insert register content.
         dispatch(
-            Action::PasteAfter { register: None },
+            Action::PasteAfter {
+                count: 1,
+                register: None,
+            },
             &mut model,
             &mut sticky,
             &observers,
@@ -941,14 +966,20 @@ mod tests {
         // Delete 'a'
         let observers: Vec<Box<dyn ActionObserver>> = Vec::new();
         dispatch(
-            Action::Edit(EditKind::DeleteUnder),
+            Action::Edit(EditKind::DeleteUnder {
+                count: 1,
+                register: None,
+            }),
             &mut model,
             &mut sticky,
             &observers,
         );
         // Delete 'b' (originally 'c', now at index 0 after first delete)
         dispatch(
-            Action::Edit(EditKind::DeleteUnder),
+            Action::Edit(EditKind::DeleteUnder {
+                count: 1,
+                register: None,
+            }),
             &mut model,
             &mut sticky,
             &observers,
@@ -956,10 +987,26 @@ mod tests {
         assert_eq!(model.state().active_buffer().line(0).unwrap(), "cd");
         assert_eq!(model.state().undo_depth(), 2, "two discrete snapshots");
         // Undo last -> should restore to "bcd" (?) Actually sequence: start abcd -> after first delete bcd -> after second delete cd. Undo should return to bcd.
-        assert!(dispatch(Action::Undo, &mut model, &mut sticky, &observers).dirty);
+        assert!(
+            dispatch(
+                Action::Undo { count: 1 },
+                &mut model,
+                &mut sticky,
+                &observers
+            )
+            .dirty
+        );
         assert_eq!(model.state().active_buffer().line(0).unwrap(), "bcd");
         // Undo again -> original
-        assert!(dispatch(Action::Undo, &mut model, &mut sticky, &observers).dirty);
+        assert!(
+            dispatch(
+                Action::Undo { count: 1 },
+                &mut model,
+                &mut sticky,
+                &observers
+            )
+            .dirty
+        );
         assert_eq!(model.state().active_buffer().line(0).unwrap(), "abcd");
     }
 

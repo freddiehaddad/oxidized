@@ -89,7 +89,7 @@ mod tests {
         let initial = "l1\nl2\nl3\n"; // trailing newline
         let res = run_scenario(
             initial,
-            &[Keys("dj"), Action(Action::Undo)],
+            &[Keys("dj"), Action(Action::Undo { count: 1 })],
             ScenarioExpect {
                 final_text: Some(initial),
                 buffer_replaced: Some(true),
@@ -107,7 +107,7 @@ mod tests {
             initial,
             &[
                 Keys("2dw"), // expects: delete two words starting at cursor ("one ", "two ")
-                Action(Action::Undo),
+                Action(Action::Undo { count: 1 }),
             ],
             ScenarioExpect {
                 final_text: Some(initial),
@@ -126,8 +126,8 @@ mod tests {
             &[
                 Keys("dj"),
                 Keys("dj"),
-                Action(Action::Undo),
-                Action(Action::Undo),
+                Action(Action::Undo { count: 1 }),
+                Action(Action::Undo { count: 1 }),
             ],
             ScenarioExpect {
                 final_text: Some(initial),
