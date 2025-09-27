@@ -981,45 +981,64 @@ impl EditorState {
     /// Shared paste implementation that assumes an edit snapshot has already been pushed.
     /// Returns true when the inserted text is structural (multi-line).
     pub fn paste_with_text(&mut self, text: &str, before: bool, cursor: &mut Position) -> bool {
-        let buffer = self.active_buffer_mut();
-        let structural = text.contains('\n');
-        if !structural {
-            let mut insert_pos = *cursor;
-            if !before {
-                let line_len = buffer.line_byte_len(insert_pos.line);
-                if insert_pos.byte < line_len
-                    && let Some(line_owned) = buffer.line(insert_pos.line)
-                {
-                    let line_str = line_owned.as_str();
-                    let trimmed = line_str.strip_suffix('\n').unwrap_or(line_str);
-                    let next = core_text::grapheme::next_boundary(trimmed, insert_pos.byte);
-                    insert_pos.byte = next.min(trimmed.len());
-                }
-            }
-            let mut idx = 0;
-            let mut last_len = 0;
-            while idx < text.len() {
-                let next = core_text::grapheme::next_boundary(text, idx);
-                let g = &text[idx..next];
-                buffer.insert_grapheme(&mut insert_pos, g);
-                last_len = g.len();
-                idx = next;
-            }
-            if last_len > 0 {
-                insert_pos.byte = insert_pos.byte.saturating_sub(last_len);
-            }
-            *cursor = insert_pos;
-            if !self.dirty {
-                self.dirty = true;
-            }
+        if text.is_empty() {
             return false;
         }
+        if text.ends_with('\n') {
+            return self.paste_linewise(text, before, cursor);
+        }
+        if text.contains('\n') {
+            return self.paste_charwise_multiline(text, before, cursor);
+        }
+        self.paste_charwise_single(text, before, cursor)
+    }
 
+    fn paste_charwise_single(&mut self, text: &str, before: bool, cursor: &mut Position) -> bool {
+        let buffer = self.active_buffer_mut();
         let mut insert_pos = *cursor;
         if !before {
             let line_len = buffer.line_byte_len(insert_pos.line);
-            if insert_pos.byte < line_len {
-                let line_owned = buffer.line(insert_pos.line).unwrap();
+            if insert_pos.byte < line_len
+                && let Some(line_owned) = buffer.line(insert_pos.line)
+            {
+                let line_str = line_owned.as_str();
+                let trimmed = line_str.strip_suffix('\n').unwrap_or(line_str);
+                let next = core_text::grapheme::next_boundary(trimmed, insert_pos.byte);
+                insert_pos.byte = next.min(trimmed.len());
+            }
+        }
+        let mut idx = 0;
+        let mut last_len = 0;
+        while idx < text.len() {
+            let next = core_text::grapheme::next_boundary(text, idx);
+            let g = &text[idx..next];
+            buffer.insert_grapheme(&mut insert_pos, g);
+            last_len = g.len();
+            idx = next;
+        }
+        if last_len > 0 {
+            insert_pos.byte = insert_pos.byte.saturating_sub(last_len);
+        }
+        *cursor = insert_pos;
+        if !self.dirty {
+            self.dirty = true;
+        }
+        false
+    }
+
+    fn paste_charwise_multiline(
+        &mut self,
+        text: &str,
+        before: bool,
+        cursor: &mut Position,
+    ) -> bool {
+        let buffer = self.active_buffer_mut();
+        let mut insert_pos = *cursor;
+        if !before {
+            let line_len = buffer.line_byte_len(insert_pos.line);
+            if insert_pos.byte < line_len
+                && let Some(line_owned) = buffer.line(insert_pos.line)
+            {
                 let line_str = line_owned.as_str();
                 let trimmed = line_str.strip_suffix('\n').unwrap_or(line_str);
                 let next = core_text::grapheme::next_boundary(trimmed, insert_pos.byte);
@@ -1078,6 +1097,81 @@ impl EditorState {
         if !self.dirty {
             self.dirty = true;
         }
+        true
+    }
+
+    fn paste_linewise(&mut self, text: &str, before: bool, cursor: &mut Position) -> bool {
+        let (inserted_start_line, first_line) = {
+            let buffer = self.active_buffer_mut();
+            let total_lines = buffer.line_count();
+            let target_line = if before {
+                cursor.line
+            } else {
+                cursor.line.saturating_add(1)
+            };
+
+            let mut insert_pos = if total_lines == 0 {
+                Position { line: 0, byte: 0 }
+            } else if target_line >= total_lines {
+                let last_line = total_lines.saturating_sub(1);
+                let mut pos = Position {
+                    line: last_line,
+                    byte: buffer.line_byte_len(last_line),
+                };
+                buffer.insert_newline(&mut pos);
+                pos
+            } else {
+                Position {
+                    line: target_line,
+                    byte: 0,
+                }
+            };
+
+            let inserted_start_line = insert_pos.line;
+            for segment in text.split_inclusive('\n') {
+                let frag = segment.strip_suffix('\n').unwrap_or(segment);
+                if !frag.is_empty() {
+                    let mut idx = 0;
+                    while idx < frag.len() {
+                        let next = core_text::grapheme::next_boundary(frag, idx);
+                        let g = &frag[idx..next];
+                        buffer.insert_grapheme(&mut insert_pos, g);
+                        idx = next;
+                    }
+                }
+                if segment.ends_with('\n') {
+                    buffer.insert_newline(&mut insert_pos);
+                }
+            }
+
+            let first_line = buffer.line(inserted_start_line).unwrap_or_default();
+            (inserted_start_line, first_line)
+        };
+
+        if !self.dirty {
+            self.dirty = true;
+        }
+
+        let line_str = first_line.as_str();
+        let trimmed = line_str.strip_suffix('\n').unwrap_or(line_str);
+        let mut byte = 0usize;
+        let mut advanced = false;
+        for g in core_text::grapheme::iter(trimmed) {
+            if g.chars().all(char::is_whitespace) {
+                byte += g.len();
+            } else {
+                advanced = true;
+                break;
+            }
+        }
+        if !advanced {
+            byte = 0;
+        }
+        *cursor = Position {
+            line: inserted_start_line,
+            byte,
+        };
+
         true
     }
 
@@ -1201,15 +1295,89 @@ mod tests {
         let mut cursor = Position { line: 0, byte: 1 }; // after 'a'
         let structural = st.paste(PasteSource::Unnamed, false, &mut cursor).unwrap();
         assert!(structural);
-        // After semantics: advanced to end of first line, inserted multi-line payload
+        // Linewise payload should land on separate lines beneath the source line
         let l0 = st.active_buffer().line(0).unwrap();
         let l1 = st.active_buffer().line(1).unwrap();
         let l2 = st.active_buffer().line(2).unwrap();
-        assert_eq!(l0, "abX\n");
-        assert_eq!(l1, "Y\n");
-        assert_eq!(l2, "cd\n");
-        // Cursor should be at end of last inserted line before original remainder merge (line index 2 start?) Here after attaching tail -> end of 'cd' line
+        let l3 = st.active_buffer().line(3).unwrap();
+        assert_eq!(l0, "ab\n");
+        assert_eq!(l1, "X\n");
+        assert_eq!(l2, "Y\n");
+        assert_eq!(l3, "cd\n");
         assert_eq!(cursor.line, 1);
+        assert_eq!(cursor.byte, 0);
+    }
+
+    #[test]
+    fn paste_linewise_after_places_cursor_on_indent() {
+        let buf = Buffer::from_str("t", "alpha\nbeta\n").unwrap();
+        let mut st = EditorState::new(buf);
+        {
+            let mut regs = st.registers_facade();
+            regs.write_yank("  paste\n", None);
+        }
+        let mut cursor = Position { line: 0, byte: 1 };
+        let structural = st.paste(PasteSource::Unnamed, false, &mut cursor).unwrap();
+        assert!(structural, "linewise paste should be structural");
+        assert_eq!(st.active_buffer().line(1).unwrap(), "  paste\n");
+        assert_eq!(st.active_buffer().line(2).unwrap(), "beta\n");
+        assert_eq!(cursor.line, 1, "cursor should land on pasted line");
+        assert_eq!(cursor.byte, 2, "cursor should advance to first non-blank");
+    }
+
+    #[test]
+    fn paste_linewise_before_inserts_above() {
+        let buf = Buffer::from_str("t", "alpha\nbeta\n").unwrap();
+        let mut st = EditorState::new(buf);
+        {
+            let mut regs = st.registers_facade();
+            regs.write_yank("inserted\n", None);
+        }
+        let mut cursor = Position { line: 1, byte: 0 };
+        let structural = st.paste(PasteSource::Unnamed, true, &mut cursor).unwrap();
+        assert!(structural);
+        assert_eq!(st.active_buffer().line(0).unwrap(), "alpha\n");
+        assert_eq!(st.active_buffer().line(1).unwrap(), "inserted\n");
+        assert_eq!(st.active_buffer().line(2).unwrap(), "beta\n");
+        assert_eq!(cursor.line, 1);
+        assert_eq!(cursor.byte, 0);
+    }
+
+    #[test]
+    fn paste_linewise_repeat_replays_payload_each_time() {
+        let buf = Buffer::from_str("t", "start\n").unwrap();
+        let mut st = EditorState::new(buf);
+        {
+            let mut regs = st.registers_facade();
+            regs.write_yank("block\n", None);
+        }
+        let mut cursor = Position { line: 0, byte: 0 };
+        for _ in 0..2 {
+            let structural = st.paste(PasteSource::Unnamed, false, &mut cursor).unwrap();
+            assert!(structural);
+        }
+        assert_eq!(st.active_buffer().line(0).unwrap(), "start\n");
+        assert_eq!(st.active_buffer().line(1).unwrap(), "block\n");
+        assert_eq!(st.active_buffer().line(2).unwrap(), "block\n");
+        assert_eq!(cursor.line, 2);
+        assert_eq!(cursor.byte, 0);
+    }
+
+    #[test]
+    fn paste_does_not_rotate_numbered_ring() {
+        let buf = Buffer::from_str("t", "base\n").unwrap();
+        let mut st = EditorState::new(buf);
+        {
+            let mut regs = st.registers_facade();
+            regs.write_delete("one\n".to_string(), None);
+            regs.write_delete("two\n".to_string(), None);
+        }
+        let before: Vec<String> = st.registers.numbered().to_vec();
+        let mut cursor = Position { line: 0, byte: 0 };
+        let structural = st.paste(PasteSource::Unnamed, false, &mut cursor).unwrap();
+        assert!(structural);
+        let after: Vec<String> = st.registers.numbered().to_vec();
+        assert_eq!(after, before, "paste should not alter numbered ring order");
     }
 
     #[test]

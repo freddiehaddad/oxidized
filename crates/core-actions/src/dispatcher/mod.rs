@@ -909,6 +909,59 @@ mod tests {
     }
 
     #[test]
+    fn paste_after_linewise_places_cursor() {
+        let buffer = Buffer::from_str("t", "alpha\nbeta\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        {
+            let mut regs = model.state_mut().registers_facade();
+            regs.write_yank("  paste\n", None);
+        }
+        let mut sticky = None;
+        let res = dispatch(
+            Action::PasteAfter {
+                count: 1,
+                register: None,
+            },
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        assert!(res.buffer_replaced);
+        assert_eq!(model.state().active_buffer().line(1).unwrap(), "  paste\n");
+        let cursor = model.active_view().cursor;
+        assert_eq!(cursor.line, 1);
+        assert_eq!(cursor.byte, 2);
+    }
+
+    #[test]
+    fn paste_before_linewise_inserts_above() {
+        let buffer = Buffer::from_str("t", "alpha\nbeta\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        {
+            let mut regs = model.state_mut().registers_facade();
+            regs.write_yank("block\n", None);
+        }
+        model.active_view_mut().cursor = core_text::Position { line: 1, byte: 0 };
+        let mut sticky = None;
+        let res = dispatch(
+            Action::PasteBefore {
+                count: 1,
+                register: None,
+            },
+            &mut model,
+            &mut sticky,
+            &[],
+        );
+        assert!(res.buffer_replaced);
+        assert_eq!(model.state().active_buffer().line(1).unwrap(), "block\n");
+        let cursor = model.active_view().cursor;
+        assert_eq!(cursor.line, 1);
+        assert_eq!(cursor.byte, 0);
+    }
+
+    #[test]
     fn undo_repeats_count_times() {
         let buffer = Buffer::from_str("t", "abcd").unwrap();
         let state = core_state::EditorState::new(buffer);
