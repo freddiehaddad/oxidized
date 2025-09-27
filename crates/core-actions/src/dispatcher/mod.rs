@@ -1320,7 +1320,7 @@ mod tests {
                 .ephemeral_status
                 .as_ref()
                 .map(|m| m.text.as_str())
-                == Some("No filename")
+                == Some("E32: No file name")
         );
     }
 

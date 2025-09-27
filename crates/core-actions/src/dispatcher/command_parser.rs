@@ -23,9 +23,9 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsedCommand {
-    Quit,
-    Write,
-    Edit(PathBuf),
+    Quit { force: bool },
+    Write { force: bool, path: Option<PathBuf> },
+    Edit { force: bool, path: Option<PathBuf> },
     Metrics, // placeholder for Step 11
     Unknown(String),
 }
@@ -43,22 +43,54 @@ impl CommandParser {
         if body.is_empty() {
             return ParsedCommand::Unknown(String::new());
         }
-        // Fast path exact matches
-        match body {
-            "q" => return ParsedCommand::Quit,
-            "w" => return ParsedCommand::Write,
-            "metrics" => return ParsedCommand::Metrics,
-            _ => {}
+        let (head, tail) = split_head(body);
+        match head {
+            "q" => ParsedCommand::Quit { force: false },
+            "q!" => ParsedCommand::Quit { force: true },
+            "w" => ParsedCommand::Write {
+                force: false,
+                path: parse_path(tail),
+            },
+            "w!" => ParsedCommand::Write {
+                force: true,
+                path: parse_path(tail),
+            },
+            "e" => ParsedCommand::Edit {
+                force: false,
+                path: parse_path(tail),
+            },
+            "e!" => ParsedCommand::Edit {
+                force: true,
+                path: parse_path(tail),
+            },
+            "metrics" if tail.trim().is_empty() => ParsedCommand::Metrics,
+            _ => ParsedCommand::Unknown(body.to_string()),
         }
-        // Edit command: e <path>
-        if let Some(rest) = body.strip_prefix('e') {
-            // Accept forms: "e path", "e    path"
-            let path_part = rest.trim_start();
-            if !path_part.is_empty() {
-                return ParsedCommand::Edit(PathBuf::from(path_part));
-            }
+    }
+}
+
+fn split_head(body: &str) -> (&str, &str) {
+    let mut idx = 0usize;
+    for (offset, ch) in body.char_indices() {
+        if ch.is_whitespace() {
+            break;
         }
-        ParsedCommand::Unknown(body.to_string())
+        idx = offset + ch.len_utf8();
+    }
+    let (head, rest) = if idx == 0 || idx >= body.len() {
+        (body, "")
+    } else {
+        body.split_at(idx)
+    };
+    (head, rest)
+}
+
+fn parse_path(rest: &str) -> Option<PathBuf> {
+    let trimmed = rest.trim_start();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(trimmed))
     }
 }
 
@@ -68,25 +100,67 @@ mod tests {
 
     #[test]
     fn parse_quit() {
-        assert_eq!(CommandParser::parse(":q"), ParsedCommand::Quit);
+        assert_eq!(
+            CommandParser::parse(":q"),
+            ParsedCommand::Quit { force: false }
+        );
+    }
+
+    #[test]
+    fn parse_quit_force() {
+        assert_eq!(
+            CommandParser::parse(":q!"),
+            ParsedCommand::Quit { force: true }
+        );
     }
 
     #[test]
     fn parse_write() {
-        assert_eq!(CommandParser::parse(":w"), ParsedCommand::Write);
+        assert_eq!(
+            CommandParser::parse(":w"),
+            ParsedCommand::Write {
+                force: false,
+                path: None
+            }
+        );
+    }
+
+    #[test]
+    fn parse_write_with_path_force() {
+        assert_eq!(
+            CommandParser::parse(":w!   foo.txt"),
+            ParsedCommand::Write {
+                force: true,
+                path: Some(PathBuf::from("foo.txt"))
+            }
+        );
     }
 
     #[test]
     fn parse_edit() {
-        match CommandParser::parse(":e  foo.txt") {
-            ParsedCommand::Edit(p) => assert_eq!(p, PathBuf::from("foo.txt")),
-            other => panic!("expected Edit, got {:?}", other),
-        }
+        assert_eq!(
+            CommandParser::parse(":e  foo.txt"),
+            ParsedCommand::Edit {
+                force: false,
+                path: Some(PathBuf::from("foo.txt"))
+            }
+        );
     }
 
     #[test]
     fn parse_metrics() {
         assert_eq!(CommandParser::parse(":metrics"), ParsedCommand::Metrics);
+    }
+
+    #[test]
+    fn parse_edit_force_without_path() {
+        assert_eq!(
+            CommandParser::parse(":e!"),
+            ParsedCommand::Edit {
+                force: true,
+                path: None
+            }
+        );
     }
 
     #[test]

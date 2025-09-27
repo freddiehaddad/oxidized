@@ -69,11 +69,14 @@ pub enum WriteFileResult {
     Error,
 }
 
-/// Serialize the active buffer out to its associated file name honoring original
-/// line ending style and trailing newline presence.
-pub fn write_file(state: &mut EditorState) -> WriteFileResult {
-    let Some(path) = state.file_name.clone() else {
-        // small PathBuf clone
+/// Serialize the active buffer out to its associated file name (or provided target)
+/// honoring original line ending style and trailing newline presence.
+pub fn write_file(state: &mut EditorState, target: Option<&std::path::Path>) -> WriteFileResult {
+    let path = if let Some(p) = target {
+        p.to_path_buf()
+    } else if let Some(existing) = state.file_name.clone() {
+        existing
+    } else {
         return WriteFileResult::NoFilename;
     };
     // Re-expand line endings based on original metadata
@@ -140,7 +143,7 @@ mod tests {
         state.original_line_ending = LineEnding::Crlf;
         state.had_trailing_newline = true;
         state.dirty = true;
-        let res = write_file(&mut state);
+        let res = write_file(&mut state, None);
         assert!(matches!(res, WriteFileResult::Success));
         assert!(!state.dirty, "dirty cleared after write");
         let written = std::fs::read_to_string(&path).unwrap();
@@ -152,7 +155,7 @@ mod tests {
         let buffer = Buffer::from_str("t", "x").unwrap();
         let mut state = EditorState::new(buffer);
         state.dirty = true;
-        let res = write_file(&mut state);
+        let res = write_file(&mut state, None);
         assert!(matches!(res, WriteFileResult::NoFilename));
         assert!(state.dirty, "dirty unchanged when no filename");
     }
