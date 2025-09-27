@@ -19,7 +19,7 @@
 //! parity. Subsequent refactor steps (command parser extraction, etc.)
 //! will build on this structure.
 
-use crate::{Action, ActionObserver};
+use crate::{Action, ActionObserver, MotionKind};
 use core_model::EditorModel;
 use core_state::PasteSource;
 
@@ -256,7 +256,13 @@ pub fn dispatch(
                     if sel.start == sel.end {
                         return DispatchResult::clean();
                     }
-                    let (abs_start, abs_end) = selection_abs_byte_range(state, sel.start, sel.end);
+                    let (abs_start, mut abs_end) =
+                        selection_abs_byte_range(state, sel.start, sel.end);
+                    if abs_start == abs_end {
+                        return DispatchResult::clean();
+                    }
+                    abs_end =
+                        adjust_change_range(state.active_buffer(), motion, abs_start, abs_end);
                     if abs_start == abs_end {
                         return DispatchResult::clean();
                     }
@@ -422,6 +428,32 @@ fn selection_abs_byte_range(
     let a = to_abs(start);
     let b = to_abs(end);
     if a <= b { (a, b) } else { (b, a) }
+}
+
+fn adjust_change_range(
+    buffer: &core_text::Buffer,
+    motion: MotionKind,
+    abs_start: usize,
+    abs_end: usize,
+) -> usize {
+    if abs_start >= abs_end {
+        return abs_end;
+    }
+    match motion {
+        MotionKind::WordForward => {
+            let slice = buffer.slice_bytes(abs_start, abs_end);
+            if slice.is_empty() || slice.chars().all(|c| c.is_whitespace()) {
+                return abs_end;
+            }
+            let trimmed = slice.trim_end_matches(|c: char| c.is_whitespace());
+            if trimmed.len() == slice.len() {
+                abs_end
+            } else {
+                abs_start + trimmed.len()
+            }
+        }
+        _ => abs_end,
+    }
 }
 
 #[cfg(test)]
@@ -1437,10 +1469,24 @@ mod tests {
         let res = dispatch(act, &mut model, &mut sticky, &[]);
         assert!(res.dirty);
         assert_eq!(model.state().mode, core_state::Mode::Insert);
-        assert!(model.state().registers.unnamed.contains("one"));
-        // Buffer should have removed first word only (current resolver yields remaining without leading space)
+        assert_eq!(model.state().registers.unnamed, "one");
+        // Vim parity: cw changes word but preserves following whitespace.
         let after_line = model.state().active_buffer().line(0).unwrap();
-        assert!(after_line.starts_with("two"));
+        assert_eq!(after_line, " two three\n");
+    }
+
+    #[test]
+    fn operator_change_cw_unicode_word() {
+        let buffer = Buffer::from_str("t", "éclair 😀 space\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let act = change_sequence(&mut model, "cw");
+        let mut sticky = None;
+        dispatch(act, &mut model, &mut sticky, &[]);
+        assert_eq!(model.state().mode, core_state::Mode::Insert);
+        assert_eq!(model.state().registers.unnamed, "éclair");
+        let line = model.state().active_buffer().line(0).unwrap();
+        assert_eq!(line, " 😀 space\n");
     }
 
     #[test]
@@ -1453,8 +1499,9 @@ mod tests {
         dispatch(act, &mut model, &mut sticky, &[]);
         assert_eq!(model.state().mode, core_state::Mode::Insert);
         let after_line = model.state().active_buffer().line(0).unwrap();
-        // two words removed -> remaining starts with third word directly
-        assert!(after_line.starts_with("three"));
+        assert_eq!(model.state().registers.unnamed, "one two");
+        // two words removed while preserving trailing whitespace before third word
+        assert_eq!(after_line, " three four\n");
     }
 
     #[test]
@@ -1467,7 +1514,55 @@ mod tests {
         dispatch(act, &mut model, &mut sticky, &[]);
         assert_eq!(model.state().mode, core_state::Mode::Insert);
         let after_line = model.state().active_buffer().line(0).unwrap();
-        assert!(after_line.starts_with("three"));
+        assert_eq!(model.state().registers.unnamed, "one two");
+        assert_eq!(after_line, " three four\n");
+    }
+
+    #[test]
+    fn operator_change_line_end_c_dollar() {
+        let buffer = Buffer::from_str("t", "alpha beta\nsecond\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let act = change_sequence(&mut model, "c$");
+        let mut sticky = None;
+        dispatch(act, &mut model, &mut sticky, &[]);
+        assert_eq!(model.state().mode, core_state::Mode::Insert);
+        let first_line = model.state().active_buffer().line(0).unwrap();
+        assert_eq!(first_line, "\n");
+        assert_eq!(model.state().registers.unnamed, "alpha beta");
+        let second_line = model.state().active_buffer().line(1).unwrap();
+        assert_eq!(second_line, "second\n");
+    }
+
+    #[test]
+    fn operator_change_line_start_c0() {
+        let buffer = Buffer::from_str("t", "alpha beta gamma\n").unwrap();
+        let state = core_state::EditorState::new(buffer);
+        let mut model = EditorModel::new(state);
+        let mut sticky = None;
+        for _ in 0..6 {
+            let act = translate_key(
+                model.state().mode,
+                model.state().command_line.buffer(),
+                &KeyEvent {
+                    code: KeyCode::Char('l'),
+                    mods: KeyModifiers::empty(),
+                },
+            )
+            .unwrap();
+            dispatch(act, &mut model, &mut sticky, &[]);
+        }
+        let act = Action::ApplyOperator {
+            op: OperatorKind::Change,
+            motion: MotionKind::LineStart,
+            count: 1,
+            register: None,
+        };
+        dispatch(act, &mut model, &mut sticky, &[]);
+        assert_eq!(model.state().mode, core_state::Mode::Insert);
+        let line = model.state().active_buffer().line(0).unwrap();
+        assert_eq!(line, "beta gamma\n");
+        assert_eq!(model.state().registers.unnamed, "alpha ");
     }
 
     #[test]
