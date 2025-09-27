@@ -290,11 +290,11 @@ pub mod grapheme {
         egc_width(g) as usize
     }
 
-    /// Naive word classification: alphanumeric or underscore start.
+    /// Word classification aligned with Vim's default `iskeyword` plus apostrophes for contractions.
     pub fn is_word(g: &str) -> bool {
         g.chars()
             .next()
-            .map(|c| c == '_' || c.is_alphanumeric())
+            .map(|c| c == '_' || c == '\'' || c.is_alphanumeric())
             .unwrap_or(false)
     }
 }

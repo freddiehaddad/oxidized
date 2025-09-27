@@ -524,6 +524,7 @@ pub struct EditorState {
     pub selection: SelectionModel,
     // Refactor R4 Step 13: optional overlay (metrics) configuration
     pub overlay_mode: OverlayMode,
+    pub jump_mark: Option<Position>, // Previous jump location ('' mark)
 }
 
 /// Line ending style detected from source file (Phase 2 Step 9).
@@ -756,6 +757,7 @@ impl EditorState {
             last_render_delta: None, // Initialize last_render_delta to None
             selection: SelectionModel::default(),
             overlay_mode: OverlayMode::default(),
+            jump_mark: None,
         }
     }
 
@@ -789,6 +791,14 @@ impl EditorState {
     /// Test-only helper (and future external hook) to set cached viewport height explicitly.
     pub fn set_last_text_height(&mut self, h: usize) {
         self.last_text_height = h;
+    }
+
+    pub fn set_jump_mark(&mut self, pos: Position) {
+        self.jump_mark = Some(pos);
+    }
+
+    pub fn jump_mark(&self) -> Option<Position> {
+        self.jump_mark
     }
     /// Borrow the currently active buffer.
     pub fn active_buffer(&self) -> &Buffer {

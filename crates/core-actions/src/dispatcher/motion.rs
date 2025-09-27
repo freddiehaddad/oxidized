@@ -112,7 +112,15 @@ fn expand_visual_char_selection(
     state.selection.set(span);
 }
 
-fn page_half_down(state: &EditorState, view: &mut View, sticky_visual_col: &mut Option<usize>) {
+fn resolve_page_metrics(state: &EditorState, total_lines: usize) -> (usize, usize) {
+    let height = state.last_text_height.max(1).min(total_lines.max(1));
+    // Vim's 'scroll option defaults to half the window height when unset (0).
+    // Counts are not yet threaded through motions, so we always use the fallback.
+    let jump = (height / 2).max(1);
+    (height, jump)
+}
+
+fn page_half_down(state: &mut EditorState, view: &mut View, sticky_visual_col: &mut Option<usize>) {
     // New semantics (Phase 5 / Step 0.2): explicit half-page scroll independent of
     // margin-based auto_scroll. We shift the viewport by half the last known text
     // height and advance the cursor by the same jump, clamping at buffer end.
@@ -121,10 +129,12 @@ fn page_half_down(state: &EditorState, view: &mut View, sticky_visual_col: &mut 
     if total_lines == 0 {
         return;
     }
-    let h = state.last_text_height.max(1).min(total_lines); // guard small files
-    let jump = (h / 2).max(1);
+    // Store the prior cursor location so `''` can jump back like Vim.
+    // Store the prior cursor location so `''` can jump back like Vim.
+    state.set_jump_mark(view.cursor);
+    let (height, jump) = resolve_page_metrics(state, total_lines);
     // Compute new viewport first line; clamp so last page is fully visible.
-    let max_first = total_lines.saturating_sub(h);
+    let max_first = total_lines.saturating_sub(height);
     let candidate_first = view.viewport_first_line.saturating_add(jump);
     let new_first = candidate_first.min(max_first);
     view.viewport_first_line = new_first;
@@ -136,14 +146,14 @@ fn page_half_down(state: &EditorState, view: &mut View, sticky_visual_col: &mut 
     }
 }
 
-fn page_half_up(state: &EditorState, view: &mut View, sticky_visual_col: &mut Option<usize>) {
+fn page_half_up(state: &mut EditorState, view: &mut View, sticky_visual_col: &mut Option<usize>) {
     let buffer = state.active_buffer();
     let total_lines = buffer.line_count();
     if total_lines == 0 {
         return;
     }
-    let h = state.last_text_height.max(1).min(total_lines);
-    let jump = (h / 2).max(1);
+    state.set_jump_mark(view.cursor);
+    let (_, jump) = resolve_page_metrics(state, total_lines);
     // Compute new viewport first line with saturating subtraction.
     let new_first = view.viewport_first_line.saturating_sub(jump);
     view.viewport_first_line = new_first;
@@ -286,5 +296,20 @@ mod tests {
             view.cursor.line > prev_cursor,
             "cursor continues moving toward EOF"
         );
+    }
+
+    #[test]
+    fn page_half_updates_jump_mark() {
+        let text = mk_buffer(80);
+        let (mut state, mut view, mut sticky) = setup(&text);
+        state.last_text_height = 24;
+        // First half-down should record original position as jump mark.
+        let origin = view.cursor;
+        handle_motion(MotionKind::PageHalfDown, &mut state, &mut view, &mut sticky);
+        assert_eq!(state.jump_mark, Some(origin));
+        let after_down = view.cursor;
+        // Half-up updates the mark to the cursor prior to moving back.
+        handle_motion(MotionKind::PageHalfUp, &mut state, &mut view, &mut sticky);
+        assert_eq!(state.jump_mark, Some(after_down));
     }
 }

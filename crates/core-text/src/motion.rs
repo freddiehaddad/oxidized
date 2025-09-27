@@ -147,130 +147,187 @@ fn byte_for_visual_col(buf: &Buffer, line: usize, target_col: usize) -> usize {
     0
 }
 
-/// Move forward to the start of the next word. Semantics (naive):
-/// - If currently on a word cluster, advance to boundary after the current word, then skip any non-word clusters, landing on first cluster of next word.
-/// - If on whitespace / punctuation, skip them until a word cluster; if at EOL, move to start of next line's first word.
-pub fn word_forward(buf: &Buffer, pos: &mut Position) {
-    let mut line = pos.line;
-    let mut byte = pos.byte;
-    // Helper to get line content sans newline
-    let get_line = |buf: &Buffer, idx: usize| -> Option<String> {
-        buf.line(idx).map(|l| {
-            if l.ends_with('\n') {
-                l[..l.len() - 1].to_string()
-            } else {
-                l
-            }
-        })
-    };
-    let mut line_content = match get_line(buf, line) {
-        Some(s) => s,
-        None => return,
-    };
-    if byte > line_content.len() {
-        byte = line_content.len();
-    }
-    if byte >= line_content.len() {
-        // Move to next line start
-        if line + 1 >= buf.line_count() {
-            return;
-        }
-        line += 1;
-        byte = 0;
-        line_content = get_line(buf, line).unwrap();
-    }
-    // If starting on a word char, skip the rest of this word first
-    let next_b = grapheme::next_boundary(&line_content, byte);
-    if next_b > byte {
-        let current = &line_content[byte..next_b];
-        if grapheme::is_word(current) {
-            let mut b = next_b;
-            while b < line_content.len() {
-                let nb = grapheme::next_boundary(&line_content, b);
-                let c = &line_content[b..nb];
-                if !grapheme::is_word(c) {
-                    break;
-                }
-                b = nb;
-            }
-            byte = b;
-        }
-    }
-    // Skip non-word clusters to next word start (could be same line or next line)
-    loop {
-        if byte >= line_content.len() {
-            if line + 1 >= buf.line_count() {
-                pos.line = line;
-                pos.byte = line_content.len();
-                return;
-            }
-            line += 1;
-            byte = 0;
-            line_content = get_line(buf, line).unwrap();
-        }
-        let nb = grapheme::next_boundary(&line_content, byte);
-        let cluster = &line_content[byte..nb];
-        if grapheme::is_word(cluster) {
-            pos.line = line;
-            pos.byte = byte;
-            return;
-        }
-        byte = nb;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClusterKind {
+    Word,
+    Blank,
+    Other,
+}
+
+fn classify_cluster(cluster: &str) -> ClusterKind {
+    if grapheme::is_word(cluster) {
+        ClusterKind::Word
+    } else if cluster.chars().all(|c| c.is_whitespace()) {
+        ClusterKind::Blank
+    } else {
+        ClusterKind::Other
     }
 }
 
-/// Move backward to the start of the previous word. If currently at start of a word, move to start of previous word.
-pub fn word_backward(buf: &Buffer, pos: &mut Position) {
-    if pos.line >= buf.line_count() {
+fn line_without_newline(buf: &Buffer, idx: usize) -> String {
+    buf.line(idx)
+        .map(|mut l| {
+            if l.ends_with('\n') {
+                l.pop();
+            }
+            l
+        })
+        .unwrap_or_default()
+}
+
+fn advance_line_forward(
+    buf: &Buffer,
+    line: &mut usize,
+    byte: &mut usize,
+    line_content: &mut String,
+) -> bool {
+    if *line + 1 >= buf.line_count() {
+        *byte = line_content.len();
+        return false;
+    }
+    *line += 1;
+    *line_content = line_without_newline(buf, *line);
+    *byte = 0;
+    true
+}
+
+fn skip_blanks_forward(
+    buf: &Buffer,
+    line: &mut usize,
+    byte: &mut usize,
+    line_content: &mut String,
+) -> bool {
+    loop {
+        if *byte >= line_content.len() {
+            if !advance_line_forward(buf, line, byte, line_content) {
+                return false;
+            }
+            if line_content.is_empty() {
+                continue;
+            }
+        }
+        let nb = grapheme::next_boundary(line_content, *byte);
+        let cluster = &line_content[*byte..nb];
+        if classify_cluster(cluster) == ClusterKind::Blank {
+            *byte = nb;
+            continue;
+        }
+        return true;
+    }
+}
+
+fn skip_kind_in_line(line: &str, mut byte: usize, kind: ClusterKind) -> usize {
+    while byte < line.len() {
+        let nb = grapheme::next_boundary(line, byte);
+        let cluster = &line[byte..nb];
+        if classify_cluster(cluster) != kind {
+            break;
+        }
+        byte = nb;
+    }
+    byte
+}
+
+fn retreat_line(
+    buf: &Buffer,
+    line: &mut usize,
+    byte: &mut usize,
+    line_content: &mut String,
+) -> bool {
+    if *line == 0 {
+        return false;
+    }
+    *line -= 1;
+    *line_content = line_without_newline(buf, *line);
+    *byte = line_content.len();
+    true
+}
+
+/// Move forward to the start of the next token following Vim `w` semantics.
+/// - Word tokens consist of Unicode letters, digits, underscores, and apostrophes (for contractions).
+/// - Punctuation tokens (non-word, non-whitespace graphemes) are treated as standalone stops.
+/// - Whitespace is skipped until the next word or punctuation token, traversing lines as needed.
+pub fn word_forward(buf: &Buffer, pos: &mut Position) {
+    if buf.line_count() == 0 {
         return;
     }
-    // Helper to get line content sans newline
-    let get_line = |buf: &Buffer, idx: usize| -> Option<String> {
-        buf.line(idx).map(|l| {
-            if l.ends_with('\n') {
-                l[..l.len() - 1].to_string()
-            } else {
-                l
-            }
-        })
+    let mut line = pos.line.min(buf.line_count() - 1);
+    let mut line_content = line_without_newline(buf, line);
+    let mut byte = pos.byte.min(line_content.len());
+    if byte >= line_content.len() {
+        let _ = skip_blanks_forward(buf, &mut line, &mut byte, &mut line_content);
+        pos.line = line;
+        pos.byte = byte;
+        return;
+    }
+
+    let nb = grapheme::next_boundary(&line_content, byte);
+    let cluster = &line_content[byte..nb];
+    byte = match classify_cluster(cluster) {
+        ClusterKind::Blank => nb,
+        ClusterKind::Word => skip_kind_in_line(&line_content, byte, ClusterKind::Word),
+        ClusterKind::Other => skip_kind_in_line(&line_content, byte, ClusterKind::Other),
     };
-    let mut line = pos.line;
-    let mut line_content = get_line(buf, line).unwrap_or_default();
-    let mut byte = pos.byte;
-    if byte == 0 {
-        if line == 0 {
-            pos.byte = 0;
-            return;
-        }
-        line -= 1;
-        line_content = get_line(buf, line).unwrap_or_default();
-        byte = line_content.len();
-    }
-    // Step back one cluster if currently at a word start to move inside previous region
-    let prev = grapheme::prev_boundary(&line_content, byte);
-    if prev < byte {
-        byte = prev;
-    }
-    // Skip punctuation/whitespace backwards
-    while byte > 0 {
-        let prev_b = grapheme::prev_boundary(&line_content, byte);
-        let cluster = &line_content[prev_b..byte];
-        if grapheme::is_word(cluster) {
-            break;
-        }
-        byte = prev_b;
-    }
-    // Skip word chars backwards to start of word
-    while byte > 0 {
-        let prev_b = grapheme::prev_boundary(&line_content, byte);
-        let cluster = &line_content[prev_b..byte];
-        if !grapheme::is_word(cluster) {
-            break;
-        }
-        byte = prev_b;
-    }
+    let _ = skip_blanks_forward(buf, &mut line, &mut byte, &mut line_content);
     pos.line = line;
     pos.byte = byte;
+}
+
+/// Move backward to the start of the previous token following Vim `b` semantics.
+/// If currently at the start of a token, move to the beginning of the prior word or punctuation token,
+/// skipping intervening whitespace and blank lines.
+pub fn word_backward(buf: &Buffer, pos: &mut Position) {
+    if buf.line_count() == 0 {
+        return;
+    }
+    let mut line = pos.line.min(buf.line_count() - 1);
+    let mut line_content = line_without_newline(buf, line);
+    let mut byte = pos.byte.min(line_content.len());
+
+    loop {
+        if byte == 0 {
+            if !retreat_line(buf, &mut line, &mut byte, &mut line_content) {
+                pos.line = 0;
+                pos.byte = 0;
+                return;
+            }
+            continue;
+        }
+        let prev_b = grapheme::prev_boundary(&line_content, byte);
+        if prev_b == byte {
+            if !retreat_line(buf, &mut line, &mut byte, &mut line_content) {
+                pos.line = 0;
+                pos.byte = 0;
+                return;
+            }
+            continue;
+        }
+        let cluster = &line_content[prev_b..byte];
+        let kind = classify_cluster(cluster);
+        match kind {
+            ClusterKind::Blank => {
+                byte = prev_b;
+                continue;
+            }
+            ClusterKind::Word | ClusterKind::Other => {
+                byte = prev_b;
+                while byte > 0 {
+                    let before = grapheme::prev_boundary(&line_content, byte);
+                    if before == byte {
+                        break;
+                    }
+                    let prev_cluster = &line_content[before..byte];
+                    if classify_cluster(prev_cluster) != kind {
+                        break;
+                    }
+                    byte = before;
+                }
+                pos.line = line;
+                pos.byte = byte;
+                return;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -320,68 +377,79 @@ mod tests {
 
     #[test]
     fn word_forward_and_backward_basic() {
-        let buf = Buffer::from_str("t", "foo, bar baz\nqux!! zip").unwrap();
-        let mut pos = Position::new(0, 0);
-        // forward through words
-        word_forward(&buf, &mut pos); // at foo already, move to bar
-        assert_eq!(pos.line, 0);
+        let buf = Buffer::from_str("t", "foo, bar can't stop 123!").unwrap();
         let line0 = buf.line(0).unwrap();
+        let comma_idx = line0.find(',').unwrap();
         let bar_idx = line0.find("bar").unwrap();
-        assert_eq!(pos.byte, bar_idx);
-        word_forward(&buf, &mut pos); // baz
-        let baz_idx = line0.find("baz").unwrap();
-        assert_eq!(pos.byte, baz_idx);
-        word_forward(&buf, &mut pos); // next line qux
-        assert_eq!(pos.line, 1);
-        let line1 = buf.line(1).unwrap();
-        let qux_idx = line1.find("qux").unwrap();
-        assert_eq!(pos.byte, qux_idx);
-        // backward
-        word_backward(&buf, &mut pos); // back to baz
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.byte, baz_idx);
-        word_backward(&buf, &mut pos); // bar
-        assert_eq!(pos.byte, bar_idx);
-        word_backward(&buf, &mut pos); // foo
-        assert_eq!(pos.byte, 0);
+        let cant_idx = line0.find("can't").unwrap();
+        let stop_idx = line0.find("stop").unwrap();
+        let digits_idx = line0.find("123").unwrap();
+        let excl_idx = line0.find('!').unwrap();
+
+        let mut pos = Position::new(0, 0);
+        word_forward(&buf, &mut pos);
+        assert_eq!((pos.line, pos.byte), (0, comma_idx));
+        word_forward(&buf, &mut pos);
+        assert_eq!((pos.line, pos.byte), (0, bar_idx));
+        word_forward(&buf, &mut pos);
+        assert_eq!((pos.line, pos.byte), (0, cant_idx));
+        word_forward(&buf, &mut pos);
+        assert_eq!((pos.line, pos.byte), (0, stop_idx));
+        word_forward(&buf, &mut pos);
+        assert_eq!((pos.line, pos.byte), (0, digits_idx));
+        word_forward(&buf, &mut pos);
+        assert_eq!((pos.line, pos.byte), (0, excl_idx));
+
+        // Starting on an internal apostrophe should treat it as part of the word
+        let apost_idx = line0.find('\'').unwrap();
+        pos.byte = apost_idx;
+        word_forward(&buf, &mut pos);
+        assert_eq!((pos.line, pos.byte), (0, stop_idx));
+
+        // Backwards from end-of-line traverses punctuation and words
+        pos.byte = buf.line_byte_len(0);
+        word_backward(&buf, &mut pos);
+        assert_eq!((pos.line, pos.byte), (0, excl_idx));
+        word_backward(&buf, &mut pos);
+        assert_eq!((pos.line, pos.byte), (0, digits_idx));
+        word_backward(&buf, &mut pos);
+        assert_eq!((pos.line, pos.byte), (0, stop_idx));
+        word_backward(&buf, &mut pos);
+        assert_eq!((pos.line, pos.byte), (0, cant_idx));
+        word_backward(&buf, &mut pos);
+        assert_eq!((pos.line, pos.byte), (0, bar_idx));
+        word_backward(&buf, &mut pos);
+        assert_eq!((pos.line, pos.byte), (0, comma_idx));
+        word_backward(&buf, &mut pos);
+        assert_eq!((pos.line, pos.byte), (0, 0));
     }
 
     #[test]
     fn word_motion_cross_line_edges() {
         // Ensures word_forward at end of line moves to first word of next non-empty line and backward wraps.
-        let buf = Buffer::from_str("t", "alpha\n\n beta gamma\n\nzzz").unwrap();
+        let buf = Buffer::from_str("t", "alpha\n\n βeta γamma\n    \n😀 emoji\n").unwrap();
         let mut pos = Position::new(0, 0); // at 'alpha'
-        // Move to next line's first word (beta) skipping blank line
-        word_forward(&buf, &mut pos); // should go to beta
-        // Ensure current line contains beta
-        let current_line_str = buf.line(pos.line).unwrap();
-        let beta_idx = current_line_str.find("beta").expect("beta present");
+
+        // Forward jumps over blank lines and leading whitespace
+        word_forward(&buf, &mut pos);
+        assert_eq!(pos.line, 2);
+        let beta_idx = buf.line(2).unwrap().find("βeta").unwrap();
         assert_eq!(pos.byte, beta_idx);
-        // Move forward to gamma (same line)
+
+        // Next word on same line is γamma
         word_forward(&buf, &mut pos);
-        let gamma_line_str = buf.line(pos.line).unwrap();
-        let gamma_idx = gamma_line_str.find("gamma").unwrap();
+        let gamma_idx = buf.line(2).unwrap().find("γamma").unwrap();
         assert_eq!(pos.byte, gamma_idx);
-        // Move forward to zzz (final non-empty line)
+
+        // Forward again should reach the emoji punctuation token on final line
         word_forward(&buf, &mut pos);
-        let z_line = buf.line(pos.line).unwrap();
-        assert!(z_line.contains("zzz"));
-        assert_eq!(pos.byte, 0, "should land at start of final word line");
-        // Move backward returns to a prior non-empty line (gamma or beta depending on naive parsing)
+        assert_eq!(pos.line, 4);
+        let emoji_idx = buf.line(4).unwrap().find("😀").unwrap();
+        assert_eq!(pos.byte, emoji_idx);
+
+        // Backwards from emoji returns to γamma despite intervening blank line
         word_backward(&buf, &mut pos);
-        assert!(
-            pos.line < buf.line_count() - 1,
-            "should have moved off final line"
-        );
-        let mut back_line = buf.line(pos.line).unwrap();
-        if back_line.trim().is_empty() {
-            // Move backward again to reach previous word line
-            word_backward(&buf, &mut pos);
-            back_line = buf.line(pos.line).unwrap();
-        }
-        assert!(
-            back_line.contains("beta") || back_line.contains("gamma"),
-            "expected to reach a word line (beta|gamma)"
-        );
+        assert_eq!(pos.line, 2);
+        assert_eq!(pos.byte, gamma_idx);
     }
 }
