@@ -23,6 +23,17 @@ The NGI pipeline is Oxidized's end-to-end bridge from terminal events to high-le
 - Text commits are funneled through the centralized normalization and segmentation adapter established in the Vim parity plan (Step 4), keeping grapheme boundaries intact for undo coalescing and rendering.
 - Paste chunks flush once buffers reach configurable thresholds, ensuring large emoji-rich payloads stay chunk-aligned without splitting clusters.
 
+## KeyPress lifecycle
+
+- **Emission**: The async input task maps each `crossterm::event::KeyEvent` into a `KeyEventExt` token and enqueues `InputEvent::KeyPress`. Legacy `InputEvent::Key` events are no longer emitted; the runtime keeps a defensive trace when it encounters one so unexpected producers can be spotted quickly.
+- **Token semantics**:
+  - `KeyToken::Char` carries printable Unicode scalars (already normalized via `normalize_keycode`).
+  - `KeyToken::Named` represents non-printable logical keys (Esc, Enter, arrows, function keys).
+  - `KeyToken::Chord` pairs a base token with a `ModMask`, preserving modifier combinations like `<C-d>` or `<A-S-Tab>`.
+- **Timestamp**: Each `KeyPress` records the `Instant` observed by the input task, enabling deterministic timeout handling and future latency metrics. Timestamps are monotonic per task; consumers must not synthesize or reorder them.
+- **Repeat flag**: `repeat = true` only when the terminal reports an auto-repeat (e.g., holding `j`). The retry-aware timeout logic in `ox-bin` can use this to avoid flushing pending trie state prematurely.
+- **Logging**: Follow `docs/logging.md`—log chord discriminants (`?token`) and modifier masks, never raw graphemes. The input task emits `trace!(target="input.event", kind="keypress", repeat, mods=?mods)` (Step 3) while downstream translation/dispatch layers rely on `actions.translate` and `actions.dispatch` targets for structured diagnostics.
+
 ## Timeout & resolution
 
 - The translator tracks whether a pending sequence requires more input (e.g., distinguishing `d` vs. `dw`).

@@ -1,25 +1,17 @@
 //! Async input service helpers shared across the runtime.
 
 mod async_service;
+mod key_token;
 pub use async_service::AsyncInputShutdown;
 
 use async_service::spawn_async_event_task;
 
-use core_events::{Event, InputEvent, KeyCode, KeyEvent, KeyModifiers, normalize_keycode};
-use crossterm::event::KeyModifiers as CMods;
+use core_events::Event;
 use tokio::task::JoinHandle;
 
 #[inline]
 pub(crate) fn log_paste_chunk_flush(chunk: &str) {
     tracing::trace!(target: "input.paste", chunk_len = chunk.len(), "chunk_flush");
-}
-
-#[inline]
-pub(crate) fn build_key_event(code: KeyCode, mods: KeyModifiers) -> Event {
-    Event::Input(InputEvent::Key(KeyEvent {
-        code: normalize_keycode(code),
-        mods,
-    }))
 }
 
 /// Spawn the async input service backed by `crossterm::EventStream`.
@@ -30,20 +22,6 @@ pub fn spawn_async_input(
     sender: tokio::sync::mpsc::Sender<Event>,
 ) -> (JoinHandle<()>, AsyncInputShutdown) {
     spawn_async_event_task(sender)
-}
-
-pub(crate) fn map_mods(m: CMods) -> KeyModifiers {
-    let mut out = KeyModifiers::empty();
-    if m.contains(CMods::CONTROL) {
-        out |= KeyModifiers::CTRL;
-    }
-    if m.contains(CMods::ALT) {
-        out |= KeyModifiers::ALT;
-    }
-    if m.contains(CMods::SHIFT) {
-        out |= KeyModifiers::SHIFT;
-    }
-    out
 }
 
 #[cfg(test)]

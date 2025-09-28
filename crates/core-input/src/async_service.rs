@@ -1,8 +1,10 @@
-use crate::{build_key_event, log_paste_chunk_flush, map_mods};
+use crate::key_token::{KeyPressParts, map_key_event};
+use crate::log_paste_chunk_flush;
 use core_events::{
     ASYNC_INPUT_STARTS, ASYNC_INPUT_STOP_CHANNEL, ASYNC_INPUT_STOP_ERROR, ASYNC_INPUT_STOP_SIGNAL,
     ASYNC_INPUT_STOP_STREAM, CHANNEL_BLOCKING_SENDS, CHANNEL_SEND_FAILURES, Event, InputEvent,
-    KeyCode, KeyModifiers, PASTE_BYTES, PASTE_CHUNKS, PASTE_SESSIONS,
+    KEYPRESS_REPEAT, KEYPRESS_TOTAL, KeyEventExt, KeyToken, ModMask, NamedKey, PASTE_BYTES,
+    PASTE_CHUNKS, PASTE_SESSIONS,
 };
 use crossterm::event::{
     Event as CEvent, EventStream, KeyCode as CKeyCode, KeyEvent as CKeyEvent, KeyEventKind as CKind,
@@ -60,7 +62,7 @@ pub(crate) fn spawn_async_event_task(
         let _enter = span.enter();
 
         if let Err(join_err) = task::spawn_blocking(enable_bracketed_paste).await {
-            debug!(target = "input.paste", ?join_err, "enable_failed_join");
+            debug!(target: "input.paste", ?join_err, "enable_failed_join");
         }
 
         let stream = EventStream::new();
@@ -69,7 +71,7 @@ pub(crate) fn spawn_async_event_task(
             .await;
 
         if let Err(join_err) = task::spawn_blocking(disable_bracketed_paste).await {
-            debug!(target = "input.paste", ?join_err, "disable_failed_join");
+            debug!(target: "input.paste", ?join_err, "disable_failed_join");
         }
     });
 
@@ -78,14 +80,14 @@ pub(crate) fn spawn_async_event_task(
 
 fn enable_bracketed_paste() {
     if let Err(e) = write!(io::stdout(), "\x1b[?2004h") {
-        debug!(target = "input.paste", ?e, "enable_failed");
+        debug!(target: "input.paste", ?e, "enable_failed");
     }
     let _ = io::stdout().flush();
 }
 
 fn disable_bracketed_paste() {
     if let Err(e) = write!(io::stdout(), "\x1b[?2004l") {
-        debug!(target = "input.paste", ?e, "disable_failed");
+        debug!(target: "input.paste", ?e, "disable_failed");
     }
     let _ = io::stdout().flush();
 }
@@ -232,11 +234,9 @@ where
     }
 
     async fn handle_key_event(&mut self, key: CKeyEvent) -> bool {
-        if key.kind != CKind::Press {
+        if !matches!(key.kind, CKind::Press | CKind::Repeat) {
             return true;
         }
-
-        let mods = map_mods(key.modifiers);
 
         // Paste detection path mirrors blocking implementation.
         match (&mut self.paste_fsm, &key.code) {
@@ -254,7 +254,7 @@ where
                     || target_without_bracket.starts_with(slice);
 
                 if is_full_match {
-                    trace!(target = "input.paste", "start");
+                    trace!(target: "input.paste", "start");
                     if !self.send_event(Event::Input(InputEvent::PasteStart)).await {
                         return false;
                     }
@@ -264,11 +264,14 @@ where
                     };
                 } else if !is_valid_prefix {
                     let replay = acc.clone();
-                    if !self.emit_key(KeyCode::Esc, mods).await {
+                    if !self
+                        .emit_replayed_keypress(KeyToken::Named(NamedKey::Esc))
+                        .await
+                    {
                         return false;
                     }
                     for b in replay {
-                        if !self.emit_key(KeyCode::Char(b as char), mods).await {
+                        if !self.emit_replayed_keypress(KeyToken::Char(b as char)).await {
                             return false;
                         }
                     }
@@ -300,7 +303,7 @@ where
                         PASTE_CHUNKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         PASTE_BYTES.fetch_add(slen as u64, std::sync::atomic::Ordering::Relaxed);
                     }
-                    trace!(target = "input.paste", "end");
+                    trace!(target: "input.paste", "end");
                     if !self.send_event(Event::Input(InputEvent::PasteEnd)).await {
                         return false;
                     }
@@ -326,21 +329,23 @@ where
             _ => {}
         }
 
-        let code = match map_key_code(&key.code) {
-            Some(code) => code,
-            None => return true,
-        };
-
-        if code == KeyCode::Char('c') && mods.contains(KeyModifiers::CTRL) {
+        if matches!(key.code, CKeyCode::Char('c'))
+            && key
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::CONTROL)
+        {
             return self.send_event(Event::Input(InputEvent::CtrlC)).await;
         }
 
-        let evt = build_key_event(code, mods);
-        self.send_event(evt).await
+        if let Some(parts) = map_key_event(&key) {
+            return self.emit_keypress(parts).await;
+        }
+
+        true
     }
 
     async fn handle_clipboard_paste(&mut self, data: String) -> bool {
-        trace!(target = "input.paste", len = data.len(), "paste_event");
+        trace!(target: "input.paste", len = data.len(), "paste_event");
         if !self.send_event(Event::Input(InputEvent::PasteStart)).await {
             return false;
         }
@@ -364,13 +369,53 @@ where
             remaining = rest;
         }
 
-        trace!(target = "input.paste", "paste_event_end");
+        trace!(target: "input.paste", "paste_event_end");
         self.send_event(Event::Input(InputEvent::PasteEnd)).await
     }
 
-    async fn emit_key(&mut self, code: KeyCode, mods: KeyModifiers) -> bool {
-        let evt = build_key_event(code, mods);
-        self.send_event(evt).await
+    async fn emit_keypress(&mut self, parts: KeyPressParts) -> bool {
+        let KeyPressParts {
+            token,
+            mods,
+            repeat,
+        } = parts;
+        let token = if mods.is_empty() {
+            token
+        } else {
+            KeyToken::Chord {
+                base: Box::new(token),
+                mods,
+            }
+        };
+
+        trace!(
+            target: "input.event",
+            kind = "keypress",
+            repeat,
+            mods = ?mods,
+            token_kind = token_kind_label(&token)
+        );
+
+        let event = Event::Input(InputEvent::KeyPress(KeyEventExt::with_repeat(
+            token, repeat,
+        )));
+        let sent = self.send_event(event).await;
+        if sent {
+            KEYPRESS_TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if repeat {
+                KEYPRESS_REPEAT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        sent
+    }
+
+    async fn emit_replayed_keypress(&mut self, token: KeyToken) -> bool {
+        self.emit_keypress(KeyPressParts {
+            token,
+            mods: ModMask::empty(),
+            repeat: false,
+        })
+        .await
     }
 
     async fn send_event(&mut self, event: Event) -> bool {
@@ -390,18 +435,11 @@ where
     }
 }
 
-fn map_key_code(code: &CKeyCode) -> Option<KeyCode> {
-    match code {
-        CKeyCode::Char(c) => Some(KeyCode::Char(*c)),
-        CKeyCode::Enter => Some(KeyCode::Enter),
-        CKeyCode::Esc => Some(KeyCode::Esc),
-        CKeyCode::Backspace => Some(KeyCode::Backspace),
-        CKeyCode::Tab => Some(KeyCode::Tab),
-        CKeyCode::Up => Some(KeyCode::Up),
-        CKeyCode::Down => Some(KeyCode::Down),
-        CKeyCode::Left => Some(KeyCode::Left),
-        CKeyCode::Right => Some(KeyCode::Right),
-        _ => None,
+fn token_kind_label(token: &KeyToken) -> &'static str {
+    match token {
+        KeyToken::Char(_) => "char",
+        KeyToken::Named(_) => "named",
+        KeyToken::Chord { .. } => "chord",
     }
 }
 
@@ -427,12 +465,11 @@ mod tests {
     use super::*;
     use core_events::{
         ASYNC_INPUT_STARTS, ASYNC_INPUT_STOP_CHANNEL, ASYNC_INPUT_STOP_SIGNAL, Event, InputEvent,
-        KeyEvent,
     };
     use std::io;
     use std::sync::atomic::Ordering;
     use std::sync::{Arc, Mutex};
-    use tokio::sync::mpsc;
+    use tokio::sync::{Mutex as TokioMutex, mpsc};
     use tokio::time::{Duration, timeout};
     use tokio_stream::wrappers::UnboundedReceiverStream;
     use tracing::{Metadata, Subscriber, subscriber::Interest};
@@ -441,6 +478,8 @@ mod tests {
     use tracing_subscriber::filter::LevelFilter;
     use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
     use tracing_subscriber::registry::Registry;
+
+    static LOG_CAPTURE_GUARD: TokioMutex<()> = TokioMutex::const_new(());
 
     #[derive(Clone, Default)]
     struct LogCapture {
@@ -493,19 +532,104 @@ mod tests {
 
     #[tokio::test]
     async fn forwards_basic_key_events() {
+        let base_total = KEYPRESS_TOTAL.fetch_add(0, Ordering::Relaxed);
+        let base_repeat = KEYPRESS_REPEAT.fetch_add(0, Ordering::Relaxed);
+
         let outputs = run_scenario(vec![CEvent::Key(CKeyEvent::new(
             CKeyCode::Char('a'),
             crossterm::event::KeyModifiers::NONE,
         ))])
         .await;
 
+        match outputs.as_slice() {
+            [Event::Input(InputEvent::KeyPress(keypress))] => {
+                assert!(matches!(keypress.token, KeyToken::Char('a')));
+                assert!(!keypress.repeat);
+            }
+            other => panic!("unexpected output sequence: {other:?}"),
+        }
+
+        let after_total = KEYPRESS_TOTAL.fetch_add(0, Ordering::Relaxed);
+        let after_repeat = KEYPRESS_REPEAT.fetch_add(0, Ordering::Relaxed);
+        assert_eq!(after_total.saturating_sub(base_total), 1);
+        assert_eq!(after_repeat.saturating_sub(base_repeat), 0);
+    }
+
+    #[tokio::test]
+    async fn repeat_key_events_set_repeat_flag() {
+        let base_total = KEYPRESS_TOTAL.fetch_add(0, Ordering::Relaxed);
+        let base_repeat = KEYPRESS_REPEAT.fetch_add(0, Ordering::Relaxed);
+
+        let mut c_event = CKeyEvent::new(CKeyCode::Char('j'), crossterm::event::KeyModifiers::NONE);
+        c_event.kind = CKind::Repeat;
+
+        let outputs = run_scenario(vec![CEvent::Key(c_event)]).await;
+
+        match outputs.as_slice() {
+            [Event::Input(InputEvent::KeyPress(keypress))] => {
+                assert!(matches!(keypress.token, KeyToken::Char('j')));
+                assert!(keypress.repeat, "repeat flag should propagate");
+            }
+            other => panic!("unexpected output sequence: {other:?}"),
+        }
+
+        let after_total = KEYPRESS_TOTAL.fetch_add(0, Ordering::Relaxed);
+        let after_repeat = KEYPRESS_REPEAT.fetch_add(0, Ordering::Relaxed);
+        assert_eq!(after_total.saturating_sub(base_total), 1);
+        assert_eq!(after_repeat.saturating_sub(base_repeat), 1);
+    }
+
+    #[tokio::test]
+    async fn keypress_logging_and_counters() {
+        let _log_guard = LOG_CAPTURE_GUARD.lock().await;
+        let base_total = KEYPRESS_TOTAL.fetch_add(0, Ordering::Relaxed);
+        let base_repeat = KEYPRESS_REPEAT.fetch_add(0, Ordering::Relaxed);
+
+        let capture = LogCapture::default();
+        let events_handle = capture.events.clone();
+        let subscriber = Registry::default().with(capture.with_filter(LevelFilter::TRACE));
+        let dispatch = tracing::Dispatch::new(subscriber);
+        let _guard = tracing::dispatcher::set_default(&dispatch);
+
+        let outputs = run_scenario(vec![CEvent::Key(CKeyEvent::new(
+            CKeyCode::Char('l'),
+            crossterm::event::KeyModifiers::NONE,
+        ))])
+        .await;
+
         assert!(matches!(
             outputs.as_slice(),
-            [Event::Input(InputEvent::Key(KeyEvent {
-                code: KeyCode::Char('a'),
-                ..
-            }))]
+            [Event::Input(InputEvent::KeyPress(_))]
         ));
+
+        let after_total = KEYPRESS_TOTAL.fetch_add(0, Ordering::Relaxed);
+        let after_repeat = KEYPRESS_REPEAT.fetch_add(0, Ordering::Relaxed);
+        assert_eq!(after_total.saturating_sub(base_total), 1);
+        assert_eq!(after_repeat.saturating_sub(base_repeat), 0);
+
+        let logs = events_handle.lock().unwrap();
+        let keypress_log = logs
+            .iter()
+            .find(|entry| entry.target == "input.event")
+            .unwrap_or_else(|| panic!("missing input.event log, captured: {logs:?}"));
+        assert!(
+            keypress_log
+                .fields
+                .iter()
+                .any(|(k, v)| k == "kind" && v == "\"keypress\"")
+        );
+        assert!(
+            keypress_log
+                .fields
+                .iter()
+                .any(|(k, v)| k == "repeat" && v == "false")
+        );
+        assert!(
+            keypress_log
+                .fields
+                .iter()
+                .any(|(k, v)| k == "token_kind" && v == "\"char\"")
+        );
     }
 
     #[tokio::test]
@@ -681,6 +805,7 @@ mod tests {
 
     #[tokio::test]
     async fn logs_startup_and_shutdown_reason_on_signal() {
+        let _log_guard = LOG_CAPTURE_GUARD.lock().await;
         let capture = LogCapture::default();
         let events_handle = capture.events.clone();
         let subscriber = Registry::default().with(capture.with_filter(LevelFilter::TRACE));

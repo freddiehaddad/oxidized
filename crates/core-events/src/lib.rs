@@ -3,6 +3,7 @@
 
 use std::fmt;
 use std::sync::atomic::AtomicU64;
+use std::time::Instant;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 
@@ -33,6 +34,8 @@ pub static CHANNEL_BLOCKING_SENDS: AtomicU64 = AtomicU64::new(0); // increments 
 pub static PASTE_SESSIONS: AtomicU64 = AtomicU64::new(0); // number of PasteStart events
 pub static PASTE_CHUNKS: AtomicU64 = AtomicU64::new(0); // number of PasteChunk events
 pub static PASTE_BYTES: AtomicU64 = AtomicU64::new(0); // total bytes across all chunks
+pub static KEYPRESS_TOTAL: AtomicU64 = AtomicU64::new(0); // total keypress events emitted
+pub static KEYPRESS_REPEAT: AtomicU64 = AtomicU64::new(0); // keypress events flagged as repeat
 // Async input task lifecycle telemetry (Refactor R4 Step 15)
 pub static ASYNC_INPUT_STARTS: AtomicU64 = AtomicU64::new(0);
 pub static ASYNC_INPUT_STOP_SIGNAL: AtomicU64 = AtomicU64::new(0);
@@ -304,7 +307,15 @@ pub enum InputEvent {
     /// Synthetic interrupt (Ctrl-C) surfaced distinctly for future job control.
     CtrlC,
     // --- NGI variants (feature gated) ---------------------------------------------------------
-    /// Logical key press with richer token model + timestamp + repeat flag.
+    /// Logical key press with richer token model, timestamp, and repeat flag.
+    ///
+    /// Invariants:
+    /// * `KeyEventExt::timestamp` must be monotonic per input task (each event
+    ///   carries the instant observed from the async task).
+    /// * `KeyEventExt::repeat` is `true` only for auto-repeat events emitted by
+    ///   the terminal (it **must not** be synthesized downstream).
+    /// * The associated `KeyToken` never contains raw payloads that should be
+    ///   redacted from logs; consumers log only discriminants or lengths.
     KeyPress(KeyEventExt),
     /// One or more extended grapheme clusters ready for insertion (already NFC normalized).
     TextCommit(String),
@@ -334,11 +345,44 @@ pub enum InputEvent {
 // -------------------------------------------------------------------------------------------------
 // NGI Supporting Types
 // -------------------------------------------------------------------------------------------------
+/// Rich keypress metadata emitted by the async input task.
+///
+/// Fields:
+/// * `token`: Logical key identity (character, named key, or chord).
+/// * `repeat`: Whether this event was reported as an auto-repeat by the
+///   terminal. Downstream consumers may use this to avoid resetting NGI timeout
+///   state while still applying motions.
+/// * `timestamp`: Instant captured when the input task observed the event.
+///
+/// Constructors ensure timestamps are monotonically increasing when called in
+/// event order, but callers may also provide explicit instants (useful for
+/// tests or deserialization paths).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct KeyEventExt {
     pub token: KeyToken,
     pub repeat: bool,
-    pub timestamp: std::time::Instant,
+    pub timestamp: Instant,
+}
+
+impl KeyEventExt {
+    /// Create a `KeyEventExt` using the current instant and `repeat = false`.
+    pub fn new(token: KeyToken) -> Self {
+        Self::from_parts(token, false, Instant::now())
+    }
+
+    /// Create a `KeyEventExt` using the current instant and explicit repeat bit.
+    pub fn with_repeat(token: KeyToken, repeat: bool) -> Self {
+        Self::from_parts(token, repeat, Instant::now())
+    }
+
+    /// Create a `KeyEventExt` with caller supplied timestamp (primarily for tests).
+    pub fn from_parts(token: KeyToken, repeat: bool, timestamp: Instant) -> Self {
+        Self {
+            token,
+            repeat,
+            timestamp,
+        }
+    }
 }
 
 bitflags::bitflags! {
@@ -365,6 +409,11 @@ pub enum NamedKey {
     Delete,
 }
 
+/// Canonical logical key tokens surfaced by NGI.
+///
+/// `KeyToken::Chord` wraps a base token plus modifier mask, ensuring consumers
+/// can faithfully reconstruct combinations such as `<C-d>` without relying on
+/// legacy translation shortcuts.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum KeyToken {
     Char(char),
@@ -449,6 +498,7 @@ pub type EventResult<T> = anyhow::Result<T>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
     #[test]
     fn key_event_display() {
         let k = KeyEvent {
@@ -457,5 +507,51 @@ mod tests {
         };
         let s = format!("{}", k);
         assert!(s.contains("Char"));
+    }
+
+    #[test]
+    fn key_event_ext_new_defaults() {
+        let token = KeyToken::Char('a');
+        let evt = KeyEventExt::new(token.clone());
+        assert_eq!(evt.token, token);
+        assert!(!evt.repeat, "new() must default repeat to false");
+        assert!(evt.timestamp <= Instant::now());
+    }
+
+    #[test]
+    fn key_event_ext_with_repeat_and_from_parts() {
+        let token = KeyToken::Named(NamedKey::Enter);
+        let ts = Instant::now();
+        let evt = KeyEventExt::from_parts(token.clone(), true, ts);
+        assert_eq!(evt.token, token);
+        assert!(evt.repeat);
+        assert_eq!(evt.timestamp, ts);
+
+        let repeat_evt = KeyEventExt::with_repeat(token.clone(), false);
+        assert_eq!(repeat_evt.token, token);
+        assert!(!repeat_evt.repeat);
+        assert!(repeat_evt.timestamp >= ts);
+    }
+
+    #[test]
+    fn key_token_chord_round_trip() {
+        let mods = ModMask::CTRL | ModMask::ALT;
+        let base = KeyToken::Named(NamedKey::Down);
+        let chord = KeyToken::Chord {
+            base: Box::new(base.clone()),
+            mods,
+        };
+        let evt = KeyEventExt::with_repeat(chord.clone(), true);
+        match evt.token {
+            KeyToken::Chord {
+                base: boxed_base,
+                mods: observed_mods,
+            } => {
+                assert_eq!(*boxed_base, base);
+                assert_eq!(observed_mods, mods);
+            }
+            other => panic!("expected chord token, got {:?}", other),
+        }
+        assert!(evt.repeat);
     }
 }

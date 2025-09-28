@@ -2,11 +2,13 @@
 use anyhow::Result;
 use clap::Parser;
 use core_actions::dispatcher::dispatch;
-use core_actions::{Action, ActionObserver, EditKind, PendingState}; // trait (currently unused in main but stored for future use)
+use core_actions::{
+    Action, ActionObserver, EditKind, NgiResolution, PendingState, bridge_keypress,
+};
 use core_config::{ConfigContext, ConfigPlatformTraits, load_from};
 use core_events::{
     CommandEvent, EVENT_CHANNEL_CAP, Event, EventHooks, EventSourceRegistry, InputEvent,
-    NoopEventHooks, TickEventSource,
+    KeyEventExt, NoopEventHooks, TickEventSource,
 };
 use core_model::EditorModel;
 use core_render::apply::{
@@ -275,7 +277,7 @@ struct EditorRuntime<'a> {
     source_handles: Vec<tokio::task::JoinHandle<()>>,
     input_task: Option<tokio::task::JoinHandle<()>>,
     input_shutdown: Option<core_input::AsyncInputShutdown>,
-    _terminal_guard: core_terminal::TerminalGuard<'a>,
+    _terminal_guard: Option<core_terminal::TerminalGuard<'a>>,
 }
 
 #[derive(Clone)]
@@ -399,9 +401,22 @@ impl RenderMetricsLedger {
 }
 
 #[derive(Clone, Copy)]
+struct KeypressMeta {
+    repeat: bool,
+    timestamp: Instant,
+}
+
+impl KeypressMeta {
+    fn new(repeat: bool, timestamp: Instant) -> Self {
+        Self { repeat, timestamp }
+    }
+}
+
+#[derive(Clone, Copy)]
 struct NgiTimeoutState {
     deadline: Option<Instant>,
     pending: PendingState,
+    last_timestamp: Option<Instant>,
 }
 
 impl Default for NgiTimeoutState {
@@ -409,17 +424,44 @@ impl Default for NgiTimeoutState {
         Self {
             deadline: None,
             pending: PendingState::Idle,
+            last_timestamp: None,
         }
     }
 }
 
 impl NgiTimeoutState {
-    fn update(&mut self, pending: PendingState, deadline: Option<Instant>) {
-        self.pending = pending;
-        self.deadline = deadline;
-        if matches!(self.pending, PendingState::Idle) {
-            self.deadline = None;
+    fn update(
+        &mut self,
+        pending: PendingState,
+        deadline: Option<Instant>,
+        meta: Option<KeypressMeta>,
+    ) {
+        if let Some(meta) = meta {
+            self.last_timestamp = Some(meta.timestamp);
+            let was_pending = matches!(self.pending, PendingState::AwaitingMore { .. });
+            let is_pending = matches!(pending, PendingState::AwaitingMore { .. });
+            if meta.repeat && was_pending && is_pending {
+                if let Some(new_deadline) = deadline {
+                    match self.deadline {
+                        Some(existing) if new_deadline < existing => {
+                            self.deadline = Some(new_deadline);
+                        }
+                        None => {
+                            self.deadline = Some(new_deadline);
+                        }
+                        _ => {}
+                    }
+                }
+                self.pending = pending;
+                return;
+            }
         }
+
+        self.pending = pending;
+        self.deadline = match self.pending {
+            PendingState::Idle => None,
+            PendingState::AwaitingMore { .. } => deadline,
+        };
     }
 
     fn clear(&mut self) {
@@ -435,6 +477,11 @@ impl NgiTimeoutState {
     #[cfg(test)]
     fn deadline(&self) -> Option<Instant> {
         self.deadline
+    }
+
+    #[cfg(test)]
+    fn last_timestamp(&self) -> Option<Instant> {
+        self.last_timestamp
     }
 
     fn poll_expired<F>(&mut self, now: Instant, flush: F) -> Option<TimeoutFlushResult>
@@ -461,7 +508,7 @@ impl NgiTimeoutState {
             return None;
         };
 
-        self.update(result.pending, result.deadline);
+        self.update(result.pending, result.deadline, None);
         Some(result)
     }
 }
@@ -622,7 +669,7 @@ impl<'a> EditorRuntime<'a> {
             source_handles,
             input_task: Some(input_task),
             input_shutdown: Some(input_shutdown),
-            _terminal_guard: terminal_guard,
+            _terminal_guard: Some(terminal_guard),
         }
     }
 
@@ -750,9 +797,16 @@ impl<'a> EditorRuntime<'a> {
 
     fn handle_input_event(&mut self, input: &InputEvent) -> LoopControl {
         match input {
-            InputEvent::KeyPress(_) => self.handle_key_press(),
+            InputEvent::KeyPress(keypress) => self.handle_key_press(keypress),
             InputEvent::CtrlC => self.handle_ctrl_c(),
-            InputEvent::Key(key) => self.handle_key(key),
+            InputEvent::Key(_) => {
+                trace!(
+                    target = "runtime.input",
+                    kind = "legacy_key_ignored",
+                    "dropping legacy InputEvent::Key"
+                );
+                LoopControl::Continue { lines_changed: 0 }
+            }
             InputEvent::Resize(w, h) => self.handle_resize(*w, *h),
             InputEvent::TextCommit(text) => self.handle_text_commit(text),
             InputEvent::PasteStart => self.handle_paste_start(),
@@ -770,8 +824,56 @@ impl<'a> EditorRuntime<'a> {
         CommandContextSnapshot::capture(self.model.state())
     }
 
-    fn handle_key_press(&mut self) -> LoopControl {
-        LoopControl::Continue { lines_changed: 0 }
+    fn handle_key_press(&mut self, keypress: &KeyEventExt) -> LoopControl {
+        let bridge = bridge_keypress(keypress);
+
+        let Some(key_event) = bridge.key_event else {
+            if bridge.unsupported {
+                trace!(
+                    target = "runtime.input",
+                    kind = "keypress_fallback",
+                    repeat = keypress.repeat,
+                    chord = ?keypress.token,
+                    "bridge_unsupported"
+                );
+            } else {
+                trace!(
+                    target = "runtime.input",
+                    kind = "keypress_fallback",
+                    repeat = keypress.repeat,
+                    chord = ?keypress.token,
+                    dropped_mods = ?bridge.dropped_mods,
+                    "bridge_discarded"
+                );
+            }
+            return LoopControl::Continue { lines_changed: 0 };
+        };
+
+        if !bridge.dropped_mods.is_empty() {
+            trace!(
+                target = "runtime.input",
+                kind = "keypress_dropped_mods",
+                repeat = keypress.repeat,
+                chord = ?keypress.token,
+                dropped_mods = ?bridge.dropped_mods
+            );
+        }
+
+        trace!(
+            target = "runtime.input",
+            kind = "keypress_accept",
+            repeat = keypress.repeat,
+            timestamp = ?keypress.timestamp
+        );
+
+        let ctx = self.command_context();
+        let resolution =
+            core_actions::translate_ngi(ctx.mode(), ctx.pending_buffer(), &key_event, &self.config);
+
+        self.apply_resolution(
+            resolution,
+            KeypressMeta::new(keypress.repeat, keypress.timestamp),
+        )
     }
 
     fn handle_ctrl_c(&mut self) -> LoopControl {
@@ -781,12 +883,12 @@ impl<'a> EditorRuntime<'a> {
         }
     }
 
-    fn handle_key(&mut self, key: &core_events::KeyEvent) -> LoopControl {
-        let ctx = self.command_context();
-        let resolution =
-            core_actions::translate_ngi(ctx.mode(), ctx.pending_buffer(), key, &self.config);
-        self.ngi_timeout
-            .update(resolution.pending_state, resolution.timeout_deadline);
+    fn apply_resolution(&mut self, resolution: NgiResolution, meta: KeypressMeta) -> LoopControl {
+        self.ngi_timeout.update(
+            resolution.pending_state,
+            resolution.timeout_deadline,
+            Some(meta),
+        );
 
         if let Some(action) = resolution.action {
             let outcome = self.process_action(action);
@@ -1181,6 +1283,7 @@ fn convert_delta_snapshot(
 mod tests {
     use super::*;
     use core_actions::{EditKind, ModeChange, MotionKind};
+    use core_events::{KeyEvent, KeyEventExt, KeyToken, ModMask, NamedKey};
     use core_render::render_engine::{RenderEngine, build_content_frame};
     use core_text::Buffer;
     use std::fmt;
@@ -1202,6 +1305,28 @@ mod tests {
     struct CapturedEvent {
         target: String,
         fields: Vec<(String, String)>,
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingObserver {
+        actions: Arc<Mutex<Vec<Action>>>,
+    }
+
+    impl ActionObserver for RecordingObserver {
+        fn on_action(&self, action: &Action) {
+            self.actions.lock().unwrap().push(action.clone());
+        }
+    }
+
+    impl RecordingObserver {
+        fn debug_actions(&self) -> Vec<String> {
+            self.actions
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|action| format!("{:?}", action))
+                .collect()
+        }
     }
 
     #[derive(Default)]
@@ -1229,6 +1354,214 @@ mod tests {
                 fields: collector.fields,
             });
         }
+    }
+
+    fn runtime_for_input_tests(initial: &str) -> EditorRuntime<'static> {
+        let buffer = Buffer::from_str("test", initial).unwrap();
+        let state = EditorState::new(buffer);
+        let model = EditorModel::new(state);
+        let (tx, rx) = mpsc::channel::<Event>(8);
+        EditorRuntime {
+            model,
+            config: core_config::Config::default(),
+            platform_traits: core_config::ConfigPlatformTraits::new(false, true),
+            scheduler: RenderScheduler::new(),
+            render_engine: RenderEngine::new(),
+            render_metrics: RenderMetricsLedger::default(),
+            sticky_visual_col: None,
+            paste: PasteSession::new(),
+            ngi_timeout: NgiTimeoutState::default(),
+            observers: Vec::new(),
+            hooks: Box::new(NoopEventHooks),
+            rx,
+            tx: Some(tx),
+            source_handles: Vec::new(),
+            input_task: None,
+            input_shutdown: None,
+            _terminal_guard: None,
+        }
+    }
+
+    #[test]
+    fn keypress_char_updates_state_and_emits_motion() {
+        let mut runtime = runtime_for_input_tests("abc");
+        let observer = RecordingObserver::default();
+        runtime.observers.push(Box::new(observer.clone()));
+        assert_eq!(runtime.model.active_view().cursor.byte, 0);
+
+        let keypress = KeyEventExt::new(KeyToken::Char('l'));
+        let control = runtime.handle_key_press(&keypress);
+        assert!(matches!(control, LoopControl::Continue { .. }));
+        assert_eq!(runtime.model.active_view().cursor.byte, 1);
+        assert!(matches!(runtime.ngi_timeout.pending(), PendingState::Idle));
+
+        let actions = observer.debug_actions();
+        assert_eq!(actions, vec!["Motion(Right)"]);
+    }
+
+    #[test]
+    fn keypress_digit_prefix_forms_count_motion() {
+        let mut runtime = runtime_for_input_tests("abc");
+        let observer = RecordingObserver::default();
+        runtime.observers.push(Box::new(observer.clone()));
+
+        let prefix = KeyEventExt::new(KeyToken::Char('3'));
+        let control = runtime.handle_key_press(&prefix);
+        assert!(matches!(
+            control,
+            LoopControl::Continue { lines_changed: 0 }
+        ));
+        assert_eq!(runtime.ngi_timeout.last_timestamp(), Some(prefix.timestamp));
+        assert!(observer.debug_actions().is_empty());
+
+        let motion = KeyEventExt::new(KeyToken::Char('w'));
+        let control = runtime.handle_key_press(&motion);
+        assert!(matches!(control, LoopControl::Continue { .. }));
+
+        let actions = observer.debug_actions();
+        assert_eq!(actions.len(), 1);
+        assert!(
+            actions[0].contains("MotionWithCount"),
+            "actions: {actions:?}"
+        );
+    }
+
+    #[test]
+    fn keypress_repeat_pending_retains_deadline() {
+        let mut runtime = runtime_for_input_tests("");
+
+        let start = Instant::now();
+        let first = KeyEventExt::from_parts(KeyToken::Char('2'), false, start);
+        let control = runtime.handle_key_press(&first);
+        assert!(matches!(
+            control,
+            LoopControl::Continue { lines_changed: 0 }
+        ));
+        let initial_deadline = runtime.ngi_timeout.deadline();
+
+        let repeat =
+            KeyEventExt::from_parts(KeyToken::Char('2'), true, start + Duration::from_millis(2));
+        let control = runtime.handle_key_press(&repeat);
+        assert!(matches!(
+            control,
+            LoopControl::Continue { lines_changed: 0 }
+        ));
+
+        let deadline_after_repeat = runtime.ngi_timeout.deadline();
+        assert_eq!(deadline_after_repeat, initial_deadline);
+        assert_eq!(runtime.ngi_timeout.last_timestamp(), Some(repeat.timestamp));
+    }
+
+    #[test]
+    fn unsupported_keypress_is_noop_and_next_keypress_works() {
+        let mut runtime = runtime_for_input_tests("abc");
+        let observer = RecordingObserver::default();
+        runtime.observers.push(Box::new(observer.clone()));
+
+        let unsupported = KeyEventExt::new(KeyToken::Named(NamedKey::Home));
+        let control = runtime.handle_key_press(&unsupported);
+        assert!(matches!(
+            control,
+            LoopControl::Continue { lines_changed: 0 }
+        ));
+        assert!(observer.debug_actions().is_empty());
+        assert_eq!(runtime.model.active_view().cursor.byte, 0);
+
+        let move_right = KeyEventExt::new(KeyToken::Char('l'));
+        let control = runtime.handle_key_press(&move_right);
+        assert!(matches!(control, LoopControl::Continue { .. }));
+        assert_eq!(runtime.model.active_view().cursor.byte, 1);
+
+        let actions = observer.debug_actions();
+        assert_eq!(actions, vec!["Motion(Right)"]);
+    }
+
+    #[test]
+    fn keypress_log_replay_matches_legacy_delete_word() {
+        let log = r#"
+char:d repeat=false ts=0
+char:w repeat=false ts=8
+"#;
+        let keypresses = parse_keypress_log(log);
+        let legacy_events = keypresses_to_legacy(&keypresses);
+
+        let mut kp_runtime = runtime_for_input_tests("alpha beta");
+        let kp_observer = RecordingObserver::default();
+        kp_runtime.observers.push(Box::new(kp_observer.clone()));
+        for keypress in &keypresses {
+            let control = kp_runtime.handle_key_press(keypress);
+            assert!(matches!(control, LoopControl::Continue { .. }));
+        }
+
+        let expected_actions = translate_legacy_actions("alpha beta", &legacy_events);
+        assert_eq!(kp_observer.debug_actions(), expected_actions);
+
+        let mut legacy_runtime = runtime_for_input_tests("alpha beta");
+        apply_legacy_sequence(&mut legacy_runtime, &legacy_events);
+
+        assert_eq!(
+            buffer_snapshot(&kp_runtime),
+            buffer_snapshot(&legacy_runtime)
+        );
+        assert_eq!(
+            kp_runtime.model.active_view().cursor,
+            legacy_runtime.model.active_view().cursor
+        );
+    }
+
+    #[test]
+    fn keypress_log_count_prefix_matches_legacy() {
+        let log = r#"
+char:2 repeat=false ts=0
+char:d repeat=false ts=6
+char:w repeat=false ts=12
+"#;
+        let keypresses = parse_keypress_log(log);
+        let legacy_events = keypresses_to_legacy(&keypresses);
+
+        let mut kp_runtime = runtime_for_input_tests("alpha beta");
+        let kp_observer = RecordingObserver::default();
+        kp_runtime.observers.push(Box::new(kp_observer.clone()));
+        for keypress in &keypresses {
+            let control = kp_runtime.handle_key_press(keypress);
+            assert!(matches!(control, LoopControl::Continue { .. }));
+        }
+
+        let expected_actions = translate_legacy_actions("alpha beta", &legacy_events);
+        assert_eq!(kp_observer.debug_actions(), expected_actions);
+
+        let mut legacy_runtime = runtime_for_input_tests("alpha beta");
+        apply_legacy_sequence(&mut legacy_runtime, &legacy_events);
+
+        assert_eq!(
+            buffer_snapshot(&kp_runtime),
+            buffer_snapshot(&legacy_runtime)
+        );
+        assert_eq!(
+            kp_runtime.model.active_view().cursor,
+            legacy_runtime.model.active_view().cursor
+        );
+    }
+
+    #[test]
+    fn keypress_log_ctrl_r_parity() {
+        let log = r#"
+char:3 repeat=false ts=0
+chord:ctrl|char|r repeat=false ts=5
+"#;
+        let keypresses = parse_keypress_log(log);
+        let legacy_events = keypresses_to_legacy(&keypresses);
+
+        let mut kp_runtime = runtime_for_input_tests("alpha beta");
+        let kp_observer = RecordingObserver::default();
+        kp_runtime.observers.push(Box::new(kp_observer.clone()));
+        for keypress in &keypresses {
+            let control = kp_runtime.handle_key_press(keypress);
+            assert!(matches!(control, LoopControl::Continue { .. }));
+        }
+
+        let expected_actions = translate_legacy_actions("alpha beta", &legacy_events);
+        assert_eq!(kp_observer.debug_actions(), expected_actions);
     }
 
     #[test]
@@ -1273,6 +1606,149 @@ mod tests {
                 "event leaked emoji from paste content: {value}"
             );
         }
+    }
+
+    fn parse_keypress_log(log: &str) -> Vec<KeyEventExt> {
+        let base = Instant::now();
+        log.lines()
+            .enumerate()
+            .filter_map(|(idx, raw)| {
+                let line = raw.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    return None;
+                }
+                let mut spec = None;
+                let mut repeat = false;
+                let mut ts = (idx as u64) * 5;
+                for part in line.split_whitespace() {
+                    if let Some(rest) = part.strip_prefix("repeat=") {
+                        repeat = rest.parse().expect("repeat boolean");
+                    } else if let Some(rest) = part.strip_prefix("ts=") {
+                        ts = rest.parse().expect("timestamp millis");
+                    } else {
+                        spec = Some(part);
+                    }
+                }
+                let spec = spec.expect("missing token spec");
+                let (kind, payload) = spec
+                    .split_once(':')
+                    .expect("token spec requires kind:payload");
+                let token = parse_token(kind, payload);
+                let instant = base + Duration::from_millis(ts);
+                Some(KeyEventExt::from_parts(token, repeat, instant))
+            })
+            .collect()
+    }
+
+    fn parse_token(kind: &str, payload: &str) -> KeyToken {
+        match kind {
+            "char" => KeyToken::Char(parse_char(payload)),
+            "named" => KeyToken::Named(named_key_from_spec(payload)),
+            "chord" => parse_chord(payload),
+            other => panic!("unsupported key token kind: {other}"),
+        }
+    }
+
+    fn parse_char(payload: &str) -> char {
+        match payload {
+            "space" => ' ',
+            other => other
+                .chars()
+                .next()
+                .expect("char payload must contain at least one character"),
+        }
+    }
+
+    fn parse_chord(spec: &str) -> KeyToken {
+        let mut parts = spec.split('|');
+        let mods_spec = parts.next().unwrap_or("none");
+        let base_kind = parts
+            .next()
+            .expect("chord payload requires base token kind");
+        let base_payload = parts
+            .next()
+            .expect("chord payload requires base token value");
+        let base_token = parse_token(base_kind, base_payload);
+        KeyToken::Chord {
+            base: Box::new(base_token),
+            mods: mods_from_spec(mods_spec),
+        }
+    }
+
+    fn mods_from_spec(spec: &str) -> ModMask {
+        if spec.is_empty() || spec == "none" {
+            return ModMask::empty();
+        }
+        let mut mods = ModMask::empty();
+        for part in spec.split('+') {
+            match part {
+                "ctrl" => mods |= ModMask::CTRL,
+                "alt" => mods |= ModMask::ALT,
+                "shift" => mods |= ModMask::SHIFT,
+                other => panic!("unsupported modifier: {other}"),
+            }
+        }
+        mods
+    }
+
+    fn named_key_from_spec(spec: &str) -> NamedKey {
+        match spec {
+            "enter" => NamedKey::Enter,
+            "esc" => NamedKey::Esc,
+            "backspace" => NamedKey::Backspace,
+            "tab" => NamedKey::Tab,
+            "up" => NamedKey::Up,
+            "down" => NamedKey::Down,
+            "left" => NamedKey::Left,
+            "right" => NamedKey::Right,
+            other => panic!("unsupported named key: {other}"),
+        }
+    }
+
+    fn keypresses_to_legacy(keypresses: &[KeyEventExt]) -> Vec<KeyEvent> {
+        keypresses
+            .iter()
+            .map(|kp| {
+                bridge_keypress(kp)
+                    .key_event
+                    .expect("log entry must bridge to legacy event")
+            })
+            .collect()
+    }
+
+    fn translate_legacy_actions(initial: &str, events: &[KeyEvent]) -> Vec<String> {
+        let mut runtime = runtime_for_input_tests(initial);
+        let observer = RecordingObserver::default();
+        runtime.observers.push(Box::new(observer.clone()));
+        apply_legacy_sequence(&mut runtime, events);
+        observer.debug_actions()
+    }
+
+    fn apply_legacy_sequence(runtime: &mut EditorRuntime<'_>, events: &[KeyEvent]) {
+        let mut timestamp = Instant::now();
+        for event in events {
+            let ctx = runtime.command_context();
+            let resolution = core_actions::translate_ngi(
+                ctx.mode(),
+                ctx.pending_buffer(),
+                event,
+                &runtime.config,
+            );
+            let meta = KeypressMeta::new(false, timestamp);
+            runtime.apply_resolution(resolution, meta);
+            timestamp += Duration::from_millis(5);
+        }
+    }
+
+    fn buffer_snapshot(runtime: &EditorRuntime<'_>) -> String {
+        let buffer = runtime.model.state().active_buffer();
+        let mut out = String::new();
+        for idx in 0..buffer.line_count() {
+            if let Some(line) = buffer.line(idx) {
+                out.push_str(&line);
+            }
+        }
+        out
     }
 
     #[tokio::test]
@@ -1906,9 +2382,11 @@ mod tests {
     #[test]
     fn ngi_timeout_state_flushes_action_when_expired() {
         let mut timeout = NgiTimeoutState::default();
+        let now = Instant::now();
         timeout.update(
             PendingState::AwaitingMore { buffered_len: 1 },
-            Some(Instant::now() - Duration::from_millis(5)),
+            Some(now - Duration::from_millis(5)),
+            Some(KeypressMeta::new(false, now)),
         );
 
         let result = timeout.poll_expired(Instant::now(), || {
@@ -1928,9 +2406,11 @@ mod tests {
     #[test]
     fn ngi_timeout_state_does_not_flush_before_deadline() {
         let mut timeout = NgiTimeoutState::default();
+        let now = Instant::now();
         timeout.update(
             PendingState::AwaitingMore { buffered_len: 2 },
-            Some(Instant::now() + Duration::from_millis(50)),
+            Some(now + Duration::from_millis(50)),
+            Some(KeypressMeta::new(false, now)),
         );
 
         let result = timeout.poll_expired(Instant::now(), || {
@@ -1948,9 +2428,11 @@ mod tests {
     #[test]
     fn ngi_timeout_state_clears_when_flush_returns_none() {
         let mut timeout = NgiTimeoutState::default();
+        let now = Instant::now();
         timeout.update(
             PendingState::AwaitingMore { buffered_len: 3 },
-            Some(Instant::now() - Duration::from_millis(10)),
+            Some(now - Duration::from_millis(10)),
+            Some(KeypressMeta::new(false, now)),
         );
 
         let result = timeout.poll_expired(Instant::now(), || None);
@@ -1958,6 +2440,35 @@ mod tests {
         assert!(result.is_none());
         assert_eq!(timeout.pending(), PendingState::Idle);
         assert!(timeout.deadline().is_none());
+    }
+
+    #[test]
+    fn ngi_timeout_repeat_pending_preserves_original_deadline() {
+        let mut timeout = NgiTimeoutState::default();
+        let start = Instant::now();
+        let first_deadline = start + Duration::from_millis(200);
+        timeout.update(
+            PendingState::AwaitingMore { buffered_len: 1 },
+            Some(first_deadline),
+            Some(KeypressMeta::new(false, start)),
+        );
+
+        let later_deadline = first_deadline + Duration::from_millis(200);
+        timeout.update(
+            PendingState::AwaitingMore { buffered_len: 1 },
+            Some(later_deadline),
+            Some(KeypressMeta::new(true, start + Duration::from_millis(5))),
+        );
+
+        assert_eq!(timeout.deadline(), Some(first_deadline));
+        assert!(matches!(
+            timeout.pending(),
+            PendingState::AwaitingMore { buffered_len: 1 }
+        ));
+        assert_eq!(
+            timeout.last_timestamp(),
+            Some(start + Duration::from_millis(5))
+        );
     }
 
     #[tokio::test]

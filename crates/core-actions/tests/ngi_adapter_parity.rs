@@ -1,6 +1,7 @@
+use core_actions::ngi_adapter::bridge_keypress;
 use core_actions::{Action, MotionKind, OperatorKind, translate_ngi};
 use core_config::Config;
-use core_events::{KeyCode, KeyEvent, KeyModifiers};
+use core_events::{KeyCode, KeyEvent, KeyEventExt, KeyModifiers, KeyToken, ModMask};
 use core_state::Mode;
 
 fn kc(c: char) -> KeyEvent {
@@ -74,4 +75,98 @@ fn register_yank_ayw() {
         translate_ngi(Mode::Normal, "", &kc(c), &cfg);
     }
     // Last call should have produced ApplyOperator; not capturing due to simplicity (future: store actions in observer).
+}
+
+#[test]
+fn keypress_delete_word_matches_legacy() {
+    let keypress_actions = translate_sequence_keypress(vec![
+        KeyEventExt::new(KeyToken::Char('d')),
+        KeyEventExt::new(KeyToken::Char('w')),
+    ]);
+    let legacy_actions = translate_sequence_legacy(vec![
+        KeyEvent {
+            code: KeyCode::Char('d'),
+            mods: KeyModifiers::empty(),
+        },
+        KeyEvent {
+            code: KeyCode::Char('w'),
+            mods: KeyModifiers::empty(),
+        },
+    ]);
+
+    assert_eq!(keypress_actions, legacy_actions);
+    assert_eq!(keypress_actions.len(), 1);
+    assert!(keypress_actions[0].contains("ApplyOperator"));
+}
+
+#[test]
+fn keypress_count_prefix_matches_legacy() {
+    let keypress_actions = translate_sequence_keypress(vec![
+        KeyEventExt::new(KeyToken::Char('5')),
+        KeyEventExt::new(KeyToken::Char('w')),
+    ]);
+    let legacy_actions = translate_sequence_legacy(vec![
+        KeyEvent {
+            code: KeyCode::Char('5'),
+            mods: KeyModifiers::empty(),
+        },
+        KeyEvent {
+            code: KeyCode::Char('w'),
+            mods: KeyModifiers::empty(),
+        },
+    ]);
+
+    assert_eq!(keypress_actions, legacy_actions);
+    assert_eq!(keypress_actions.len(), 1);
+    assert!(keypress_actions[0].contains("MotionWithCount"));
+}
+
+#[test]
+fn keypress_ctrl_d_matches_legacy() {
+    let keypress_actions = translate_sequence_keypress(vec![KeyEventExt::new(KeyToken::Chord {
+        base: Box::new(KeyToken::Char('d')),
+        mods: ModMask::CTRL,
+    })]);
+    let legacy_actions = translate_sequence_legacy(vec![KeyEvent {
+        code: KeyCode::Char('d'),
+        mods: KeyModifiers::CTRL,
+    }]);
+
+    assert_eq!(keypress_actions, legacy_actions);
+    assert_eq!(keypress_actions.len(), 1);
+    assert!(keypress_actions[0].contains("Motion"));
+}
+
+fn translate_sequence_keypress(seq: Vec<KeyEventExt>) -> Vec<String> {
+    std::thread::spawn(move || {
+        let cfg = Config::default();
+        seq.into_iter()
+            .filter_map(|keypress| {
+                let bridged = bridge_keypress(&keypress);
+                let key_event = bridged
+                    .key_event
+                    .expect("test expects keypress to bridge to legacy event");
+                translate_ngi(Mode::Normal, "", &key_event, &cfg)
+                    .action
+                    .map(|action| format!("{:?}", action))
+            })
+            .collect::<Vec<_>>()
+    })
+    .join()
+    .expect("keypress translation thread panicked")
+}
+
+fn translate_sequence_legacy(seq: Vec<KeyEvent>) -> Vec<String> {
+    std::thread::spawn(move || {
+        let cfg = Config::default();
+        seq.into_iter()
+            .filter_map(|event| {
+                translate_ngi(Mode::Normal, "", &event, &cfg)
+                    .action
+                    .map(|action| format!("{:?}", action))
+            })
+            .collect::<Vec<_>>()
+    })
+    .join()
+    .expect("legacy translation thread panicked")
 }

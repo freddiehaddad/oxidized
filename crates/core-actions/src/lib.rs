@@ -200,7 +200,7 @@ pub use dispatcher::dispatch; // re-export for test convenience (Phase 5 Visual 
 pub mod ngi_adapter {
     use super::{Action, EditKind, Mode, ModeChange, MotionKind, OperatorKind};
     use core_config::Config; // for timeout settings (passed in future wiring)
-    use core_events::{KeyCode, KeyEvent, KeyModifiers};
+    use core_events::{KeyCode, KeyEvent, KeyEventExt, KeyModifiers, KeyToken, ModMask, NamedKey};
     use core_keymap::{
         ComposedAction, MappingTrie, PendingContext, baseline_normal_specs, compose_with_context,
     };
@@ -224,6 +224,181 @@ pub mod ngi_adapter {
     pub enum PendingState {
         Idle,
         AwaitingMore { buffered_len: usize },
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct BridgeKeypressResult {
+        pub key_event: Option<KeyEvent>,
+        pub dropped_mods: ModMask,
+        pub unsupported: bool,
+        pub repeat: bool,
+        pub timestamp: Instant,
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn bridge_keypress(keypress: &KeyEventExt) -> BridgeKeypressResult {
+        let (base_token, accumulated_mods) = flatten_token(&keypress.token);
+
+        let (key_mods, dropped_mods) = convert_mod_mask(accumulated_mods);
+
+        let key_event = match keycode_from_token(&base_token) {
+            Some(code) => Some(KeyEvent {
+                code,
+                mods: key_mods,
+            }),
+            None => {
+                if !matches!(base_token, KeyToken::Char(_)) {
+                    debug!(
+                        target = "actions.translate",
+                        chord = ?keypress.token,
+                        mods = ?accumulated_mods,
+                        "keypress_bridge_unsupported"
+                    );
+                }
+                return BridgeKeypressResult {
+                    key_event: None,
+                    dropped_mods: accumulated_mods,
+                    unsupported: true,
+                    repeat: keypress.repeat,
+                    timestamp: keypress.timestamp,
+                };
+            }
+        };
+
+        if !dropped_mods.is_empty() {
+            debug!(
+                target = "actions.translate",
+                dropped_mods = ?dropped_mods,
+                chord = ?keypress.token,
+                "keypress_bridge"
+            );
+        }
+
+        BridgeKeypressResult {
+            key_event,
+            dropped_mods,
+            unsupported: false,
+            repeat: keypress.repeat,
+            timestamp: keypress.timestamp,
+        }
+    }
+
+    fn flatten_token(token: &KeyToken) -> (KeyToken, ModMask) {
+        match token {
+            KeyToken::Chord { base, mods } => {
+                let (inner, inner_mods) = flatten_token(base);
+                (inner, *mods | inner_mods)
+            }
+            other => (other.clone(), ModMask::empty()),
+        }
+    }
+
+    fn keycode_from_token(token: &KeyToken) -> Option<KeyCode> {
+        match token {
+            KeyToken::Char(c) => Some(KeyCode::Char(*c)),
+            KeyToken::Named(named) => match named {
+                NamedKey::Enter => Some(KeyCode::Enter),
+                NamedKey::Esc => Some(KeyCode::Esc),
+                NamedKey::Backspace => Some(KeyCode::Backspace),
+                NamedKey::Tab => Some(KeyCode::Tab),
+                NamedKey::Up => Some(KeyCode::Up),
+                NamedKey::Down => Some(KeyCode::Down),
+                NamedKey::Left => Some(KeyCode::Left),
+                NamedKey::Right => Some(KeyCode::Right),
+                _ => None,
+            },
+            KeyToken::Chord { .. } => None,
+        }
+    }
+
+    fn convert_mod_mask(mods: ModMask) -> (KeyModifiers, ModMask) {
+        let supported = ModMask::CTRL | ModMask::ALT | ModMask::SHIFT;
+        let kept = mods & supported;
+        let dropped = mods & !supported;
+
+        let mut key_mods = KeyModifiers::empty();
+        if kept.contains(ModMask::CTRL) {
+            key_mods |= KeyModifiers::CTRL;
+        }
+        if kept.contains(ModMask::ALT) {
+            key_mods |= KeyModifiers::ALT;
+        }
+        if kept.contains(ModMask::SHIFT) {
+            key_mods |= KeyModifiers::SHIFT;
+        }
+
+        (key_mods, dropped)
+    }
+
+    #[cfg(test)]
+    mod bridge_tests {
+        use super::*;
+
+        #[test]
+        fn char_token_converts_to_key_event() {
+            let result = bridge_keypress(&KeyEventExt::new(KeyToken::Char('a')));
+            let key_event = result
+                .key_event
+                .expect("basic char should bridge to legacy event");
+            assert!(matches!(key_event.code, KeyCode::Char('a')));
+            assert!(key_event.mods.is_empty());
+            assert!(result.dropped_mods.is_empty());
+            assert!(!result.unsupported);
+            assert!(!result.repeat);
+        }
+
+        #[test]
+        fn chord_with_ctrl_preserves_modifier() {
+            let token = KeyToken::Chord {
+                base: Box::new(KeyToken::Char('d')),
+                mods: ModMask::CTRL,
+            };
+            let result = bridge_keypress(&KeyEventExt::new(token));
+            let key_event = result
+                .key_event
+                .expect("Ctrl-d chord should bridge to legacy event");
+            assert!(matches!(key_event.code, KeyCode::Char('d')));
+            assert!(key_event.mods.contains(KeyModifiers::CTRL));
+            assert!(result.dropped_mods.is_empty());
+            assert!(!result.unsupported);
+            assert!(!result.repeat);
+        }
+
+        #[test]
+        fn unrepresentable_mods_are_marked_as_dropped() {
+            let token = KeyToken::Chord {
+                base: Box::new(KeyToken::Char('k')),
+                mods: ModMask::SUPER,
+            };
+            let result = bridge_keypress(&KeyEventExt::new(token));
+            let key_event = result
+                .key_event
+                .expect("super modifier should still produce base event");
+            assert!(matches!(key_event.code, KeyCode::Char('k')));
+            assert!(result.dropped_mods.contains(ModMask::SUPER));
+            assert!(!result.unsupported);
+            assert!(!result.repeat);
+        }
+
+        #[test]
+        fn unsupported_named_key_returns_none() {
+            let result = bridge_keypress(&KeyEventExt::new(KeyToken::Named(NamedKey::Home)));
+            assert!(result.key_event.is_none());
+            assert!(result.unsupported);
+            assert!(result.dropped_mods.is_empty());
+            assert!(!result.repeat);
+        }
+
+        #[test]
+        fn repeat_flag_and_timestamp_passthrough() {
+            let token = KeyToken::Char('l');
+            let ts = Instant::now();
+            let keypress = KeyEventExt::from_parts(token, true, ts);
+            let result = bridge_keypress(&keypress);
+            assert!(result.repeat);
+            assert_eq!(result.timestamp, ts);
+        }
     }
 
     #[derive(Debug, Clone)]
@@ -773,7 +948,10 @@ pub mod ngi_adapter {
     }
 }
 
-pub use ngi_adapter::{NgiResolution, PendingState, flush_pending_literal, translate_ngi};
+pub use ngi_adapter::{
+    BridgeKeypressResult, NgiResolution, PendingState, bridge_keypress, flush_pending_literal,
+    translate_ngi,
+};
 
 #[cfg(test)]
 mod tests {
