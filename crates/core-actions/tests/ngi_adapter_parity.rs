@@ -1,5 +1,7 @@
-use core_actions::ngi_adapter::bridge_keypress;
-use core_actions::{Action, MotionKind, OperatorKind, translate_ngi};
+mod common;
+use common::*;
+
+use core_actions::{Action, MotionKind, NgiTranslator, OperatorKind, translate_keypress};
 use core_config::Config;
 use core_events::{KeyCode, KeyEvent, KeyEventExt, KeyModifiers, KeyToken, ModMask};
 use core_state::Mode;
@@ -13,6 +15,7 @@ fn kc(c: char) -> KeyEvent {
 
 #[test]
 fn motion_w() {
+    reset_translator();
     let cfg = Config::default();
     let act = translate_ngi(Mode::Normal, "", &kc('w'), &cfg)
         .action
@@ -22,6 +25,7 @@ fn motion_w() {
 
 #[test]
 fn count_motion_5w() {
+    reset_translator();
     let cfg = Config::default();
     let seq = ['5', 'w'];
     let mut out = None;
@@ -39,6 +43,7 @@ fn count_motion_5w() {
 
 #[test]
 fn operator_motion_dw() {
+    reset_translator();
     let cfg = Config::default();
     let seq = ['d', 'w'];
     let mut out = None;
@@ -61,6 +66,7 @@ fn operator_motion_dw() {
 
 #[test]
 fn multiplicative_2d3w() {
+    reset_translator();
     let cfg = Config::default();
     for c in ['2', 'd', '3', 'w'] {
         translate_ngi(Mode::Normal, "", &kc(c), &cfg);
@@ -70,6 +76,7 @@ fn multiplicative_2d3w() {
 
 #[test]
 fn register_yank_ayw() {
+    reset_translator();
     let cfg = Config::default();
     for c in ['"', 'a', 'y', 'w'] {
         translate_ngi(Mode::Normal, "", &kc(c), &cfg);
@@ -79,6 +86,7 @@ fn register_yank_ayw() {
 
 #[test]
 fn keypress_delete_word_matches_legacy() {
+    reset_translator();
     let keypress_actions = translate_sequence_keypress(vec![
         KeyEventExt::new(KeyToken::Char('d')),
         KeyEventExt::new(KeyToken::Char('w')),
@@ -101,6 +109,7 @@ fn keypress_delete_word_matches_legacy() {
 
 #[test]
 fn keypress_count_prefix_matches_legacy() {
+    reset_translator();
     let keypress_actions = translate_sequence_keypress(vec![
         KeyEventExt::new(KeyToken::Char('5')),
         KeyEventExt::new(KeyToken::Char('w')),
@@ -123,6 +132,7 @@ fn keypress_count_prefix_matches_legacy() {
 
 #[test]
 fn keypress_ctrl_d_matches_legacy() {
+    reset_translator();
     let keypress_actions = translate_sequence_keypress(vec![KeyEventExt::new(KeyToken::Chord {
         base: Box::new(KeyToken::Char('d')),
         mods: ModMask::CTRL,
@@ -140,13 +150,10 @@ fn keypress_ctrl_d_matches_legacy() {
 fn translate_sequence_keypress(seq: Vec<KeyEventExt>) -> Vec<String> {
     std::thread::spawn(move || {
         let cfg = Config::default();
+        let mut translator = NgiTranslator::new();
         seq.into_iter()
             .filter_map(|keypress| {
-                let bridged = bridge_keypress(&keypress);
-                let key_event = bridged
-                    .key_event
-                    .expect("test expects keypress to bridge to legacy event");
-                translate_ngi(Mode::Normal, "", &key_event, &cfg)
+                translate_keypress(&mut translator, Mode::Normal, "", &keypress, &cfg)
                     .action
                     .map(|action| format!("{:?}", action))
             })

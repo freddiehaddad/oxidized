@@ -1,5 +1,8 @@
+mod common;
+use common::*;
+
 use core_actions::dispatcher::dispatch; // dispatch is not re-exported at crate root
-use core_actions::{Action, MotionKind, OperatorKind, translate_key};
+use core_actions::{Action, MotionKind, OperatorKind};
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_model::EditorModel;
 use core_text::Buffer;
@@ -42,6 +45,7 @@ fn apply_dw(model: &mut EditorModel) {
 
 #[test]
 fn dw_deletes_word_plus_space_ascii() {
+    reset_translator();
     let content = "*Nothing is stable. Everything can change. Comet\n";
     let buffer = Buffer::from_str("t", content).unwrap();
     let state = core_state::EditorState::new(buffer);
@@ -58,6 +62,7 @@ fn dw_deletes_word_plus_space_ascii() {
 
 #[test]
 fn dw_deletes_word_plus_space_after_multibyte_prefix() {
+    reset_translator();
     // Include multi-byte graphemes before target word: 🚀 (4 bytes) café (é multibyte) Ωmega (Ω multi-byte).
     let content = "🚀 café Ωmega Everything followed by text\n";
     let buffer = Buffer::from_str("t", content).unwrap();
@@ -88,6 +93,7 @@ fn translate_seq(model: &mut EditorModel, seq: &str) -> Option<Action> {
 
 #[test]
 fn explicit_named_register_yank() {
+    reset_translator();
     let buffer = Buffer::from_str("t", "alpha beta gamma\n").unwrap();
     let state = core_state::EditorState::new(buffer);
     let mut model = EditorModel::new(state);
@@ -123,6 +129,7 @@ fn explicit_named_register_yank() {
 
 #[test]
 fn explicit_named_register_append_uppercase() {
+    reset_translator();
     let buffer = Buffer::from_str("t", "one two three four\n").unwrap();
     let state = core_state::EditorState::new(buffer);
     let mut model = EditorModel::new(state);
@@ -142,6 +149,7 @@ fn explicit_named_register_append_uppercase() {
 
 #[test]
 fn explicit_register_with_counts_2yw_equivalent_a2yw() {
+    reset_translator();
     let buffer = Buffer::from_str("t", "one two three four\n").unwrap();
     let state = core_state::EditorState::new(buffer);
     let mut model = EditorModel::new(state);
@@ -165,6 +173,7 @@ fn explicit_register_with_counts_2yw_equivalent_a2yw() {
 
 #[test]
 fn explicit_register_paste_uses_named() {
+    reset_translator();
     let buffer = Buffer::from_str("t", "foo bar baz\n").unwrap();
     let state = core_state::EditorState::new(buffer);
     let mut model = EditorModel::new(state);

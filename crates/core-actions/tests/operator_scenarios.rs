@@ -1,8 +1,11 @@
-//! Step 6.4 operator scenario & invariant harness.
-//! Provides reusable helpers to exercise operator + motion combinations
-//! and assert buffer restoration + structural repaint contracts.
+mod common;
+use common::*;
 
-use core_actions::{Action, dispatcher::DispatchResult, dispatcher::dispatch, translate_key};
+// Step 6.4 operator scenario & invariant harness.
+// Provides reusable helpers to exercise operator + motion combinations
+// and assert buffer restoration + structural repaint contracts.
+
+use core_actions::{Action, dispatcher::DispatchResult, dispatcher::dispatch};
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_model::EditorModel;
 use core_text::Buffer;

@@ -1,4 +1,6 @@
-use core_actions::translate_key;
+mod common;
+use common::*;
+
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_model::EditorModel;
 use core_text::Buffer;
@@ -25,6 +27,7 @@ fn feed(model: &mut EditorModel, seq: &str) {
 
 #[test]
 fn explicit_numbered_register_paste_1p() {
+    reset_translator();
     // Build a buffer with three words to exercise deletes.
     let buf = Buffer::from_str("t", "alpha beta gamma delta\n").unwrap();
     let state = core_state::EditorState::new(buf);
@@ -48,6 +51,7 @@ fn explicit_numbered_register_paste_1p() {
 
 #[test]
 fn explicit_numbered_register_zero_paste_latest() {
+    reset_translator();
     let buf = Buffer::from_str("t", "one two three four\n").unwrap();
     let state = core_state::EditorState::new(buf);
     let mut model = EditorModel::new(state);

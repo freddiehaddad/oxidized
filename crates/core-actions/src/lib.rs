@@ -33,6 +33,7 @@
 use core_config::Config;
 use core_events::KeyEvent;
 use core_state::Mode;
+use std::time::Instant;
 pub mod span_resolver; // Phase 4 Step 4
 pub mod text_object; // Refactor R4 Step 15: text object trait stub
 
@@ -176,17 +177,24 @@ pub enum ModeChange {
 }
 
 /// Public translation API. NGI adapter is now the single translation path.
-pub fn translate_key(mode: Mode, pending_command: &str, key: &KeyEvent) -> Option<Action> {
-    translate_key_with_config(mode, pending_command, key, &Config::default())
+pub fn translate_key(
+    translator: &mut ngi_adapter::NgiTranslator,
+    mode: Mode,
+    pending_command: &str,
+    key: &KeyEvent,
+) -> Option<Action> {
+    translate_key_with_config(translator, mode, pending_command, key, &Config::default())
 }
 
 pub fn translate_key_with_config(
+    translator: &mut ngi_adapter::NgiTranslator,
     mode: Mode,
     pending_command: &str,
     key: &KeyEvent,
     cfg: &Config,
 ) -> Option<Action> {
-    crate::ngi_adapter::translate_ngi(mode, pending_command, key, cfg).action
+    crate::ngi_adapter::translate_ngi(translator, mode, pending_command, key, cfg, Instant::now())
+        .action
 }
 
 pub mod dispatcher;
@@ -204,16 +212,8 @@ pub mod ngi_adapter {
     use core_keymap::{
         ComposedAction, MappingTrie, PendingContext, baseline_normal_specs, compose_with_context,
     };
-    use std::cell::RefCell;
     use std::time::{Duration, Instant};
     use tracing::{debug, trace};
-
-    thread_local! {
-        static TRIE: MappingTrie = MappingTrie::build(baseline_normal_specs());
-        static CTX: RefCell<PendingContext> = RefCell::new(PendingContext::default());
-    static BUFFER: RefCell<Vec<char>> = const { RefCell::new(Vec::new()) };
-        static PARTIAL_TIMER: RefCell<PartialTimeoutState> = const { RefCell::new(PartialTimeoutState::new()) };
-    }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum PartialKind {
@@ -226,61 +226,30 @@ pub mod ngi_adapter {
         AwaitingMore { buffered_len: usize },
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct BridgeKeypressResult {
-        pub key_event: Option<KeyEvent>,
-        pub dropped_mods: ModMask,
-        pub unsupported: bool,
-        pub repeat: bool,
-        pub timestamp: Instant,
+    enum KeypressMapping {
+        Supported {
+            key_event: KeyEvent,
+            dropped_mods: ModMask,
+        },
+        Unsupported {
+            dropped_mods: ModMask,
+        },
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn bridge_keypress(keypress: &KeyEventExt) -> BridgeKeypressResult {
+    fn map_keypress(keypress: &KeyEventExt) -> KeypressMapping {
         let (base_token, accumulated_mods) = flatten_token(&keypress.token);
-
         let (key_mods, dropped_mods) = convert_mod_mask(accumulated_mods);
 
-        let key_event = match keycode_from_token(&base_token) {
-            Some(code) => Some(KeyEvent {
-                code,
-                mods: key_mods,
-            }),
-            None => {
-                if !matches!(base_token, KeyToken::Char(_)) {
-                    debug!(
-                        target = "actions.translate",
-                        chord = ?keypress.token,
-                        mods = ?accumulated_mods,
-                        "keypress_bridge_unsupported"
-                    );
-                }
-                return BridgeKeypressResult {
-                    key_event: None,
-                    dropped_mods: accumulated_mods,
-                    unsupported: true,
-                    repeat: keypress.repeat,
-                    timestamp: keypress.timestamp,
-                };
-            }
-        };
-
-        if !dropped_mods.is_empty() {
-            debug!(
-                target = "actions.translate",
-                dropped_mods = ?dropped_mods,
-                chord = ?keypress.token,
-                "keypress_bridge"
-            );
-        }
-
-        BridgeKeypressResult {
-            key_event,
-            dropped_mods,
-            unsupported: false,
-            repeat: keypress.repeat,
-            timestamp: keypress.timestamp,
+        match keycode_from_token(&base_token) {
+            Some(code) => KeypressMapping::Supported {
+                key_event: KeyEvent {
+                    code,
+                    mods: key_mods,
+                },
+                dropped_mods,
+            },
+            None => KeypressMapping::Unsupported { dropped_mods },
         }
     }
 
@@ -332,72 +301,44 @@ pub mod ngi_adapter {
     }
 
     #[cfg(test)]
-    mod bridge_tests {
+    mod ingest_tests {
         use super::*;
 
         #[test]
-        fn char_token_converts_to_key_event() {
-            let result = bridge_keypress(&KeyEventExt::new(KeyToken::Char('a')));
-            let key_event = result
-                .key_event
-                .expect("basic char should bridge to legacy event");
-            assert!(matches!(key_event.code, KeyCode::Char('a')));
-            assert!(key_event.mods.is_empty());
-            assert!(result.dropped_mods.is_empty());
-            assert!(!result.unsupported);
-            assert!(!result.repeat);
+        fn ingest_char_token_translates_motion() {
+            let mut translator = NgiTranslator::new();
+            let keypress = KeyEventExt::new(KeyToken::Char('h'));
+            let resolution =
+                translator.ingest_keypress(Mode::Normal, "", &keypress, &Config::default());
+            assert!(matches!(
+                resolution.action,
+                Some(Action::Motion(MotionKind::Left))
+            ));
         }
 
         #[test]
-        fn chord_with_ctrl_preserves_modifier() {
-            let token = KeyToken::Chord {
+        fn ingest_ctrl_chord_translates_motion() {
+            let mut translator = NgiTranslator::new();
+            let keypress = KeyEventExt::new(KeyToken::Chord {
                 base: Box::new(KeyToken::Char('d')),
                 mods: ModMask::CTRL,
-            };
-            let result = bridge_keypress(&KeyEventExt::new(token));
-            let key_event = result
-                .key_event
-                .expect("Ctrl-d chord should bridge to legacy event");
-            assert!(matches!(key_event.code, KeyCode::Char('d')));
-            assert!(key_event.mods.contains(KeyModifiers::CTRL));
-            assert!(result.dropped_mods.is_empty());
-            assert!(!result.unsupported);
-            assert!(!result.repeat);
+            });
+            let resolution =
+                translator.ingest_keypress(Mode::Normal, "", &keypress, &Config::default());
+            assert!(matches!(
+                resolution.action,
+                Some(Action::Motion(MotionKind::PageHalfDown))
+            ));
         }
 
         #[test]
-        fn unrepresentable_mods_are_marked_as_dropped() {
-            let token = KeyToken::Chord {
-                base: Box::new(KeyToken::Char('k')),
-                mods: ModMask::SUPER,
-            };
-            let result = bridge_keypress(&KeyEventExt::new(token));
-            let key_event = result
-                .key_event
-                .expect("super modifier should still produce base event");
-            assert!(matches!(key_event.code, KeyCode::Char('k')));
-            assert!(result.dropped_mods.contains(ModMask::SUPER));
-            assert!(!result.unsupported);
-            assert!(!result.repeat);
-        }
-
-        #[test]
-        fn unsupported_named_key_returns_none() {
-            let result = bridge_keypress(&KeyEventExt::new(KeyToken::Named(NamedKey::Home)));
-            assert!(result.key_event.is_none());
-            assert!(result.unsupported);
-            assert!(result.dropped_mods.is_empty());
-            assert!(!result.repeat);
-        }
-
-        #[test]
-        fn repeat_flag_and_timestamp_passthrough() {
-            let token = KeyToken::Char('l');
-            let ts = Instant::now();
-            let keypress = KeyEventExt::from_parts(token, true, ts);
-            let result = bridge_keypress(&keypress);
-            assert!(result.repeat);
-            assert_eq!(result.timestamp, ts);
+        fn ingest_unsupported_named_key_yields_no_action() {
+            let mut translator = NgiTranslator::new();
+            let keypress = KeyEventExt::new(KeyToken::Named(NamedKey::Home));
+            let resolution =
+                translator.ingest_keypress(Mode::Normal, "", &keypress, &Config::default());
+            assert!(resolution.action.is_none());
+            assert!(matches!(resolution.pending_state, PendingState::Idle));
         }
     }
 
@@ -435,17 +376,23 @@ pub mod ngi_adapter {
                 started: None,
             }
         }
-        fn start(&mut self, kind: PartialKind) {
+        fn start(&mut self, kind: PartialKind, at: Instant) {
             if self.kind.is_none() {
-                // start only on first ambiguous prefix
                 self.kind = Some(kind);
-                self.started = Some(Instant::now());
-                trace!(target = "actions.translate", kind = "timeout_start");
+                trace!(target: "actions.translate", kind = "timeout_start");
+            }
+            if self.started.is_none() {
+                self.started = Some(at);
+            }
+        }
+        fn restart(&mut self, at: Instant) {
+            if self.kind.is_some() {
+                self.started = Some(at);
             }
         }
         fn clear(&mut self) {
             if self.kind.is_some() {
-                trace!(target = "actions.translate", kind = "timeout_clear");
+                trace!(target: "actions.translate", kind = "timeout_clear");
             }
             self.kind = None;
             self.started = None;
@@ -459,437 +406,547 @@ pub mod ngi_adapter {
         }
     }
 
+    #[derive(Debug)]
+    pub struct NgiTranslator {
+        trie: MappingTrie,
+        ctx: PendingContext,
+        buffer: Vec<char>,
+        partial_timer: PartialTimeoutState,
+    }
+
+    impl NgiTranslator {
+        pub fn new() -> Self {
+            Self {
+                trie: MappingTrie::build(baseline_normal_specs()),
+                ctx: PendingContext::default(),
+                buffer: Vec::new(),
+                partial_timer: PartialTimeoutState::new(),
+            }
+        }
+
+        pub fn reset_for_mode(&mut self, mode: Mode) {
+            self.cancel_pending();
+            if matches!(mode, Mode::Insert) {
+                self.ctx.register = None;
+            }
+        }
+
+        pub fn cancel_pending(&mut self) {
+            let _ = compose_with_context(&mut self.ctx, &core_keymap::MappingOutput::Esc);
+            self.buffer.clear();
+            self.partial_timer.clear();
+        }
+
+        pub fn ingest_keypress(
+            &mut self,
+            mode: Mode,
+            pending_command: &str,
+            keypress: &KeyEventExt,
+            cfg: &Config,
+        ) -> NgiResolution {
+            match map_keypress(keypress) {
+                KeypressMapping::Supported {
+                    key_event,
+                    dropped_mods,
+                } => {
+                    if !dropped_mods.is_empty() {
+                        debug!(
+                            target: "actions.translate",
+                            dropped_mods = ?dropped_mods,
+                            chord = ?keypress.token,
+                            "keypress_mods_dropped"
+                        );
+                    }
+                    trace!(
+                        target: "actions.translate",
+                        kind = "keypress_ingest",
+                        repeat = keypress.repeat,
+                        timestamp = ?keypress.timestamp,
+                        chord = ?keypress.token
+                    );
+                    self.translate(mode, pending_command, &key_event, cfg, keypress.timestamp)
+                }
+                KeypressMapping::Unsupported { dropped_mods } => {
+                    trace!(
+                        target: "actions.translate",
+                        kind = "keypress_unsupported",
+                        repeat = keypress.repeat,
+                        timestamp = ?keypress.timestamp,
+                        chord = ?keypress.token,
+                        dropped_mods = ?dropped_mods
+                    );
+                    self.finalize_resolution(None, cfg)
+                }
+            }
+        }
+
+        pub fn translate(
+            &mut self,
+            mode: Mode,
+            pending_command: &str,
+            key: &KeyEvent,
+            cfg: &Config,
+            timestamp: Instant,
+        ) -> NgiResolution {
+            if pending_command.starts_with(':') {
+                let action = match key.code {
+                    KeyCode::Char(c)
+                        if !key.mods.contains(KeyModifiers::CTRL)
+                            && !key.mods.contains(KeyModifiers::ALT) =>
+                    {
+                        trace!(target: "actions.translate", kind = "command_char");
+                        Some(Action::CommandChar(c))
+                    }
+                    KeyCode::Enter => {
+                        trace!(
+                            target: "actions.translate",
+                            kind = "command_execute",
+                            len = pending_command.len()
+                        );
+                        Some(Action::CommandExecute(pending_command.to_string()))
+                    }
+                    KeyCode::Backspace => {
+                        trace!(target: "actions.translate", kind = "command_backspace");
+                        Some(Action::CommandBackspace)
+                    }
+                    KeyCode::Esc => {
+                        trace!(target: "actions.translate", kind = "command_cancel");
+                        Some(Action::CommandCancel)
+                    }
+                    _ => None,
+                };
+                return self.finalize_resolution(action, cfg);
+            }
+
+            if matches!(mode, Mode::VisualChar) {
+                self.buffer.clear();
+                self.partial_timer.clear();
+                let ctx = &mut self.ctx;
+                let action = if key.mods.contains(KeyModifiers::CTRL) {
+                    match key.code {
+                        KeyCode::Char('d') => {
+                            trace!(target: "actions.translate", motion = ?MotionKind::PageHalfDown, "visual_half_page");
+                            Some(emit_visual_motion(MotionKind::PageHalfDown, ctx))
+                        }
+                        KeyCode::Char('u') => {
+                            trace!(target: "actions.translate", motion = ?MotionKind::PageHalfUp, "visual_half_page");
+                            Some(emit_visual_motion(MotionKind::PageHalfUp, ctx))
+                        }
+                        _ => None,
+                    }
+                } else {
+                    match key.code {
+                        KeyCode::Esc => {
+                            ctx.reset_transient();
+                            ctx.register = None;
+                            trace!(target: "actions.translate", kind = "leave_visual_char");
+                            Some(Action::ModeChange(ModeChange::LeaveVisualChar))
+                        }
+                        KeyCode::Char('"') => {
+                            ctx.awaiting_register = true;
+                            ctx.register = None;
+                            debug!(
+                                target: "input.context",
+                                awaiting_register = true,
+                                "visual_register_prefix"
+                            );
+                            None
+                        }
+                        KeyCode::Char(c) if ctx.awaiting_register => {
+                            if c.is_ascii_alphanumeric() {
+                                ctx.register = Some(c);
+                                ctx.awaiting_register = false;
+                                debug!(target: "input.context", register = %c, "visual_register_set");
+                            }
+                            None
+                        }
+                        KeyCode::Char(c @ '1'..='9') => {
+                            extend_visual_count(ctx, c);
+                            None
+                        }
+                        KeyCode::Char('0') => {
+                            if ctx.count_prefix.is_some() {
+                                extend_visual_count(ctx, '0');
+                                None
+                            } else {
+                                Some(emit_visual_motion(MotionKind::LineStart, ctx))
+                            }
+                        }
+                        KeyCode::Char('$') => Some(emit_visual_motion(MotionKind::LineEnd, ctx)),
+                        KeyCode::Char('h') => Some(emit_visual_motion(MotionKind::Left, ctx)),
+                        KeyCode::Char('l') => Some(emit_visual_motion(MotionKind::Right, ctx)),
+                        KeyCode::Char('j') => Some(emit_visual_motion(MotionKind::Down, ctx)),
+                        KeyCode::Char('k') => Some(emit_visual_motion(MotionKind::Up, ctx)),
+                        KeyCode::Left => Some(emit_visual_motion(MotionKind::Left, ctx)),
+                        KeyCode::Right => Some(emit_visual_motion(MotionKind::Right, ctx)),
+                        KeyCode::Up => Some(emit_visual_motion(MotionKind::Up, ctx)),
+                        KeyCode::Down => Some(emit_visual_motion(MotionKind::Down, ctx)),
+                        KeyCode::Char('w') => {
+                            Some(emit_visual_motion(MotionKind::WordForward, ctx))
+                        }
+                        KeyCode::Char('b') => {
+                            Some(emit_visual_motion(MotionKind::WordBackward, ctx))
+                        }
+                        KeyCode::Char('d')
+                        | KeyCode::Char('y')
+                        | KeyCode::Char('c')
+                        | KeyCode::Char('x') => {
+                            let op = match key.code {
+                                KeyCode::Char('d') | KeyCode::Char('x') => OperatorKind::Delete,
+                                KeyCode::Char('y') => OperatorKind::Yank,
+                                KeyCode::Char('c') => OperatorKind::Change,
+                                _ => unreachable!(),
+                            };
+                            let (count, register) = take_visual_prefix(ctx);
+                            trace!(target: "actions.translate", op = ?op, count, register = ?register, "visual_operator");
+                            Some(Action::VisualOperator {
+                                op,
+                                register,
+                                count,
+                            })
+                        }
+                        KeyCode::Char('p') => {
+                            let (count, register) = take_visual_prefix(ctx);
+                            trace!(target: "actions.translate", before = false, count, register = ?register, "visual_paste");
+                            Some(Action::VisualPaste {
+                                before: false,
+                                register,
+                                count,
+                            })
+                        }
+                        KeyCode::Char('P') => {
+                            let (count, register) = take_visual_prefix(ctx);
+                            trace!(target: "actions.translate", before = true, count, register = ?register, "visual_paste");
+                            Some(Action::VisualPaste {
+                                before: true,
+                                register,
+                                count,
+                            })
+                        }
+                        KeyCode::Char('v') => {
+                            ctx.reset_transient();
+                            ctx.register = None;
+                            Some(Action::ModeChange(ModeChange::LeaveVisualChar))
+                        }
+                        _ => None,
+                    }
+                };
+                return self.finalize_resolution(action, cfg);
+            }
+
+            if matches!(mode, Mode::Insert) {
+                let action = match key.code {
+                    KeyCode::Char(c)
+                        if !key.mods.contains(KeyModifiers::CTRL)
+                            && !key.mods.contains(KeyModifiers::ALT) =>
+                    {
+                        trace!(target: "actions.translate", kind = "insert_char");
+                        Some(Action::Edit(EditKind::InsertGrapheme(c.to_string())))
+                    }
+                    KeyCode::Enter => {
+                        trace!(target: "actions.translate", kind = "insert_newline");
+                        Some(Action::Edit(EditKind::InsertNewline))
+                    }
+                    KeyCode::Backspace => {
+                        trace!(target: "actions.translate", kind = "backspace");
+                        Some(Action::Edit(EditKind::Backspace))
+                    }
+                    KeyCode::Esc => {
+                        trace!(target: "actions.translate", kind = "leave_insert");
+                        Some(Action::ModeChange(ModeChange::LeaveInsert))
+                    }
+                    _ => None,
+                };
+                return self.finalize_resolution(action, cfg);
+            }
+
+            if matches!(mode, Mode::Normal)
+                && matches!(key.code, KeyCode::Char(':'))
+                && !key.mods.contains(KeyModifiers::CTRL)
+                && !key.mods.contains(KeyModifiers::ALT)
+            {
+                trace!(target: "actions.translate", kind = "command_start");
+                return self.finalize_resolution(Some(Action::CommandStart), cfg);
+            }
+
+            if matches!(mode, Mode::Normal) {
+                match key.code {
+                    KeyCode::Left => {
+                        trace!(target: "actions.translate", motion = ?MotionKind::Left, "normal_named_motion");
+                        return self
+                            .finalize_resolution(Some(Action::Motion(MotionKind::Left)), cfg);
+                    }
+                    KeyCode::Right => {
+                        trace!(target: "actions.translate", motion = ?MotionKind::Right, "normal_named_motion");
+                        return self
+                            .finalize_resolution(Some(Action::Motion(MotionKind::Right)), cfg);
+                    }
+                    KeyCode::Up => {
+                        trace!(target: "actions.translate", motion = ?MotionKind::Up, "normal_named_motion");
+                        return self.finalize_resolution(Some(Action::Motion(MotionKind::Up)), cfg);
+                    }
+                    KeyCode::Down => {
+                        trace!(target: "actions.translate", motion = ?MotionKind::Down, "normal_named_motion");
+                        return self
+                            .finalize_resolution(Some(Action::Motion(MotionKind::Down)), cfg);
+                    }
+                    KeyCode::Char('d') if key.mods.contains(KeyModifiers::CTRL) => {
+                        trace!(target: "actions.translate", motion = ?MotionKind::PageHalfDown, "normal_half_page");
+                        return self.finalize_resolution(
+                            Some(Action::Motion(MotionKind::PageHalfDown)),
+                            cfg,
+                        );
+                    }
+                    KeyCode::Char('u') if key.mods.contains(KeyModifiers::CTRL) => {
+                        trace!(target: "actions.translate", motion = ?MotionKind::PageHalfUp, "normal_half_page");
+                        return self.finalize_resolution(
+                            Some(Action::Motion(MotionKind::PageHalfUp)),
+                            cfg,
+                        );
+                    }
+                    KeyCode::Char('r') if key.mods.contains(KeyModifiers::CTRL) => {
+                        let count = self.ctx.count_prefix.take().unwrap_or(1).max(1);
+                        self.ctx.operator = None;
+                        self.ctx.post_op_count = None;
+                        self.ctx.register = None;
+                        self.ctx.awaiting_register = false;
+                        trace!(target: "actions.translate", kind = "redo", count);
+                        return self.finalize_resolution(Some(Action::Redo { count }), cfg);
+                    }
+                    KeyCode::Esc => {
+                        let _ =
+                            compose_with_context(&mut self.ctx, &core_keymap::MappingOutput::Esc);
+                        self.buffer.clear();
+                        self.partial_timer.clear();
+                        trace!(target: "actions.translate", kind = "esc_clear");
+                        return self.finalize_resolution(None, cfg);
+                    }
+                    _ => {}
+                }
+            }
+
+            if !matches!(mode, Mode::Normal) {
+                return self.finalize_resolution(None, cfg);
+            }
+
+            let KeyCode::Char(ch) = key.code else {
+                return self.finalize_resolution(None, cfg);
+            };
+            if key.mods.contains(KeyModifiers::CTRL) {
+                return self.finalize_resolution(None, cfg);
+            }
+
+            self.buffer.push(ch);
+
+            if self.ctx.awaiting_register && ch.is_ascii_alphanumeric() {
+                let _ = compose_with_context(
+                    &mut self.ctx,
+                    &core_keymap::MappingOutput::RegisterName(ch),
+                );
+                self.buffer.clear();
+                self.partial_timer.clear();
+                return self.finalize_resolution(None, cfg);
+            }
+
+            loop {
+                match self.trie.resolve(&self.buffer) {
+                    core_keymap::Resolution::Matched {
+                        consumed,
+                        output,
+                        ambiguous,
+                    } => {
+                        trace!(
+                            target: "input.map",
+                            consumed,
+                            ambiguous,
+                            ?output,
+                            "ngi_resolve_matched"
+                        );
+                        let action = match compose_with_context(&mut self.ctx, &output) {
+                            ComposedAction::None => None,
+                            ComposedAction::Motion { motion, count } => {
+                                if let Some(mk) = map_motion(motion) {
+                                    if count == 1 {
+                                        Some(Action::Motion(mk))
+                                    } else {
+                                        Some(Action::MotionWithCount { motion: mk, count })
+                                    }
+                                } else {
+                                    None
+                                }
+                            }
+                            ComposedAction::ApplyOperator {
+                                op,
+                                motion,
+                                count,
+                                register,
+                            } => {
+                                if let (Some(opk), Some(mk)) =
+                                    (map_operator(op), map_motion(motion))
+                                {
+                                    Some(Action::ApplyOperator {
+                                        op: opk,
+                                        motion: mk,
+                                        count,
+                                        register,
+                                    })
+                                } else {
+                                    None
+                                }
+                            }
+                            ComposedAction::LinewiseOperator {
+                                op,
+                                count,
+                                register,
+                            } => map_operator(op).map(|opk| Action::LinewiseOperator {
+                                op: opk,
+                                count,
+                                register,
+                            }),
+                            ComposedAction::PasteAfter { count, register } => {
+                                Some(Action::PasteAfter { count, register })
+                            }
+                            ComposedAction::PasteBefore { count, register } => {
+                                Some(Action::PasteBefore { count, register })
+                            }
+                            ComposedAction::EnterInsert => {
+                                Some(Action::ModeChange(ModeChange::EnterInsert))
+                            }
+                            ComposedAction::Undo { count } => Some(Action::Undo { count }),
+                            ComposedAction::ModeToggleVisualChar => {
+                                Some(Action::ModeChange(ModeChange::EnterVisualChar))
+                            }
+                            ComposedAction::DeleteUnder { count, register } => {
+                                Some(Action::Edit(EditKind::DeleteUnder { count, register }))
+                            }
+                            ComposedAction::DeleteLeft { count, register } => {
+                                Some(Action::Edit(EditKind::DeleteLeft { count, register }))
+                            }
+                            ComposedAction::Literal(c) => Some(Action::CommandChar(c)),
+                        };
+
+                        self.buffer.drain(0..consumed);
+                        if let Some(action) = action {
+                            self.partial_timer.clear();
+                            return self.finalize_resolution(Some(action), cfg);
+                        }
+                        if ambiguous {
+                            self.partial_timer.start(PartialKind::Generic, timestamp);
+                            break;
+                        }
+                    }
+                    core_keymap::Resolution::FallbackLiteral(c) => {
+                        trace!(target: "input.map", literal = %c, "ngi_resolve_fallback");
+                        if self.ctx.awaiting_register && c.is_ascii_alphanumeric() {
+                            let _ = compose_with_context(
+                                &mut self.ctx,
+                                &core_keymap::MappingOutput::RegisterName(c),
+                            );
+                            self.buffer.clear();
+                            self.partial_timer.clear();
+                            return self.finalize_resolution(None, cfg);
+                        }
+                        if pending_command.starts_with(':') {
+                            let action = Some(Action::CommandChar(c));
+                            self.buffer.clear();
+                            self.partial_timer.clear();
+                            return self.finalize_resolution(action, cfg);
+                        }
+                        self.partial_timer.start(PartialKind::Generic, timestamp);
+                        break;
+                    }
+                    core_keymap::Resolution::NeedMore => {
+                        self.partial_timer.start(PartialKind::Generic, timestamp);
+                        break;
+                    }
+                }
+            }
+
+            self.finalize_resolution(None, cfg)
+        }
+
+        pub fn flush_pending_literal(
+            &mut self,
+            cfg: &Config,
+            now: Instant,
+        ) -> Option<NgiResolution> {
+            if self.buffer.is_empty() {
+                return None;
+            }
+            let ch = self.buffer.remove(0);
+            trace!(target: "actions.translate", kind = "timeout_flush", ch = %ch);
+            let pending_state = if self.buffer.is_empty() {
+                self.partial_timer.clear();
+                PendingState::Idle
+            } else {
+                self.partial_timer.restart(now);
+                PendingState::AwaitingMore {
+                    buffered_len: self.buffer.len(),
+                }
+            };
+            let deadline = match pending_state {
+                PendingState::Idle => None,
+                PendingState::AwaitingMore { .. } => self.partial_timer.deadline(cfg),
+            };
+            Some(NgiResolution::new(
+                Some(Action::CommandChar(ch)),
+                pending_state,
+                deadline,
+            ))
+        }
+
+        fn finalize_resolution(&mut self, action: Option<Action>, cfg: &Config) -> NgiResolution {
+            let (pending_state, deadline) = self.snapshot_pending(cfg);
+            NgiResolution::new(action, pending_state, deadline)
+        }
+
+        fn snapshot_pending(&self, cfg: &Config) -> (PendingState, Option<Instant>) {
+            if self.buffer.is_empty() {
+                (PendingState::Idle, None)
+            } else {
+                (
+                    PendingState::AwaitingMore {
+                        buffered_len: self.buffer.len(),
+                    },
+                    self.partial_timer.deadline(cfg),
+                )
+            }
+        }
+    }
+
+    impl Default for NgiTranslator {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    pub fn translate_keypress(
+        translator: &mut NgiTranslator,
+        mode: Mode,
+        pending_command: &str,
+        keypress: &KeyEventExt,
+        cfg: &Config,
+    ) -> NgiResolution {
+        translator.ingest_keypress(mode, pending_command, keypress, cfg)
+    }
+
     pub fn translate_ngi(
+        translator: &mut NgiTranslator,
         mode: Mode,
         pending_command: &str,
         key: &KeyEvent,
         cfg: &Config,
+        timestamp: Instant,
     ) -> NgiResolution {
-        // Command-line editing when ':' is active (pending buffer starts with ':').
-        // Handle this early to avoid feeding command characters into the trie.
-        if pending_command.starts_with(':') {
-            let action = match key.code {
-                KeyCode::Char(c)
-                    if !key.mods.contains(KeyModifiers::CTRL)
-                        && !key.mods.contains(KeyModifiers::ALT) =>
-                {
-                    trace!(target = "actions.translate", kind = "command_char");
-                    Some(Action::CommandChar(c))
-                }
-                KeyCode::Enter => {
-                    // Do not log full command text; keep noise disciplined (logging.md).
-                    trace!(
-                        target = "actions.translate",
-                        kind = "command_execute",
-                        len = pending_command.len()
-                    );
-                    Some(Action::CommandExecute(pending_command.to_string()))
-                }
-                KeyCode::Backspace => {
-                    trace!(target = "actions.translate", kind = "command_backspace");
-                    Some(Action::CommandBackspace)
-                }
-                KeyCode::Esc => {
-                    trace!(target = "actions.translate", kind = "command_cancel");
-                    Some(Action::CommandCancel)
-                }
-                _ => None,
-            };
-            return finalize_resolution(action, cfg);
-        }
-        // VisualChar: motions apply to selection; d/y/c operate on selection; 'v' toggles exit.
-        if matches!(mode, Mode::VisualChar) {
-            BUFFER.with(|b| b.borrow_mut().clear());
-            PARTIAL_TIMER.with(|pt| pt.borrow_mut().clear());
-            let action = CTX.with(|ctx_cell| {
-                let mut ctx = ctx_cell.borrow_mut();
-                if key.mods.contains(KeyModifiers::CTRL) {
-                    return match key.code {
-                        KeyCode::Char('d') => {
-                            trace!(target = "actions.translate", motion = ?MotionKind::PageHalfDown, "visual_half_page");
-                            Some(emit_visual_motion(MotionKind::PageHalfDown, &mut ctx))
-                        }
-                        KeyCode::Char('u') => {
-                            trace!(target = "actions.translate", motion = ?MotionKind::PageHalfUp, "visual_half_page");
-                            Some(emit_visual_motion(MotionKind::PageHalfUp, &mut ctx))
-                        }
-                        _ => None,
-                    };
-                }
-                match key.code {
-                    KeyCode::Esc => {
-                        ctx.reset_transient();
-                        ctx.register = None;
-                        trace!(target = "actions.translate", kind = "leave_visual_char");
-                        Some(Action::ModeChange(ModeChange::LeaveVisualChar))
-                    }
-                    KeyCode::Char('"') => {
-                        ctx.awaiting_register = true;
-                        ctx.register = None;
-                        debug!(target = "input.context", awaiting_register = true, "visual_register_prefix");
-                        None
-                    }
-                    KeyCode::Char(c) if ctx.awaiting_register => {
-                        if c.is_ascii_alphanumeric() {
-                            ctx.register = Some(c);
-                            ctx.awaiting_register = false;
-                            debug!(target = "input.context", register = %c, "visual_register_set");
-                        }
-                        None
-                    }
-                    KeyCode::Char(c @ '1'..='9') => {
-                        extend_visual_count(&mut ctx, c);
-                        None
-                    }
-                    KeyCode::Char('0') => {
-                        if ctx.count_prefix.is_some() {
-                            extend_visual_count(&mut ctx, '0');
-                            None
-                        } else {
-                            Some(emit_visual_motion(MotionKind::LineStart, &mut ctx))
-                        }
-                    }
-                    KeyCode::Char('$') => Some(emit_visual_motion(MotionKind::LineEnd, &mut ctx)),
-                    KeyCode::Char('h') => Some(emit_visual_motion(MotionKind::Left, &mut ctx)),
-                    KeyCode::Char('l') => Some(emit_visual_motion(MotionKind::Right, &mut ctx)),
-                    KeyCode::Char('j') => Some(emit_visual_motion(MotionKind::Down, &mut ctx)),
-                    KeyCode::Char('k') => Some(emit_visual_motion(MotionKind::Up, &mut ctx)),
-                    KeyCode::Char('w') => Some(emit_visual_motion(MotionKind::WordForward, &mut ctx)),
-                    KeyCode::Char('b') => Some(emit_visual_motion(MotionKind::WordBackward, &mut ctx)),
-                    KeyCode::Char('d') | KeyCode::Char('y') | KeyCode::Char('c') | KeyCode::Char('x') => {
-                        let op = match key.code {
-                            KeyCode::Char('d') | KeyCode::Char('x') => OperatorKind::Delete,
-                            KeyCode::Char('y') => OperatorKind::Yank,
-                            KeyCode::Char('c') => OperatorKind::Change,
-                            _ => unreachable!(),
-                        };
-                        let (count, register) = take_visual_prefix(&mut ctx);
-                        trace!(target = "actions.translate", op = ?op, count, register = ?register, "visual_operator");
-                        Some(Action::VisualOperator {
-                            op,
-                            register,
-                            count,
-                        })
-                    }
-                    KeyCode::Char('p') => {
-                        let (count, register) = take_visual_prefix(&mut ctx);
-                        trace!(target = "actions.translate", before = false, count, register = ?register, "visual_paste");
-                        Some(Action::VisualPaste {
-                            before: false,
-                            register,
-                            count,
-                        })
-                    }
-                    KeyCode::Char('P') => {
-                        let (count, register) = take_visual_prefix(&mut ctx);
-                        trace!(target = "actions.translate", before = true, count, register = ?register, "visual_paste");
-                        Some(Action::VisualPaste {
-                            before: true,
-                            register,
-                            count,
-                        })
-                    }
-                    KeyCode::Char('v') => {
-                        ctx.reset_transient();
-                        ctx.register = None;
-                        Some(Action::ModeChange(ModeChange::LeaveVisualChar))
-                    }
-                    _ => None,
-                }
-            });
-            return finalize_resolution(action, cfg);
-        }
-        // Early Insert-mode coverage: plain text insert, newline, backspace.
-        if matches!(mode, Mode::Insert) {
-            let action = match key.code {
-                KeyCode::Char(c)
-                    if !key.mods.contains(KeyModifiers::CTRL)
-                        && !key.mods.contains(KeyModifiers::ALT) =>
-                {
-                    trace!(target = "actions.translate", kind = "insert_char");
-                    Some(Action::Edit(EditKind::InsertGrapheme(c.to_string())))
-                }
-                KeyCode::Enter => {
-                    trace!(target = "actions.translate", kind = "insert_newline");
-                    Some(Action::Edit(EditKind::InsertNewline))
-                }
-                KeyCode::Backspace => {
-                    trace!(target = "actions.translate", kind = "backspace");
-                    Some(Action::Edit(EditKind::Backspace))
-                }
-                KeyCode::Esc => {
-                    trace!(target = "actions.translate", kind = "leave_insert");
-                    Some(Action::ModeChange(ModeChange::LeaveInsert))
-                }
-                _ => None,
-            };
-            return finalize_resolution(action, cfg);
-        }
-        // Normal mode: start command-line with ':'
-        if matches!(mode, Mode::Normal)
-            && let KeyCode::Char(':') = key.code
-            && !key.mods.contains(KeyModifiers::CTRL)
-            && !key.mods.contains(KeyModifiers::ALT)
-        {
-            trace!(target = "actions.translate", kind = "command_start");
-            return finalize_resolution(Some(Action::CommandStart), cfg);
-        }
-        // Normal mode: handle Ctrl-based motions and redo directly in NGI.
-        if matches!(mode, Mode::Normal) {
-            match key.code {
-                KeyCode::Char('d') if key.mods.contains(KeyModifiers::CTRL) => {
-                    trace!(target = "actions.translate", motion = ?MotionKind::PageHalfDown, "normal_half_page");
-                    return finalize_resolution(
-                        Some(Action::Motion(MotionKind::PageHalfDown)),
-                        cfg,
-                    );
-                }
-                KeyCode::Char('u') if key.mods.contains(KeyModifiers::CTRL) => {
-                    trace!(target = "actions.translate", motion = ?MotionKind::PageHalfUp, "normal_half_page");
-                    return finalize_resolution(Some(Action::Motion(MotionKind::PageHalfUp)), cfg);
-                }
-                KeyCode::Char('r') if key.mods.contains(KeyModifiers::CTRL) => {
-                    let count = CTX.with(|ctx_cell| {
-                        let mut ctx = ctx_cell.borrow_mut();
-                        let count = ctx.count_prefix.take().unwrap_or(1).max(1);
-                        ctx.operator = None;
-                        ctx.post_op_count = None;
-                        ctx.register = None;
-                        ctx.awaiting_register = false;
-                        count
-                    });
-                    trace!(target = "actions.translate", kind = "redo", count);
-                    return finalize_resolution(Some(Action::Redo { count }), cfg);
-                }
-                KeyCode::Esc => {
-                    // Cancel any pending operator/count/register in NGI context to mirror legacy ESC behavior.
-                    #[allow(clippy::let_unit_value)]
-                    {
-                        core_keymap::PendingContext::default();
-                    }
-                    CTX.with(|ctx_cell| {
-                        let mut ctx = ctx_cell.borrow_mut();
-                        let _ = compose_with_context(&mut ctx, &core_keymap::MappingOutput::Esc);
-                    });
-                    BUFFER.with(|b| b.borrow_mut().clear());
-                    PARTIAL_TIMER.with(|pt| pt.borrow_mut().clear());
-                    trace!(target = "actions.translate", kind = "esc_clear");
-                    return finalize_resolution(None, cfg);
-                }
-                _ => {}
-            }
-        }
-        // Restrict NGI mapping trie path to Normal mode for now.
-        if !matches!(mode, Mode::Normal) {
-            return finalize_resolution(None, cfg); // no NGI mapping for non-Normal here
-        }
-        // Only plain Char codes handled in this early adapter. Defer Esc and others to legacy
-        // to preserve behaviors like command cancel while NGI coverage grows.
-        let ch = match key.code {
-            KeyCode::Char(c) if !key.mods.contains(KeyModifiers::CTRL) => c,
-            _ => return finalize_resolution(None, cfg),
-        };
-        let action = TRIE.with(|trie| {
-            CTX.with(|ctx_cell| {
-                BUFFER.with(|buf_cell| {
-                    let mut ctx = ctx_cell.borrow_mut();
-                    let mut buf = buf_cell.borrow_mut();
-                    buf.push(ch);
-                    // If we are awaiting a register (after '"'), capture alphanumeric as register name
-                    // and do not feed it through the trie (avoids misclassifying 'b' as a motion).
-                    if ctx.awaiting_register && ch.is_ascii_alphanumeric() {
-                        let _ = compose_with_context(
-                            &mut ctx,
-                            &core_keymap::MappingOutput::RegisterName(ch),
-                        );
-                        buf.clear();
-                        PARTIAL_TIMER.with(|pt| pt.borrow_mut().clear());
-                        return None;
-                    }
-                    loop {
-                        match trie.resolve(&buf) {
-                            core_keymap::Resolution::Matched {
-                                consumed,
-                                output,
-                                ambiguous,
-                            } => {
-                                trace!(
-                                    target = "input.map",
-                                    consumed,
-                                    ambiguous,
-                                    ?output,
-                                    "ngi_resolve_matched"
-                                );
-                                let action = match compose_with_context(&mut ctx, &output) {
-                                    ComposedAction::None => {
-                                        /* continue; state only */
-                                        None
-                                    }
-                                    ComposedAction::Motion { motion, count } => {
-                                        let mk = map_motion(motion)?;
-                                        if count == 1 {
-                                            Some(Action::Motion(mk))
-                                        } else {
-                                            Some(Action::MotionWithCount { motion: mk, count })
-                                        }
-                                    }
-                                    ComposedAction::ApplyOperator {
-                                        op,
-                                        motion,
-                                        count,
-                                        register,
-                                    } => {
-                                        let opk = map_operator(op)?;
-                                        let mk = map_motion(motion)?;
-                                        Some(Action::ApplyOperator {
-                                            op: opk,
-                                            motion: mk,
-                                            count,
-                                            register,
-                                        })
-                                    }
-                                    ComposedAction::LinewiseOperator {
-                                        op,
-                                        count,
-                                        register,
-                                    } => {
-                                        let opk = map_operator(op)?;
-                                        Some(Action::LinewiseOperator {
-                                            op: opk,
-                                            count,
-                                            register,
-                                        })
-                                    }
-                                    ComposedAction::PasteAfter { count, register } => {
-                                        Some(Action::PasteAfter { count, register })
-                                    }
-                                    ComposedAction::PasteBefore { count, register } => {
-                                        Some(Action::PasteBefore { count, register })
-                                    }
-                                    ComposedAction::EnterInsert => {
-                                        Some(Action::ModeChange(ModeChange::EnterInsert))
-                                    }
-                                    ComposedAction::Undo { count } => Some(Action::Undo { count }),
-                                    ComposedAction::ModeToggleVisualChar => {
-                                        Some(Action::ModeChange(ModeChange::EnterVisualChar))
-                                    }
-                                    ComposedAction::DeleteUnder { count, register } => {
-                                        Some(Action::Edit(EditKind::DeleteUnder {
-                                            count,
-                                            register,
-                                        }))
-                                    }
-                                    ComposedAction::DeleteLeft { count, register } => {
-                                        Some(Action::Edit(EditKind::DeleteLeft { count, register }))
-                                    }
-                                    ComposedAction::Literal(c) => Some(Action::CommandChar(c)),
-                                };
-                                // consume
-                                buf.drain(0..consumed);
-                                if action.is_some() {
-                                    PARTIAL_TIMER.with(|pt| pt.borrow_mut().clear());
-                                    return action;
-                                }
-                                if ambiguous {
-                                    PARTIAL_TIMER
-                                        .with(|pt| pt.borrow_mut().start(PartialKind::Generic));
-                                    break;
-                                } else {
-                                    continue;
-                                }
-                            }
-                            core_keymap::Resolution::FallbackLiteral(c) => {
-                                trace!(target="input.map", literal=%c, "ngi_resolve_fallback");
-                                // If awaiting a register after '"', consume alphanumeric as register name.
-                                if ctx.awaiting_register && c.is_ascii_alphanumeric() {
-                                    let _ = compose_with_context(
-                                        &mut ctx,
-                                        &core_keymap::MappingOutput::RegisterName(c),
-                                    );
-                                    buf.clear();
-                                    PARTIAL_TIMER.with(|pt| pt.borrow_mut().clear());
-                                    return None;
-                                }
-                                // Otherwise, treat as command char only if a command is active; else no action.
-                                let action = if pending_command.starts_with(':') {
-                                    Some(Action::CommandChar(c))
-                                } else {
-                                    None
-                                };
-                                buf.clear();
-                                PARTIAL_TIMER.with(|pt| pt.borrow_mut().clear());
-                                return action;
-                            }
-                            core_keymap::Resolution::NeedMore => {
-                                PARTIAL_TIMER
-                                    .with(|pt| pt.borrow_mut().start(PartialKind::Generic));
-                                break; // wait for more keys
-                            }
-                        }
-                    }
-                    None
-                })
-            })
-        });
-        finalize_resolution(action, cfg)
+        translator.translate(mode, pending_command, key, cfg, timestamp)
     }
 
-    pub fn flush_pending_literal(cfg: &Config) -> Option<NgiResolution> {
-        TRIE.with(|_trie| {
-            CTX.with(|_ctx_cell| {
-                BUFFER.with(|buf_cell| {
-                    PARTIAL_TIMER.with(|pt_cell| {
-                        let mut buf = buf_cell.borrow_mut();
-                        if buf.is_empty() {
-                            return None;
-                        }
-                        let ch = buf.remove(0);
-                        trace!(target = "actions.translate", kind = "timeout_flush", ch = %ch);
-                        let mut pt = pt_cell.borrow_mut();
-                        let pending_state = if buf.is_empty() {
-                            pt.clear();
-                            PendingState::Idle
-                        } else {
-                            pt.started = Some(Instant::now());
-                            PendingState::AwaitingMore {
-                                buffered_len: buf.len(),
-                            }
-                        };
-                        let deadline = match pending_state {
-                            PendingState::Idle => None,
-                            PendingState::AwaitingMore { .. } => pt.deadline(cfg),
-                        };
-                        Some(NgiResolution::new(
-                            Some(Action::CommandChar(ch)),
-                            pending_state,
-                            deadline,
-                        ))
-                    })
-                })
-            })
-        })
-    }
-
-    fn snapshot_pending(cfg: &Config) -> (PendingState, Option<Instant>) {
-        BUFFER.with(|buf_cell| {
-            let len = buf_cell.borrow().len();
-            PARTIAL_TIMER.with(|pt_cell| {
-                let pt = pt_cell.borrow();
-                if len == 0 {
-                    (PendingState::Idle, None)
-                } else {
-                    (
-                        PendingState::AwaitingMore { buffered_len: len },
-                        pt.deadline(cfg),
-                    )
-                }
-            })
-        })
-    }
-
-    fn finalize_resolution(action: Option<Action>, cfg: &Config) -> NgiResolution {
-        let (pending_state, deadline) = snapshot_pending(cfg);
-        NgiResolution::new(action, pending_state, deadline)
+    pub fn flush_pending_literal(
+        translator: &mut NgiTranslator,
+        cfg: &Config,
+        now: Instant,
+    ) -> Option<NgiResolution> {
+        translator.flush_pending_literal(cfg, now)
     }
 
     fn map_motion(c: char) -> Option<MotionKind> {
@@ -905,6 +962,7 @@ pub mod ngi_adapter {
             _ => return None,
         })
     }
+
     fn map_operator(c: char) -> Option<OperatorKind> {
         Some(match c {
             'd' => OperatorKind::Delete,
@@ -914,7 +972,7 @@ pub mod ngi_adapter {
         })
     }
 
-    fn extend_visual_count(ctx: &mut core_keymap::PendingContext, digit: char) {
+    fn extend_visual_count(ctx: &mut PendingContext, digit: char) {
         let value = (digit as u8 - b'0') as u32;
         let new_val = ctx
             .count_prefix
@@ -923,10 +981,10 @@ pub mod ngi_adapter {
             .saturating_add(value)
             .min(999_999);
         ctx.count_prefix = Some(new_val);
-        debug!(target = "input.context", count_prefix = new_val, digit = %digit, "visual_count_extend");
+        debug!(target: "input.context", count_prefix = new_val, digit = %digit, "visual_count_extend");
     }
 
-    fn take_visual_prefix(ctx: &mut core_keymap::PendingContext) -> (u32, Option<char>) {
+    fn take_visual_prefix(ctx: &mut PendingContext) -> (u32, Option<char>) {
         let count = ctx.count_prefix.take().unwrap_or(1).max(1);
         let register = ctx.register.take();
         ctx.awaiting_register = false;
@@ -935,7 +993,7 @@ pub mod ngi_adapter {
         (count, register)
     }
 
-    fn emit_visual_motion(kind: MotionKind, ctx: &mut core_keymap::PendingContext) -> Action {
+    fn emit_visual_motion(kind: MotionKind, ctx: &mut PendingContext) -> Action {
         let (count, _) = take_visual_prefix(ctx);
         if count > 1 {
             Action::MotionWithCount {
@@ -949,14 +1007,20 @@ pub mod ngi_adapter {
 }
 
 pub use ngi_adapter::{
-    BridgeKeypressResult, NgiResolution, PendingState, bridge_keypress, flush_pending_literal,
+    NgiResolution, NgiTranslator, PendingState, flush_pending_literal, translate_keypress,
     translate_ngi,
 };
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core_events::{KeyCode, KeyEvent, KeyModifiers};
+    use core_config::Config;
+    use core_events::{KeyCode, KeyEvent, KeyEventExt, KeyModifiers, KeyToken, NamedKey};
+    use std::time::Instant;
+
+    fn new_translator() -> NgiTranslator {
+        NgiTranslator::new()
+    }
     fn kc(c: char) -> KeyEvent {
         KeyEvent {
             code: KeyCode::Char(c),
@@ -966,30 +1030,35 @@ mod tests {
 
     #[test]
     fn normal_mode_motion() {
+        let mut translator = new_translator();
         assert!(matches!(
-            translate_key(Mode::Normal, "", &kc('h')),
+            translate_key(&mut translator, Mode::Normal, "", &kc('h')),
             Some(Action::Motion(MotionKind::Left))
         ));
-        assert!(translate_key(Mode::Normal, "", &kc('z')).is_none());
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('z')).is_none());
     }
 
     #[test]
     fn insert_mode_inserts() {
-        assert!(
-            matches!(translate_key(Mode::Insert, "", &kc('a')), Some(Action::Edit(EditKind::InsertGrapheme(ref s))) if s=="a")
-        );
+        let mut translator = new_translator();
+        assert!(matches!(
+            translate_key(&mut translator, Mode::Insert, "", &kc('a')),
+            Some(Action::Edit(EditKind::InsertGrapheme(ref s))) if s=="a"
+        ));
     }
 
     #[test]
     fn command_sequence_translation() {
+        let mut translator = new_translator();
         // start
-        let start = translate_key(Mode::Normal, "", &kc(':'));
+        let start = translate_key(&mut translator, Mode::Normal, "", &kc(':'));
         assert!(matches!(start, Some(Action::CommandStart)));
         // after ':' pending buffer would be ':'; simulate adding 'q'
-        let q = translate_key(Mode::Normal, ":", &kc('q'));
+        let q = translate_key(&mut translator, Mode::Normal, ":", &kc('q'));
         assert!(matches!(q, Some(Action::CommandChar('q'))));
         // Enter executes
         let enter = translate_key(
+            &mut translator,
             Mode::Normal,
             ":q",
             &KeyEvent {
@@ -1000,6 +1069,7 @@ mod tests {
         assert!(matches!(enter, Some(Action::CommandExecute(ref s)) if s==":q"));
         // Esc cancels when active
         let esc = translate_key(
+            &mut translator,
             Mode::Normal,
             ":q",
             &KeyEvent {
@@ -1010,6 +1080,7 @@ mod tests {
         assert!(matches!(esc, Some(Action::CommandCancel)));
         // Backspace
         let bs = translate_key(
+            &mut translator,
             Mode::Normal,
             ":q",
             &KeyEvent {
@@ -1023,11 +1094,12 @@ mod tests {
     #[test]
     fn ctrl_r_maps_to_redo() {
         use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let mut translator = new_translator();
         let evt = KeyEvent {
             code: KeyCode::Char('r'),
             mods: KeyModifiers::CTRL,
         };
-        let act = translate_key(Mode::Normal, "", &evt);
+        let act = translate_key(&mut translator, Mode::Normal, "", &evt);
         assert!(
             matches!(act, Some(Action::Redo { count }) if count == 1),
             "Ctrl-R should map to Redo action"
@@ -1037,23 +1109,24 @@ mod tests {
             code: KeyCode::Char('r'),
             mods: KeyModifiers::empty(),
         };
-        assert!(translate_key(Mode::Normal, "", &plain).is_none());
+        assert!(translate_key(&mut translator, Mode::Normal, "", &plain).is_none());
     }
 
     #[test]
     fn ctrl_r_respects_count_prefix() {
         use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let mut translator = new_translator();
         let esc = KeyEvent {
             code: KeyCode::Esc,
             mods: KeyModifiers::empty(),
         };
-        let _ = translate_key(Mode::Normal, "", &esc);
-        assert!(translate_key(Mode::Normal, "", &kc('3')).is_none());
+        let _ = translate_key(&mut translator, Mode::Normal, "", &esc);
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('3')).is_none());
         let ctrl_r = KeyEvent {
             code: KeyCode::Char('r'),
             mods: KeyModifiers::CTRL,
         };
-        match translate_key(Mode::Normal, "", &ctrl_r) {
+        match translate_key(&mut translator, Mode::Normal, "", &ctrl_r) {
             Some(Action::Redo { count }) => assert_eq!(count, 3),
             other => panic!("expected Redo with count 3, got {:?}", other),
         }
@@ -1062,13 +1135,14 @@ mod tests {
     #[test]
     fn ngi_delete_under_count_prefix() {
         use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let mut translator = new_translator();
         let esc = KeyEvent {
             code: KeyCode::Esc,
             mods: KeyModifiers::empty(),
         };
-        let _ = translate_key(Mode::Normal, "", &esc);
-        assert!(translate_key(Mode::Normal, "", &kc('3')).is_none());
-        match translate_key(Mode::Normal, "", &kc('x')) {
+        let _ = translate_key(&mut translator, Mode::Normal, "", &esc);
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('3')).is_none());
+        match translate_key(&mut translator, Mode::Normal, "", &kc('x')) {
             Some(Action::Edit(EditKind::DeleteUnder { count, register })) => {
                 assert_eq!(count, 3);
                 assert!(register.is_none());
@@ -1080,14 +1154,15 @@ mod tests {
     #[test]
     fn ngi_delete_under_register_prefix() {
         use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let mut translator = new_translator();
         let esc = KeyEvent {
             code: KeyCode::Esc,
             mods: KeyModifiers::empty(),
         };
-        let _ = translate_key(Mode::Normal, "", &esc);
-        assert!(translate_key(Mode::Normal, "", &kc('"')).is_none());
-        assert!(translate_key(Mode::Normal, "", &kc('a')).is_none());
-        match translate_key(Mode::Normal, "", &kc('x')) {
+        let _ = translate_key(&mut translator, Mode::Normal, "", &esc);
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('"')).is_none());
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('a')).is_none());
+        match translate_key(&mut translator, Mode::Normal, "", &kc('x')) {
             Some(Action::Edit(EditKind::DeleteUnder { count, register })) => {
                 assert_eq!(count, 1);
                 assert_eq!(register, Some('a'));
@@ -1099,13 +1174,14 @@ mod tests {
     #[test]
     fn ngi_delete_left_count_prefix() {
         use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let mut translator = new_translator();
         let esc = KeyEvent {
             code: KeyCode::Esc,
             mods: KeyModifiers::empty(),
         };
-        let _ = translate_key(Mode::Normal, "", &esc);
-        assert!(translate_key(Mode::Normal, "", &kc('2')).is_none());
-        match translate_key(Mode::Normal, "", &kc('X')) {
+        let _ = translate_key(&mut translator, Mode::Normal, "", &esc);
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('2')).is_none());
+        match translate_key(&mut translator, Mode::Normal, "", &kc('X')) {
             Some(Action::Edit(EditKind::DeleteLeft { count, register })) => {
                 assert_eq!(count, 2);
                 assert!(register.is_none());
@@ -1117,13 +1193,14 @@ mod tests {
     #[test]
     fn ngi_paste_after_count_prefix() {
         use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let mut translator = new_translator();
         let esc = KeyEvent {
             code: KeyCode::Esc,
             mods: KeyModifiers::empty(),
         };
-        let _ = translate_key(Mode::Normal, "", &esc);
-        assert!(translate_key(Mode::Normal, "", &kc('4')).is_none());
-        match translate_key(Mode::Normal, "", &kc('p')) {
+        let _ = translate_key(&mut translator, Mode::Normal, "", &esc);
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('4')).is_none());
+        match translate_key(&mut translator, Mode::Normal, "", &kc('p')) {
             Some(Action::PasteAfter { count, register }) => {
                 assert_eq!(count, 4);
                 assert!(register.is_none());
@@ -1135,14 +1212,15 @@ mod tests {
     #[test]
     fn ngi_paste_after_register_prefix() {
         use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let mut translator = new_translator();
         let esc = KeyEvent {
             code: KeyCode::Esc,
             mods: KeyModifiers::empty(),
         };
-        let _ = translate_key(Mode::Normal, "", &esc);
-        assert!(translate_key(Mode::Normal, "", &kc('"')).is_none());
-        assert!(translate_key(Mode::Normal, "", &kc('b')).is_none());
-        match translate_key(Mode::Normal, "", &kc('p')) {
+        let _ = translate_key(&mut translator, Mode::Normal, "", &esc);
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('"')).is_none());
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('b')).is_none());
+        match translate_key(&mut translator, Mode::Normal, "", &kc('p')) {
             Some(Action::PasteAfter { count, register }) => {
                 assert_eq!(count, 1);
                 assert_eq!(register, Some('b'));
@@ -1154,13 +1232,14 @@ mod tests {
     #[test]
     fn ngi_paste_before_count_prefix() {
         use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let mut translator = new_translator();
         let esc = KeyEvent {
             code: KeyCode::Esc,
             mods: KeyModifiers::empty(),
         };
-        let _ = translate_key(Mode::Normal, "", &esc);
-        assert!(translate_key(Mode::Normal, "", &kc('2')).is_none());
-        match translate_key(Mode::Normal, "", &kc('P')) {
+        let _ = translate_key(&mut translator, Mode::Normal, "", &esc);
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('2')).is_none());
+        match translate_key(&mut translator, Mode::Normal, "", &kc('P')) {
             Some(Action::PasteBefore { count, register }) => {
                 assert_eq!(count, 2);
                 assert!(register.is_none());
@@ -1172,14 +1251,15 @@ mod tests {
     #[test]
     fn ngi_paste_before_register_prefix() {
         use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let mut translator = new_translator();
         let esc = KeyEvent {
             code: KeyCode::Esc,
             mods: KeyModifiers::empty(),
         };
-        let _ = translate_key(Mode::Normal, "", &esc);
-        assert!(translate_key(Mode::Normal, "", &kc('"')).is_none());
-        assert!(translate_key(Mode::Normal, "", &kc('C')).is_none());
-        match translate_key(Mode::Normal, "", &kc('P')) {
+        let _ = translate_key(&mut translator, Mode::Normal, "", &esc);
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('"')).is_none());
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('C')).is_none());
+        match translate_key(&mut translator, Mode::Normal, "", &kc('P')) {
             Some(Action::PasteBefore { count, register }) => {
                 assert_eq!(count, 1);
                 assert_eq!(register, Some('C'));
@@ -1191,13 +1271,14 @@ mod tests {
     #[test]
     fn ngi_undo_count_prefix() {
         use core_events::{KeyCode, KeyEvent, KeyModifiers};
+        let mut translator = new_translator();
         let esc = KeyEvent {
             code: KeyCode::Esc,
             mods: KeyModifiers::empty(),
         };
-        let _ = translate_key(Mode::Normal, "", &esc);
-        assert!(translate_key(Mode::Normal, "", &kc('5')).is_none());
-        match translate_key(Mode::Normal, "", &kc('u')) {
+        let _ = translate_key(&mut translator, Mode::Normal, "", &esc);
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('5')).is_none());
+        match translate_key(&mut translator, Mode::Normal, "", &kc('u')) {
             Some(Action::Undo { count }) => assert_eq!(count, 5),
             other => panic!("expected Undo with count 5, got {:?}", other),
         }
@@ -1253,8 +1334,9 @@ mod tests {
 
     #[test]
     fn ngi_linewise_dd() {
-        assert!(translate_key(Mode::Normal, "", &kc('d')).is_none());
-        match translate_key(Mode::Normal, "", &kc('d')) {
+        let mut translator = new_translator();
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('d')).is_none());
+        match translate_key(&mut translator, Mode::Normal, "", &kc('d')) {
             Some(Action::LinewiseOperator {
                 op,
                 count,
@@ -1270,9 +1352,10 @@ mod tests {
 
     #[test]
     fn ngi_linewise_prefix_count_3dd() {
-        assert!(translate_key(Mode::Normal, "", &kc('3')).is_none());
-        assert!(translate_key(Mode::Normal, "", &kc('d')).is_none());
-        match translate_key(Mode::Normal, "", &kc('d')) {
+        let mut translator = new_translator();
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('3')).is_none());
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('d')).is_none());
+        match translate_key(&mut translator, Mode::Normal, "", &kc('d')) {
             Some(Action::LinewiseOperator {
                 op,
                 count,
@@ -1288,9 +1371,10 @@ mod tests {
 
     #[test]
     fn ngi_linewise_post_count_d2d() {
-        assert!(translate_key(Mode::Normal, "", &kc('d')).is_none());
-        assert!(translate_key(Mode::Normal, "", &kc('2')).is_none());
-        match translate_key(Mode::Normal, "", &kc('d')) {
+        let mut translator = new_translator();
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('d')).is_none());
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('2')).is_none());
+        match translate_key(&mut translator, Mode::Normal, "", &kc('d')) {
             Some(Action::LinewiseOperator {
                 op,
                 count,
@@ -1306,10 +1390,11 @@ mod tests {
 
     #[test]
     fn ngi_linewise_register_yy() {
-        assert!(translate_key(Mode::Normal, "", &kc('"')).is_none());
-        assert!(translate_key(Mode::Normal, "", &kc('a')).is_none());
-        assert!(translate_key(Mode::Normal, "", &kc('y')).is_none());
-        match translate_key(Mode::Normal, "", &kc('y')) {
+        let mut translator = new_translator();
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('"')).is_none());
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('a')).is_none());
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('y')).is_none());
+        match translate_key(&mut translator, Mode::Normal, "", &kc('y')) {
             Some(Action::LinewiseOperator {
                 op,
                 count,
@@ -1325,8 +1410,9 @@ mod tests {
 
     #[test]
     fn ngi_linewise_cc_change() {
-        assert!(translate_key(Mode::Normal, "", &kc('c')).is_none());
-        match translate_key(Mode::Normal, "", &kc('c')) {
+        let mut translator = new_translator();
+        assert!(translate_key(&mut translator, Mode::Normal, "", &kc('c')).is_none());
+        match translate_key(&mut translator, Mode::Normal, "", &kc('c')) {
             Some(Action::LinewiseOperator {
                 op,
                 count,
@@ -1337,6 +1423,73 @@ mod tests {
                 assert!(register.is_none());
             }
             other => panic!("expected LinewiseOperator(cc) got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn named_arrow_translates_to_motion() {
+        let cfg = Config::default();
+        let mut translator = new_translator();
+        let left = KeyEventExt::from_parts(KeyToken::Named(NamedKey::Left), false, Instant::now());
+        let resolution = translate_keypress(&mut translator, Mode::Normal, "", &left, &cfg);
+        assert!(matches!(
+            resolution.action,
+            Some(Action::Motion(MotionKind::Left))
+        ));
+    }
+
+    #[test]
+    fn visual_named_arrow_translates_to_motion() {
+        let cfg = Config::default();
+        let mut translator = new_translator();
+        translator.reset_for_mode(Mode::VisualChar);
+        let right =
+            KeyEventExt::from_parts(KeyToken::Named(NamedKey::Right), false, Instant::now());
+        let resolution = translate_keypress(&mut translator, Mode::VisualChar, "", &right, &cfg);
+        assert!(matches!(
+            resolution.action,
+            Some(Action::Motion(MotionKind::Right))
+        ));
+    }
+
+    #[test]
+    fn cancel_pending_clears_count_prefix() {
+        let cfg = Config::default();
+        let mut translator = new_translator();
+        let digit = KeyEventExt::from_parts(KeyToken::Char('3'), false, Instant::now());
+        let pending = translate_keypress(&mut translator, Mode::Normal, "", &digit, &cfg);
+        assert!(pending.action.is_none());
+
+        translator.cancel_pending();
+
+        let motion = KeyEventExt::from_parts(KeyToken::Char('l'), false, Instant::now());
+        let resolved = translate_keypress(&mut translator, Mode::Normal, "", &motion, &cfg);
+        assert!(matches!(
+            resolved.action,
+            Some(Action::Motion(MotionKind::Right))
+        ));
+    }
+
+    #[test]
+    fn reset_for_insert_clears_register_prefix() {
+        let cfg = Config::default();
+        let mut translator = new_translator();
+        let quote = KeyEventExt::from_parts(KeyToken::Char('"'), false, Instant::now());
+        let reg = KeyEventExt::from_parts(KeyToken::Char('b'), false, Instant::now());
+        let _ = translate_keypress(&mut translator, Mode::Normal, "", &quote, &cfg);
+        let _ = translate_keypress(&mut translator, Mode::Normal, "", &reg, &cfg);
+
+        translator.reset_for_mode(Mode::Insert);
+        translator.reset_for_mode(Mode::Normal);
+
+        let paste = KeyEventExt::from_parts(KeyToken::Char('p'), false, Instant::now());
+        let resolved = translate_keypress(&mut translator, Mode::Normal, "", &paste, &cfg);
+        match resolved.action {
+            Some(Action::PasteAfter { register, .. }) => assert!(
+                register.is_none(),
+                "expected register prefix to clear when entering insert"
+            ),
+            other => panic!("expected paste action, got {:?}", other),
         }
     }
 

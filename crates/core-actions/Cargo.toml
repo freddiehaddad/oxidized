@@ -17,3 +17,4 @@ core-config = { path = "../core-config" }
 [dev-dependencies]
 anyhow.workspace = true
 tempfile = "3.23.0"
+tracing-subscriber.workspace = true

@@ -1,4 +1,7 @@
-use core_actions::{dispatch, translate_ngi};
+mod common;
+use common::*;
+
+use core_actions::dispatch;
 use core_config::Config;
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_model::EditorModel;
@@ -14,6 +17,7 @@ fn kc(c: char) -> KeyEvent {
 
 #[test]
 fn ngi_command_line_basic_flow() {
+    reset_translator();
     let buf = Buffer::from_str("t", "").unwrap();
     let state = EditorState::new(buf);
     let mut model = EditorModel::new(state);

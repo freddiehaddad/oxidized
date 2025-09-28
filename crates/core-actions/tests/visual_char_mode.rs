@@ -1,4 +1,7 @@
-use core_actions::{dispatcher::dispatch, translate_key};
+mod common;
+use common::*;
+
+use core_actions::dispatcher::dispatch;
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_model::EditorModel;
 use core_state::{EditorState, Mode, SelectionKind};
@@ -13,6 +16,7 @@ fn key(c: char) -> KeyEvent {
 
 #[test]
 fn enter_visual_char_sets_selection_anchor() {
+    reset_translator();
     let buffer = Buffer::from_str("t", "hello world\n").unwrap();
     let state = EditorState::new(buffer);
     let mut model = EditorModel::new(state);

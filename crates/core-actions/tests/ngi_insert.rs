@@ -1,4 +1,6 @@
-use core_actions::{translate_key, translate_ngi};
+mod common;
+use common::*;
+
 use core_config::Config;
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_model::EditorModel;
@@ -14,6 +16,7 @@ fn kc(c: char) -> KeyEvent {
 
 #[test]
 fn ngi_insert_basic_text_newline_backspace() {
+    reset_translator();
     // Prepare model and enter Insert mode
     let buf = Buffer::from_str("t", "").unwrap();
     let state = EditorState::new(buf);

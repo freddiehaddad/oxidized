@@ -1,4 +1,7 @@
-use core_actions::{Action, MotionKind, OperatorKind, translate_ngi};
+mod common;
+use common::*;
+
+use core_actions::{Action, MotionKind, OperatorKind};
 use core_config::Config;
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_state::Mode;
@@ -12,6 +15,7 @@ fn kc(c: char) -> KeyEvent {
 
 #[test]
 fn ngi_normal_d_maps_to_delete_to_eol() {
+    reset_translator();
     let cfg = Config::default();
     let act = translate_ngi(Mode::Normal, "", &kc('D'), &cfg).action;
     match act {
@@ -32,6 +36,7 @@ fn ngi_normal_d_maps_to_delete_to_eol() {
 
 #[test]
 fn ngi_normal_c_maps_to_change_to_eol() {
+    reset_translator();
     let cfg = Config::default();
     let act = translate_ngi(Mode::Normal, "", &kc('C'), &cfg).action;
     match act {

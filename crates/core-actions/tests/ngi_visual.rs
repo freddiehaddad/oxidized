@@ -1,4 +1,7 @@
-use core_actions::{Action, OperatorKind, dispatch, translate_key, translate_ngi};
+mod common;
+use common::*;
+
+use core_actions::{Action, OperatorKind, dispatch};
 use core_config::Config;
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_model::EditorModel;
@@ -14,6 +17,7 @@ fn kc(c: char) -> KeyEvent {
 
 #[test]
 fn ngi_visual_basic_ops() {
+    reset_translator();
     let buf = Buffer::from_str("t", "hello world\n").unwrap();
     let state = EditorState::new(buf);
     let mut model = EditorModel::new(state);
@@ -58,6 +62,7 @@ fn ngi_visual_basic_ops() {
 
 #[test]
 fn ngi_visual_operator_respects_count_and_register() {
+    reset_translator();
     let buf = Buffer::from_str("t", "alpha beta\n").unwrap();
     let state = EditorState::new(buf);
     let mut model = EditorModel::new(state);
@@ -108,6 +113,7 @@ fn ngi_visual_operator_respects_count_and_register() {
 
 #[test]
 fn ngi_visual_paste_supports_counts_and_registers() {
+    reset_translator();
     let buf = Buffer::from_str("t", "gamma\n").unwrap();
     let state = EditorState::new(buf);
     let mut model = EditorModel::new(state);

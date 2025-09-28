@@ -1,7 +1,10 @@
-//! Step 6.4 operator × motion matrix for delete semantics.
-//! Focus: verifying linewise vs charwise classification, counts, and structural repaint flag.
+mod common;
+use common::*;
 
-use core_actions::{Action, dispatcher::dispatch, translate_key};
+// Step 6.4 operator × motion matrix for delete semantics.
+// Focus: verifying linewise vs charwise classification, counts, and structural repaint flag.
+
+use core_actions::{Action, dispatcher::dispatch};
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_model::EditorModel;
 use core_text::Buffer;
@@ -34,6 +37,7 @@ struct Case<'a> {
 
 #[test]
 fn delete_motion_matrix() {
+    reset_translator();
     let cases = [
         Case {
             name: "dw_charwise",

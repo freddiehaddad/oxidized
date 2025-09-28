@@ -1,4 +1,7 @@
-use core_actions::{Action, OperatorKind, translate_ngi};
+mod common;
+use common::*;
+
+use core_actions::{Action, OperatorKind, dispatcher::dispatch};
 use core_config::Config;
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_model::EditorModel;
@@ -14,18 +17,15 @@ fn kc(c: char) -> KeyEvent {
 
 #[test]
 fn ngi_visual_x_maps_to_visual_delete() {
+    reset_translator();
     let buf = Buffer::from_str("t", "hello\n").unwrap();
     let state = EditorState::new(buf);
     let mut model = EditorModel::new(state);
     let mut sticky = None;
 
     // Enter Visual via legacy (: for now)
-    core_actions::dispatch(
-        core_actions::translate_key(Mode::Normal, "", &kc('v')).unwrap(),
-        &mut model,
-        &mut sticky,
-        &[],
-    );
+    let enter = translate_key(Mode::Normal, "", &kc('v')).unwrap();
+    dispatch(enter, &mut model, &mut sticky, &[]);
 
     // Map via NGI adapter: 'x' -> VisualOperator(Delete)
     let cfg = Config::default();

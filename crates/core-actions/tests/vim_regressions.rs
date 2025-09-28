@@ -1,4 +1,7 @@
-use core_actions::{dispatch, translate_ngi};
+mod common;
+use common::*;
+
+use core_actions::dispatch;
 use core_config::Config;
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_model::EditorModel;
@@ -71,6 +74,7 @@ fn buffer_contents(state: &EditorState) -> String {
 
 #[test]
 fn unicode_linewise_change_and_paste_regression() {
+    reset_translator();
     let initial = "καλη μέρα\nemoji🙂 line\nalpha βeta\n";
     let keys = [
         Stroke::Char('0'),
@@ -110,6 +114,7 @@ fn unicode_linewise_change_and_paste_regression() {
 
 #[test]
 fn redo_and_named_register_snapshot_regression() {
+    reset_translator();
     let initial = "emoji 🙂 test\nalpha\n";
     let keys = [
         Stroke::Char('0'),

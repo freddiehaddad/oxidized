@@ -24,7 +24,9 @@ Breadth‑first development means behavior shifts rapidly. High‑quality tracin
 | `runtime`     | Process lifecycle & high level loop | startup, shutdown |
 | `io`          | File / disk / OS operations | file_open, file_write |
 | `config`      | Config load / clamp results | scroll_margin clamped |
-| `input`       | Raw input thread events (resize, key anomalies) | resize |
+| `input.event` | Keypress emission (async task) | keypress, repeat |
+| `input.thread`| Async input lifecycle | startup, shutdown |
+| `runtime.input` | Runtime key ingestion + timeout bookkeeping | keypress_receive, timeout_flush |
 | `events`      | Async event source registry lifecycle | spawning event source |
 | `actions.translate` | Key translation decisions | counts, operator apply |
 | `actions.dispatch`  | State mutations (motions, edits, operators) | motion, edit_insert |

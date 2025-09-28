@@ -1,4 +1,7 @@
-use core_actions::{Action, dispatch, translate_key};
+mod common;
+
+use common::{reset_translator, translate_key};
+use core_actions::{Action, dispatch};
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_model::EditorModel;
 use core_state::EditorState;
@@ -13,6 +16,7 @@ fn kc(c: char) -> KeyEvent {
 
 #[test]
 fn visual_char_delete_basic() {
+    reset_translator();
     let buf = Buffer::from_str("t", "hello world\n").unwrap();
     let state = EditorState::new(buf);
     let mut model = EditorModel::new(state);
@@ -51,6 +55,7 @@ fn visual_char_delete_basic() {
 
 #[test]
 fn visual_char_yank_basic() {
+    reset_translator();
     let buf = Buffer::from_str("t", "alpha beta gamma\n").unwrap();
     let state = EditorState::new(buf);
     let mut model = EditorModel::new(state);
@@ -90,6 +95,7 @@ fn visual_char_yank_basic() {
 
 #[test]
 fn visual_char_change_enters_insert() {
+    reset_translator();
     let buf = Buffer::from_str("t", "one two three\n").unwrap();
     let state = EditorState::new(buf);
     let mut model = EditorModel::new(state);
@@ -124,6 +130,7 @@ fn visual_char_change_enters_insert() {
 
 #[test]
 fn visual_char_paste_replaces_selection() {
+    reset_translator();
     let buf = Buffer::from_str("t", "abcde\n").unwrap();
     let state = EditorState::new(buf);
     let mut model = EditorModel::new(state);

@@ -1,5 +1,7 @@
+mod common;
+use common::*;
+
 use core_actions::dispatcher::dispatch; // dispatch not re-exported at crate root
-use core_actions::translate_key;
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_model::EditorModel;
 use core_state::{Mode, SelectionKind};
@@ -14,6 +16,7 @@ fn key(c: char) -> KeyEvent {
 
 #[test]
 fn visual_char_basic_expansion_h_l() {
+    reset_translator();
     let buffer = Buffer::from_str("t", "hello world\n").unwrap();
     let state = core_state::EditorState::new(buffer);
     let mut model = EditorModel::new(state);
@@ -52,6 +55,7 @@ fn visual_char_basic_expansion_h_l() {
 
 #[test]
 fn visual_char_word_forward_backward() {
+    reset_translator();
     let buffer = Buffer::from_str("t", "alpha beta gamma\n").unwrap();
     let state = core_state::EditorState::new(buffer);
     let mut model = EditorModel::new(state);
@@ -96,6 +100,7 @@ fn visual_char_word_forward_backward() {
 
 #[test]
 fn visual_char_line_start_end() {
+    reset_translator();
     let buffer = Buffer::from_str("t", "mixed words here\n").unwrap();
     let state = core_state::EditorState::new(buffer);
     let mut model = EditorModel::new(state);
@@ -125,6 +130,7 @@ fn visual_char_line_start_end() {
 
 #[test]
 fn visual_char_half_page_motions_expand() {
+    reset_translator();
     // Build >40 lines so half-page motions operate
     let mut s = String::new();
     for i in 0..50 {

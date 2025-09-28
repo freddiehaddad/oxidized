@@ -1,4 +1,7 @@
-use core_actions::{Action, EditKind, translate_ngi};
+mod common;
+use common::*;
+
+use core_actions::{Action, EditKind};
 use core_config::Config;
 use core_events::{KeyCode, KeyEvent, KeyModifiers};
 use core_state::Mode;
@@ -12,6 +15,7 @@ fn kc(c: char) -> KeyEvent {
 
 #[test]
 fn ngi_normal_x_maps_delete_left() {
+    reset_translator();
     let cfg = Config::default();
     let act = translate_ngi(Mode::Normal, "", &kc('X'), &cfg);
     match act.action {

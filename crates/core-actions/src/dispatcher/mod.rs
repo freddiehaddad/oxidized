@@ -709,13 +709,38 @@ fn adjust_change_range(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Action, EditKind, ModeChange, MotionKind, OperatorKind, translate_key}; // test-only imports
+    use crate::{
+        Action, EditKind, ModeChange, MotionKind, NgiTranslator, OperatorKind,
+        translate_key as core_translate_key,
+    }; // test-only imports
     use core_events::{KeyCode, KeyEvent, KeyModifiers};
     use core_model::EditorModel;
+    use core_state::Mode;
     use core_text::Buffer;
+    use std::cell::RefCell;
+
+    thread_local! {
+        static TRANSLATOR: RefCell<NgiTranslator> = RefCell::new(NgiTranslator::new());
+    }
+
+    fn reset_translator() {
+        TRANSLATOR.with(|t| *t.borrow_mut() = NgiTranslator::new());
+    }
+
+    fn translate_key(mode: Mode, pending: &str, key: &KeyEvent) -> Option<Action> {
+        TRANSLATOR.with(|t| core_translate_key(&mut t.borrow_mut(), mode, pending, key))
+    }
+
+    fn key_evt(c: char) -> KeyEvent {
+        KeyEvent {
+            code: KeyCode::Char(c),
+            mods: KeyModifiers::empty(),
+        }
+    }
 
     #[test]
     fn motion_left_right_dirty() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "ab\ncd").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -746,6 +771,7 @@ mod tests {
 
     #[test]
     fn quit_command_execute() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "abc").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -764,6 +790,7 @@ mod tests {
 
     #[test]
     fn delete_under_count_updates_registers() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "abcdef\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -785,6 +812,7 @@ mod tests {
 
     #[test]
     fn delete_under_named_register_prefix() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "wxyz\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -806,6 +834,7 @@ mod tests {
 
     #[test]
     fn delete_left_count_and_register() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "abcdef").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -847,6 +876,7 @@ mod tests {
 
     #[test]
     fn paste_after_count_repeats() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "X\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -872,6 +902,7 @@ mod tests {
 
     #[test]
     fn paste_before_count_repeats() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "123").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -910,6 +941,7 @@ mod tests {
 
     #[test]
     fn paste_after_linewise_places_cursor() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "alpha\nbeta\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -936,6 +968,7 @@ mod tests {
 
     #[test]
     fn paste_before_linewise_inserts_above() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "alpha\nbeta\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -963,6 +996,7 @@ mod tests {
 
     #[test]
     fn undo_repeats_count_times() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "abcd").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -993,6 +1027,7 @@ mod tests {
 
     #[test]
     fn redo_repeats_count_times() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "abcd").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1023,6 +1058,7 @@ mod tests {
 
     #[test]
     fn edit_command_opens_file() {
+        reset_translator();
         use std::io::Write;
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("sample.txt");
@@ -1068,6 +1104,7 @@ mod tests {
 
     #[test]
     fn visual_char_delete_forward_inclusive() {
+        reset_translator();
         // Buffer: abcdef\n cursor at 'a' enter Visual, move right 3 times selects a..d then delete
         let buffer = Buffer::from_str("t", "abcdef\n").unwrap();
         let state = core_state::EditorState::new(buffer);
@@ -1110,6 +1147,7 @@ mod tests {
 
     #[test]
     fn visual_char_delete_reverse_inclusive() {
+        reset_translator();
         // Start cursor at end, move left to build reverse selection then delete; inclusive must remove endpoints.
         let buffer = Buffer::from_str("t", "abcdef\n").unwrap();
         let state = core_state::EditorState::new(buffer);
@@ -1157,6 +1195,7 @@ mod tests {
 
     #[test]
     fn visual_char_delete_single_grapheme_inclusive() {
+        reset_translator();
         // Selecting a single character then deleting should remove it.
         let buffer = Buffer::from_str("t", "xYz\n").unwrap();
         let state = core_state::EditorState::new(buffer);
@@ -1199,6 +1238,7 @@ mod tests {
 
     #[test]
     fn write_command_writes_file() {
+        reset_translator();
         use std::io::Read;
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("write_test.txt");
@@ -1226,6 +1266,7 @@ mod tests {
 
     #[test]
     fn leave_insert_backs_up_cursor_one_grapheme() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1267,6 +1308,7 @@ mod tests {
 
     #[test]
     fn visual_enter_dirty_and_anchor_set() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "alpha").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1296,6 +1338,7 @@ mod tests {
 
     #[test]
     fn write_command_without_filename_logs_and_keeps_dirty() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "scratch buffer").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1326,6 +1369,7 @@ mod tests {
 
     #[test]
     fn edit_command_open_failure_sets_ephemeral() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "initial").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1352,6 +1396,7 @@ mod tests {
 
     #[test]
     fn dirty_flag_sets_on_first_insert() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1377,6 +1422,7 @@ mod tests {
 
     #[test]
     fn undo_does_not_clear_dirty() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1406,6 +1452,7 @@ mod tests {
 
     #[test]
     fn write_clears_then_new_edit_sets_dirty_again() {
+        reset_translator();
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("dirty_cycle.txt");
         let buffer = Buffer::from_str("t", "start").unwrap();
@@ -1458,6 +1505,7 @@ mod tests {
 
     #[test]
     fn undo_redo_cycle() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1488,6 +1536,7 @@ mod tests {
 
     #[test]
     fn observer_invoked() {
+        reset_translator();
         use std::sync::{Arc, Mutex};
         struct CountObs(Arc<Mutex<usize>>);
         impl crate::ActionObserver for CountObs {
@@ -1525,6 +1574,7 @@ mod tests {
 
     #[test]
     fn empty_buffer_backspace_noop() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1559,6 +1609,7 @@ mod tests {
 
     #[test]
     fn operator_delete_dw_basic() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "one two three\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1597,6 +1648,7 @@ mod tests {
 
     #[test]
     fn operator_delete_count_prefix_2dw() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "one two three four five\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1629,6 +1681,7 @@ mod tests {
 
     #[test]
     fn operator_delete_multiplicative_d2w() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "one two three four five\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1663,6 +1716,7 @@ mod tests {
 
     #[test]
     fn operator_delete_dj_linewise_two_lines() {
+        reset_translator();
         let text = "l1\nl2\nl3\nl4\n"; // trailing newline
         let buffer = Buffer::from_str("t", text).unwrap();
         let state = core_state::EditorState::new(buffer);
@@ -1695,6 +1749,7 @@ mod tests {
 
     #[test]
     fn operator_delete_2dj_linewise_three_lines() {
+        reset_translator();
         let text = "a1\na2\na3\na4\na5\n";
         let buffer = Buffer::from_str("t", text).unwrap();
         let state = core_state::EditorState::new(buffer);
@@ -1726,6 +1781,7 @@ mod tests {
 
     #[test]
     fn operator_delete_d2j_linewise_three_lines() {
+        reset_translator();
         let text = "b1\nb2\nb3\nb4\nb5\n";
         let buffer = Buffer::from_str("t", text).unwrap();
         let state = core_state::EditorState::new(buffer);
@@ -1757,6 +1813,7 @@ mod tests {
 
     #[test]
     fn operator_delete_linewise_dd() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "l1\nl2\nl3\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1793,6 +1850,7 @@ mod tests {
 
     #[test]
     fn operator_delete_linewise_3dd() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "a1\na2\na3\na4\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1833,6 +1891,7 @@ mod tests {
 
     #[test]
     fn operator_yank_linewise_yy() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "x1\nx2\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1868,6 +1927,7 @@ mod tests {
 
     #[test]
     fn operator_yank_linewise_register_prefix() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "r1\nr2\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1910,6 +1970,7 @@ mod tests {
 
     #[test]
     fn operator_change_linewise_cc() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "m1\nm2\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1947,6 +2008,7 @@ mod tests {
 
     #[test]
     fn operator_change_linewise_2cc() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "z1\nz2\nz3\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -1992,359 +2054,8 @@ mod tests {
     }
 
     #[test]
-    fn structural_multi_line_delete_sets_buffer_replaced() {
-        let buffer = Buffer::from_str("t", "a1\na2\na3\n").unwrap();
-        let state = core_state::EditorState::new(buffer);
-        let mut model = EditorModel::new(state);
-        let mut sticky = None;
-        // d j (delete two lines)
-        translate_key(
-            model.state().mode,
-            model.state().command_line.buffer(),
-            &key('d'),
-        );
-        let act = translate_key(
-            model.state().mode,
-            model.state().command_line.buffer(),
-            &key('j'),
-        )
-        .unwrap();
-        let res = dispatch(act, &mut model, &mut sticky, &[]);
-        assert!(
-            res.buffer_replaced,
-            "multi-line delete must mark structural"
-        );
-    }
-
-    #[test]
-    fn structural_multi_line_delete_then_undo_sets_buffer_replaced() {
-        let buffer = Buffer::from_str("t", "b1\nb2\nb3\n").unwrap();
-        let state = core_state::EditorState::new(buffer);
-        let mut model = EditorModel::new(state);
-        let mut sticky = None;
-        // Perform dj
-        translate_key(
-            model.state().mode,
-            model.state().command_line.buffer(),
-            &key('d'),
-        );
-        let act = translate_key(
-            model.state().mode,
-            model.state().command_line.buffer(),
-            &key('j'),
-        )
-        .unwrap();
-        let res = dispatch(act, &mut model, &mut sticky, &[]);
-        assert!(res.buffer_replaced);
-        // Undo
-        let undo_res = dispatch(Action::Undo { count: 1 }, &mut model, &mut sticky, &[]);
-        assert!(
-            undo_res.buffer_replaced,
-            "undo restoring lines must be structural"
-        );
-    }
-
-    #[test]
-    fn single_line_delete_not_structural() {
-        let buffer = Buffer::from_str("t", "one two three\n").unwrap();
-        let state = core_state::EditorState::new(buffer);
-        let mut model = EditorModel::new(state);
-        let mut sticky = None;
-        // dw (delete one word inside single line)
-        translate_key(
-            model.state().mode,
-            model.state().command_line.buffer(),
-            &key('d'),
-        );
-        let act = translate_key(
-            model.state().mode,
-            model.state().command_line.buffer(),
-            &key('w'),
-        )
-        .unwrap();
-        let res = dispatch(act, &mut model, &mut sticky, &[]);
-        assert!(res.dirty);
-        assert!(
-            !res.buffer_replaced,
-            "single-line delete should not be structural"
-        );
-    }
-
-    // --- Step 7 Yank operator tests ---
-
-    fn key_evt(c: char) -> KeyEvent {
-        KeyEvent {
-            code: KeyCode::Char(c),
-            mods: KeyModifiers::empty(),
-        }
-    }
-
-    #[test]
-    fn operator_yank_basic_yw() {
-        let buffer = Buffer::from_str("t", "one two three\n").unwrap();
-        let state = core_state::EditorState::new(buffer);
-        let mut model = EditorModel::new(state);
-        let mut sticky = None;
-        // y w
-        translate_key(
-            model.state().mode,
-            model.state().command_line.buffer(),
-            &key_evt('y'),
-        );
-        let act = translate_key(
-            model.state().mode,
-            model.state().command_line.buffer(),
-            &key_evt('w'),
-        )
-        .unwrap();
-        if let Action::ApplyOperator {
-            op,
-            motion,
-            count,
-            register: _,
-        } = act
-        {
-            assert!(matches!(op, OperatorKind::Yank));
-            assert!(matches!(motion, MotionKind::WordForward));
-            assert_eq!(count, 1);
-        } else {
-            panic!();
-        }
-        let pre_text = {
-            let b = model.state().active_buffer();
-            let mut s = String::new();
-            for i in 0..b.line_count() {
-                if let Some(l) = b.line(i) {
-                    s.push_str(&l);
-                }
-            }
-            s
-        };
-        let res = dispatch(act, &mut model, &mut sticky, &[]);
-        // Yank should leave buffer unchanged; dirty flag may remain false.
-        assert!(!res.buffer_replaced, "yank must not be structural");
-        let after = {
-            let b = model.state().active_buffer();
-            let mut s = String::new();
-            for i in 0..b.line_count() {
-                if let Some(l) = b.line(i) {
-                    s.push_str(&l);
-                }
-            }
-            s
-        };
-        assert_eq!(after, pre_text);
-        assert!(model.state().registers.unnamed.starts_with("one"));
-    }
-
-    #[test]
-    fn operator_yank_prefix_count_2yw() {
-        let buffer = Buffer::from_str("t", "one two three four\n").unwrap();
-        let state = core_state::EditorState::new(buffer);
-        let mut model = EditorModel::new(state);
-        let mut sticky = None;
-        // 2 y w
-        translate_key(
-            model.state().mode,
-            model.state().command_line.buffer(),
-            &key_evt('2'),
-        );
-        translate_key(
-            model.state().mode,
-            model.state().command_line.buffer(),
-            &key_evt('y'),
-        );
-        let act = translate_key(
-            model.state().mode,
-            model.state().command_line.buffer(),
-            &key_evt('w'),
-        )
-        .unwrap();
-        if let Action::ApplyOperator { count, .. } = act {
-            assert_eq!(count, 2);
-        } else {
-            panic!();
-        }
-        let pre = {
-            let b = model.state().active_buffer();
-            let mut s = String::new();
-            for i in 0..b.line_count() {
-                if let Some(l) = b.line(i) {
-                    s.push_str(&l);
-                }
-            }
-            s
-        };
-        dispatch(act, &mut model, &mut sticky, &[]);
-        let after = {
-            let b = model.state().active_buffer();
-            let mut s = String::new();
-            for i in 0..b.line_count() {
-                if let Some(l) = b.line(i) {
-                    s.push_str(&l);
-                }
-            }
-            s
-        };
-        assert_eq!(after, pre);
-        assert!(model.state().registers.unnamed.contains("one two"));
-    }
-
-    // Change operator tests (Step 8)
-    fn change_sequence(model: &mut EditorModel, seq: &str) -> Action {
-        let mut last = None;
-        for ch in seq.chars() {
-            let evt = KeyEvent {
-                code: KeyCode::Char(ch),
-                mods: KeyModifiers::empty(),
-            };
-            last = crate::translate_key(
-                model.state().mode,
-                model.state().command_line.buffer(),
-                &evt,
-            );
-        }
-        last.expect("sequence produced final action")
-    }
-
-    #[test]
-    fn operator_change_basic_cw() {
-        let buffer = Buffer::from_str("t", "one two three\n").unwrap();
-        let state = core_state::EditorState::new(buffer);
-        let mut model = EditorModel::new(state);
-        let act = change_sequence(&mut model, "cw");
-        let mut sticky = None;
-        let res = dispatch(act, &mut model, &mut sticky, &[]);
-        assert!(res.dirty);
-        assert_eq!(model.state().mode, core_state::Mode::Insert);
-        assert_eq!(model.state().registers.unnamed, "one");
-        // Vim parity: cw changes word but preserves following whitespace.
-        let after_line = model.state().active_buffer().line(0).unwrap();
-        assert_eq!(after_line, " two three\n");
-    }
-
-    #[test]
-    fn operator_change_cw_unicode_word() {
-        let buffer = Buffer::from_str("t", "éclair 😀 space\n").unwrap();
-        let state = core_state::EditorState::new(buffer);
-        let mut model = EditorModel::new(state);
-        let act = change_sequence(&mut model, "cw");
-        let mut sticky = None;
-        dispatch(act, &mut model, &mut sticky, &[]);
-        assert_eq!(model.state().mode, core_state::Mode::Insert);
-        assert_eq!(model.state().registers.unnamed, "éclair");
-        let line = model.state().active_buffer().line(0).unwrap();
-        assert_eq!(line, " 😀 space\n");
-    }
-
-    #[test]
-    fn operator_change_prefix_count_2cw() {
-        let buffer = Buffer::from_str("t", "one two three four\n").unwrap();
-        let state = core_state::EditorState::new(buffer);
-        let mut model = EditorModel::new(state);
-        let act = change_sequence(&mut model, "2cw");
-        let mut sticky = None;
-        dispatch(act, &mut model, &mut sticky, &[]);
-        assert_eq!(model.state().mode, core_state::Mode::Insert);
-        let after_line = model.state().active_buffer().line(0).unwrap();
-        assert_eq!(model.state().registers.unnamed, "one two");
-        // two words removed while preserving trailing whitespace before third word
-        assert_eq!(after_line, " three four\n");
-    }
-
-    #[test]
-    fn operator_change_post_count_c2w() {
-        let buffer = Buffer::from_str("t", "one two three four\n").unwrap();
-        let state = core_state::EditorState::new(buffer);
-        let mut model = EditorModel::new(state);
-        let act = change_sequence(&mut model, "c2w");
-        let mut sticky = None;
-        dispatch(act, &mut model, &mut sticky, &[]);
-        assert_eq!(model.state().mode, core_state::Mode::Insert);
-        let after_line = model.state().active_buffer().line(0).unwrap();
-        assert_eq!(model.state().registers.unnamed, "one two");
-        assert_eq!(after_line, " three four\n");
-    }
-
-    #[test]
-    fn operator_change_line_end_c_dollar() {
-        let buffer = Buffer::from_str("t", "alpha beta\nsecond\n").unwrap();
-        let state = core_state::EditorState::new(buffer);
-        let mut model = EditorModel::new(state);
-        let act = change_sequence(&mut model, "c$");
-        let mut sticky = None;
-        dispatch(act, &mut model, &mut sticky, &[]);
-        assert_eq!(model.state().mode, core_state::Mode::Insert);
-        let first_line = model.state().active_buffer().line(0).unwrap();
-        assert_eq!(first_line, "\n");
-        assert_eq!(model.state().registers.unnamed, "alpha beta");
-        let second_line = model.state().active_buffer().line(1).unwrap();
-        assert_eq!(second_line, "second\n");
-    }
-
-    #[test]
-    fn operator_change_line_start_c0() {
-        let buffer = Buffer::from_str("t", "alpha beta gamma\n").unwrap();
-        let state = core_state::EditorState::new(buffer);
-        let mut model = EditorModel::new(state);
-        let mut sticky = None;
-        for _ in 0..6 {
-            let act = translate_key(
-                model.state().mode,
-                model.state().command_line.buffer(),
-                &KeyEvent {
-                    code: KeyCode::Char('l'),
-                    mods: KeyModifiers::empty(),
-                },
-            )
-            .unwrap();
-            dispatch(act, &mut model, &mut sticky, &[]);
-        }
-        let act = Action::ApplyOperator {
-            op: OperatorKind::Change,
-            motion: MotionKind::LineStart,
-            count: 1,
-            register: None,
-        };
-        dispatch(act, &mut model, &mut sticky, &[]);
-        assert_eq!(model.state().mode, core_state::Mode::Insert);
-        let line = model.state().active_buffer().line(0).unwrap();
-        assert_eq!(line, "beta gamma\n");
-        assert_eq!(model.state().registers.unnamed, "alpha ");
-    }
-
-    #[test]
-    fn operator_change_linewise_cj() {
-        let buffer = Buffer::from_str("t", "l1\nl2\nl3\n").unwrap();
-        let state = core_state::EditorState::new(buffer);
-        let mut model = EditorModel::new(state);
-        let act = change_sequence(&mut model, "cj");
-        let mut sticky = None;
-        let res = dispatch(act, &mut model, &mut sticky, &[]);
-        assert!(res.buffer_replaced);
-        assert_eq!(model.state().mode, core_state::Mode::Insert);
-        // first two lines removed; resulting first line expected to be l3
-        let after_line0 = model.state().active_buffer().line(0).unwrap();
-        assert!(after_line0.starts_with("l3"));
-    }
-
-    #[test]
-    fn operator_change_linewise_prefix_2cj() {
-        let buffer = Buffer::from_str("t", "a1\na2\na3\na4\n").unwrap();
-        let state = core_state::EditorState::new(buffer);
-        let mut model = EditorModel::new(state);
-        let act = change_sequence(&mut model, "2cj");
-        let mut sticky = None;
-        let res = dispatch(act, &mut model, &mut sticky, &[]);
-        assert!(res.buffer_replaced);
-        assert_eq!(model.state().mode, core_state::Mode::Insert);
-        let after_line0 = model.state().active_buffer().line(0).unwrap();
-        // Inclusive vertical motion semantics: prefix count 2 with motion j deletes lines a1..a3, leaving a4
-        assert!(after_line0.starts_with("a4"));
-    }
-
-    #[test]
     fn operator_metrics_delete_yank_change_counts() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "one two three\nalpha beta gamma\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -2398,6 +2109,7 @@ mod tests {
 
     #[test]
     fn operator_metrics_numbered_ring_rotation() {
+        reset_translator();
         // Build buffer with many distinct words so each yank is unique
         let text = "w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12\n";
         let buffer = Buffer::from_str("t", text).unwrap();
@@ -2427,6 +2139,7 @@ mod tests {
 
     #[test]
     fn operator_yank_post_count_y2w() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "one two three four\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -2480,6 +2193,7 @@ mod tests {
 
     #[test]
     fn operator_yank_linewise_yj() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "l1\nl2\nl3\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);
@@ -2524,6 +2238,7 @@ mod tests {
 
     #[test]
     fn operator_yank_linewise_count_2yj() {
+        reset_translator();
         let buffer = Buffer::from_str("t", "a1\na2\na3\na4\n").unwrap();
         let state = core_state::EditorState::new(buffer);
         let mut model = EditorModel::new(state);

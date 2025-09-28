@@ -11,6 +11,7 @@
 - Command-line actions (`:q[!]`, `:w[!]`, `:e[!]`, `:metrics`) match Vim safeguards while exposing Oxidized diagnostics like the metrics overlay.
 - A rendering engine chooses between cursor-only, partial, scroll, and full updates while tracking performance counters in the overlay.
 - Structured tracing and logging expose motion, edit, render, config, and input events for debugging without leaking pasted content.
+- The NGI keypress handshake is fully landed: the runtime owns the translator, ingests `KeyPress` events directly, and enforces deterministic timeout deadlines with canonical tracing targets.
 - A parity regression harness replays real Vim keystrokes to keep behavior aligned with upstream Vim across Unicode-heavy scenarios.
 
 ## Still on the roadmap

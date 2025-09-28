@@ -90,7 +90,7 @@ Guiding goals:
 
 ### Logging & Tracing (Summary)
 
-Structured logging uses `tracing` with namespaced targets (e.g. `actions.dispatch`, `actions.translate`, `render.engine`, `render.scheduler`, `state.undo`, `runtime`, `io`).
+Structured logging uses `tracing` with namespaced targets (e.g. `input.event`, `input.thread`, `runtime.input`, `actions.dispatch`, `actions.translate`, `render.engine`, `render.scheduler`, `state.undo`, `runtime`, `io`).
 
 Level intent:
 

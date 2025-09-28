@@ -4,7 +4,7 @@
 //! indirectly by calling a small exposed helper (cfg(test)).
 
 mod tests {
-    use core_events::{Event, InputEvent, KeyCode, KeyEvent, KeyModifiers};
+    use core_events::{Event, InputEvent, KeyEventExt, KeyToken};
     use tokio::sync::mpsc;
 
     // Re-implement minimal portion of the FSM driving logic for deterministic testing.
@@ -34,10 +34,9 @@ mod tests {
         // This test ensures normal keys still form Key events while paste markers would (in future)
         // generate paste events. We simulate by pushing Key then synthetic paste sequence events.
         let (tx, mut rx) = mpsc::channel::<Event>(16);
-        tx.send(Event::Input(InputEvent::Key(KeyEvent {
-            code: KeyCode::Char('x'),
-            mods: KeyModifiers::empty(),
-        })))
+        tx.send(Event::Input(InputEvent::KeyPress(KeyEventExt::new(
+            KeyToken::Char('x'),
+        ))))
         .await
         .unwrap();
         tx.send(Event::Input(InputEvent::PasteStart)).await.unwrap();
@@ -60,7 +59,12 @@ mod tests {
             }
         }
         assert_eq!(got.len(), 4);
-        assert!(matches!(got[0], Event::Input(InputEvent::Key(_))));
+        match &got[0] {
+            Event::Input(InputEvent::KeyPress(keypress)) => {
+                assert!(matches!(keypress.token, KeyToken::Char('x')));
+            }
+            other => panic!("unexpected first event: {other:?}"),
+        }
         assert!(matches!(got[1], Event::Input(InputEvent::PasteStart)));
         assert!(matches!(got[2], Event::Input(InputEvent::PasteChunk(_))));
         assert!(matches!(got[3], Event::Input(InputEvent::PasteEnd)));
