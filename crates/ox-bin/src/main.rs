@@ -24,9 +24,9 @@ use std::fmt;
 use std::mem::Discriminant;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tracing::{error, info, trace};
+use tracing::{error, info, trace, warn};
 use tracing_appender::non_blocking::WorkerGuard;
 
 const STATUS_ROWS: u16 = 1;
@@ -273,7 +273,8 @@ struct EditorRuntime<'a> {
     rx: mpsc::Receiver<Event>,
     tx: Option<mpsc::Sender<Event>>,
     source_handles: Vec<tokio::task::JoinHandle<()>>,
-    input_handle: Option<std::thread::JoinHandle<()>>,
+    input_task: Option<tokio::task::JoinHandle<()>>,
+    input_shutdown: Option<core_input::AsyncInputShutdown>,
     _terminal_guard: core_terminal::TerminalGuard<'a>,
 }
 
@@ -594,7 +595,8 @@ impl<'a> EditorRuntime<'a> {
         context: RuntimeContext<'a>,
         tx: mpsc::Sender<Event>,
         rx: mpsc::Receiver<Event>,
-        input_handle: std::thread::JoinHandle<()>,
+        input_task: tokio::task::JoinHandle<()>,
+        input_shutdown: core_input::AsyncInputShutdown,
         source_handles: Vec<tokio::task::JoinHandle<()>>,
     ) -> Self {
         let RuntimeContext {
@@ -618,7 +620,8 @@ impl<'a> EditorRuntime<'a> {
             rx,
             tx: Some(tx),
             source_handles,
-            input_handle: Some(input_handle),
+            input_task: Some(input_task),
+            input_shutdown: Some(input_shutdown),
             _terminal_guard: terminal_guard,
         }
     }
@@ -662,44 +665,66 @@ impl<'a> EditorRuntime<'a> {
     async fn finalize_shutdown(&mut self, reason: ShutdownReason) {
         log_shutdown_stage(reason, "begin");
         if let Some(tx) = self.tx.take() {
+            trace!(
+                target: "runtime.shutdown",
+                reason = reason.as_str(),
+                "dropping_runtime_sender"
+            );
             drop(tx);
         }
 
         while let Some(handle) = self.source_handles.pop() {
-            if !handle.is_finished() {
-                handle.abort();
-            }
-            match handle.await {
-                Ok(_) => trace!(
+            match tokio::time::timeout(Duration::from_millis(200), handle).await {
+                Ok(Ok(_)) => trace!(
                     target: "runtime.shutdown",
                     reason = reason.as_str(),
                     "event_source_task_stopped"
                 ),
-                Err(err) if err.is_cancelled() => trace!(
+                Ok(Err(err)) if err.is_cancelled() => trace!(
                     target: "runtime.shutdown",
                     reason = reason.as_str(),
                     "event_source_task_cancelled"
                 ),
-                Err(err) => error!(
+                Ok(Err(err)) => error!(
                     target: "runtime.shutdown",
                     reason = reason.as_str(),
                     ?err,
                     "event_source_task_error"
                 ),
+                Err(_) => warn!(
+                    target: "runtime.shutdown",
+                    reason = reason.as_str(),
+                    "event_source_task_timeout"
+                ),
             }
         }
 
-        if let Some(handle) = self.input_handle.take() {
-            match handle.join() {
+        if let Some(shutdown) = self.input_shutdown.take() {
+            trace!(
+                target: "runtime.shutdown",
+                reason = reason.as_str(),
+                "input_task_shutdown_signal"
+            );
+            shutdown.signal();
+        }
+
+        if let Some(handle) = self.input_task.take() {
+            match handle.await {
                 Ok(_) => trace!(
                     target: "runtime.shutdown",
                     reason = reason.as_str(),
-                    "input_thread_joined"
+                    "input_task_joined"
                 ),
-                Err(_err) => error!(
+                Err(err) if err.is_cancelled() => trace!(
                     target: "runtime.shutdown",
                     reason = reason.as_str(),
-                    "input_thread_join_failed"
+                    "input_task_cancelled"
+                ),
+                Err(err) => error!(
+                    target: "runtime.shutdown",
+                    reason = reason.as_str(),
+                    ?err,
+                    "input_task_join_failed"
                 ),
             }
         }
@@ -1020,12 +1045,13 @@ async fn main() -> Result<()> {
     let mut startup = AppStartup::new();
     let context = startup.run()?;
     let (tx, rx) = mpsc::channel::<Event>(EVENT_CHANNEL_CAP);
-    let input_handle = core_input::spawn_input_thread(tx.clone());
+    let (input_task, input_shutdown) = core_input::spawn_async_input(tx.clone());
     let mut registry = EventSourceRegistry::new();
     registry.register(TickEventSource::new(std::time::Duration::from_millis(250)));
-    let source_handles = registry.spawn_all(tx.clone());
+    let source_handles = registry.spawn_all(&tx);
 
-    let mut runtime = EditorRuntime::new(context, tx, rx, input_handle, source_handles);
+    let mut runtime =
+        EditorRuntime::new(context, tx, rx, input_task, input_shutdown, source_handles);
     runtime.run().await
 }
 

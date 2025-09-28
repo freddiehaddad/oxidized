@@ -62,7 +62,7 @@ Guiding goals:
 | `core-text` | Unicode cluster model, width probing, motions groundwork. |
 | `core-render` | Rendering engine: partial diffing, status line, dirty tracking, batching, scheduling. |
 | `core-terminal` | Terminal capability probing & abstraction (scroll region, etc.). |
-| `core-input` | Input thread / key event normalization & translation. |
+| `core-input` | Async input service, key event normalization & translation. |
 | `core-events` | Event source abstraction + orchestration. |
 | `core-actions` | Editor actions (motions, edits, undo/redo dispatch, command handling). |
 | `core-state` | Editor state structures (buffers, views, undo log). |

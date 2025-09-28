@@ -11,8 +11,8 @@ The NGI pipeline is Oxidized's end-to-end bridge from terminal events to high-le
 
 ## Event flow
 
-1. **Terminal thread (`core-input`)** enables bracketed paste and blocks on `crossterm::event::read`.
-2. Events enter a bounded `tokio::mpsc` channel as `core_events::Event::Input`, maintaining backpressure and metrics (`CHANNEL_BLOCKING_SENDS`, `PASTE_*`).
+1. **Async input task (`core-input`)** enables bracketed paste, listens on `crossterm::EventStream`, and cooperatively awaits either new events or a shutdown signal via `tokio::select!`.
+2. Events enter a bounded `tokio::mpsc` channel as `core_events::Event::Input`, maintaining backpressure and metrics (`CHANNEL_BLOCKING_SENDS`, `PASTE_*`) while tracking async lifecycle counters (`ASYNC_INPUT_*`).
 3. **Paste FSM** distinguishes between normal keypresses and bracketed paste sessions, emitting `PasteStart`, `PasteChunk`, and `PasteEnd` markers while tracing only lengths.
 4. **NGI translator (`core-keymap`)** consumes `InputEvent` values and resolves counts, register prefixes, and multi-key sequences into high-level actions via a trie-based state machine with explicit timeout deadlines.
 5. **Dispatcher (`core-actions`)** applies resolved actions to the editor state, keeping undo, registers, and render scheduling in sync with Vim parity expectations.
@@ -32,7 +32,7 @@ The NGI pipeline is Oxidized's end-to-end bridge from terminal events to high-le
 ## Observability
 
 - Each stage emits structured tracing:
-  - `input.thread` wraps the blocking reader lifecycle.
+  - `input.thread` now captures the async task lifecycle (startup, shutdown reason, and any stream errors).
   - `input.paste` logs session start/end and chunk lengths.
   - `actions.translate` and `actions.dispatch` capture translator decisions and dispatcher outcomes.
 - Counters in `core-events` record channel pressure and paste throughput; the metrics overlay surfaces these values live inside the TUI.

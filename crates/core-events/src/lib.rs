@@ -33,6 +33,12 @@ pub static CHANNEL_BLOCKING_SENDS: AtomicU64 = AtomicU64::new(0); // increments 
 pub static PASTE_SESSIONS: AtomicU64 = AtomicU64::new(0); // number of PasteStart events
 pub static PASTE_CHUNKS: AtomicU64 = AtomicU64::new(0); // number of PasteChunk events
 pub static PASTE_BYTES: AtomicU64 = AtomicU64::new(0); // total bytes across all chunks
+// Async input task lifecycle telemetry (Refactor R4 Step 15)
+pub static ASYNC_INPUT_STARTS: AtomicU64 = AtomicU64::new(0);
+pub static ASYNC_INPUT_STOP_SIGNAL: AtomicU64 = AtomicU64::new(0);
+pub static ASYNC_INPUT_STOP_CHANNEL: AtomicU64 = AtomicU64::new(0);
+pub static ASYNC_INPUT_STOP_STREAM: AtomicU64 = AtomicU64::new(0);
+pub static ASYNC_INPUT_STOP_ERROR: AtomicU64 = AtomicU64::new(0);
 
 /// Top-level event enum consumed by the central event loop.
 #[derive(Debug, Clone)]
@@ -120,6 +126,9 @@ impl TickEventSource {
 #[cfg(test)]
 mod tests_async_sources {
     use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
     use tokio::sync::mpsc;
 
     struct MockOnceSource {
@@ -150,20 +159,79 @@ mod tests_async_sources {
         let mut reg = EventSourceRegistry::new();
         reg.register(MockOnceSource::new());
         reg.register(TickEventSource::new(std::time::Duration::from_millis(10)));
-        let _handles = reg.spawn_all(tx);
-        // Expect at least one event quickly.
-        let mut got_any = false;
+        let handles = reg.spawn_all(&tx);
+        // Expect at least one event from each source quickly.
+        let mut got_render = false;
+        let mut got_tick = false;
         let start = std::time::Instant::now();
-        while start.elapsed() < std::time::Duration::from_millis(100) {
-            if let Ok(ev) =
+        while start.elapsed() < std::time::Duration::from_millis(100) && (!got_render || !got_tick)
+        {
+            if let Ok(Some(ev)) =
                 tokio::time::timeout(std::time::Duration::from_millis(5), rx.recv()).await
-                && ev.is_some()
             {
-                got_any = true;
-                break;
+                match ev {
+                    Event::RenderRequested => got_render = true,
+                    Event::Tick => got_tick = true,
+                    _ => {}
+                }
             }
         }
-        assert!(got_any, "expected at least one event from sources");
+        assert!(
+            got_render,
+            "expected mock source to produce a render request"
+        );
+        assert!(got_tick, "expected tick source to emit tick events");
+
+        drop(tx);
+        drop(rx);
+        for handle in handles {
+            let _ = tokio::time::timeout(Duration::from_millis(20), handle).await;
+        }
+    }
+
+    struct MockCloseSource {
+        flag: Arc<AtomicBool>,
+    }
+
+    impl MockCloseSource {
+        fn new(flag: Arc<AtomicBool>) -> Self {
+            Self { flag }
+        }
+    }
+
+    impl AsyncEventSource for MockCloseSource {
+        fn name(&self) -> &'static str {
+            "mock_close"
+        }
+
+        fn spawn(self: Box<Self>, tx: Sender<Event>) -> JoinHandle<()> {
+            let flag = self.flag;
+            tokio::spawn(async move {
+                tx.closed().await;
+                flag.store(true, Ordering::SeqCst);
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn registry_sources_exit_on_channel_drop() {
+        let (tx, rx) = mpsc::channel::<Event>(8);
+        let mut reg = EventSourceRegistry::new();
+        let flag = Arc::new(AtomicBool::new(false));
+        reg.register(MockCloseSource::new(flag.clone()));
+        let handles = reg.spawn_all(&tx);
+
+        drop(tx);
+        drop(rx);
+
+        for handle in handles {
+            match tokio::time::timeout(Duration::from_millis(50), handle).await {
+                Ok(join_res) => join_res.expect("source task should exit cleanly"),
+                Err(_) => panic!("source task did not observe channel closure"),
+            }
+        }
+
+        assert!(flag.load(Ordering::SeqCst));
     }
 }
 
@@ -196,7 +264,15 @@ impl EventSourceRegistry {
     }
     /// Spawn all registered sources, returning their JoinHandles. Caller owns the handles (may
     /// choose to detach or await during shutdown sequence).
-    pub fn spawn_all(&mut self, tx: Sender<Event>) -> Vec<JoinHandle<()>> {
+    /// Spawn all registered sources, returning their JoinHandles. The supplied `Sender`
+    /// reference stays owned by the caller; each source receives its own clone so no
+    /// additional strong references linger inside the registry once this call returns.
+    ///
+    /// Ordering guarantee: call this after constructing the primary runtime channel and
+    /// before the event loop begins consuming events. During shutdown the caller should
+    /// drop its final `Sender` clone before awaiting the returned handles so the sources
+    /// observe the closed channel and exit cooperatively.
+    pub fn spawn_all(&mut self, tx: &Sender<Event>) -> Vec<JoinHandle<()>> {
         // Take ownership so duplicate spawns are prevented if called twice.
         let mut out = Vec::with_capacity(self.sources.len());
         for src in self.sources.drain(..) {
