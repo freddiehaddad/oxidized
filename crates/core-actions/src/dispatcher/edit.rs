@@ -52,17 +52,28 @@ pub(crate) fn handle_edit(
         EditKind::InsertNewline => {
             if matches!(state.mode, Mode::Insert) {
                 let before = view.cursor;
+                let before_line_count = state.active_buffer().line_count();
                 state.begin_insert_coalescing(view.cursor);
                 state.note_insert_edit();
                 let mut pos = view.cursor;
-                state.active_buffer_mut().insert_newline(&mut pos);
+                {
+                    let buffer = state.active_buffer_mut();
+                    buffer.insert_newline(&mut pos);
+                }
                 view.cursor = pos;
                 state.end_insert_coalescing();
-                tracing::trace!(target: "actions.dispatch", op="insert_newline", line=before.line, byte=before.byte, to_line=view.cursor.line, to_byte=view.cursor.byte, "edit");
+                let after_line_count = state.active_buffer().line_count();
+                let structural =
+                    after_line_count > before_line_count || view.cursor.line > before.line;
+                tracing::trace!(target: "actions.dispatch", op="insert_newline", line=before.line, byte=before.byte, to_line=view.cursor.line, to_byte=view.cursor.byte, structural, "edit");
                 if !state.dirty {
                     state.dirty = true;
                 }
-                DispatchResult::dirty()
+                if structural {
+                    DispatchResult::buffer_replaced()
+                } else {
+                    DispatchResult::dirty()
+                }
             } else {
                 DispatchResult::clean()
             }

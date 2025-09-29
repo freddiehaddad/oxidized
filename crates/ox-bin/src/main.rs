@@ -1264,6 +1264,7 @@ mod tests {
     use core_actions::{Action, EditKind, ModeChange, MotionKind, OperatorKind, PendingState};
     use core_events::{KeyCode, KeyEvent, KeyEventExt, KeyModifiers, KeyToken, ModMask, NamedKey};
     use core_render::render_engine::{RenderEngine, build_content_frame};
+    use core_render::scheduler::RenderDelta;
     use core_text::Buffer;
     use std::fmt;
     use std::sync::{Arc, Mutex};
@@ -1521,6 +1522,32 @@ char:w repeat=false ts=12
             kp_runtime.model.active_view().cursor,
             legacy_runtime.model.active_view().cursor
         );
+    }
+
+    #[test]
+    fn insert_newline_requests_full_render() {
+        let mut runtime = runtime_for_input_tests("alpha\n");
+
+        let enter_insert = KeyEventExt::new(KeyToken::Char('i'));
+        let control = runtime.handle_key_press(&enter_insert);
+        assert!(matches!(control, LoopControl::Continue { .. }));
+        if let Some(decision) = runtime.scheduler.consume() {
+            assert!(matches!(decision.semantic, RenderDelta::Lines(_)));
+        }
+
+        let newline = KeyEventExt::new(KeyToken::Named(NamedKey::Enter));
+        let control = runtime.handle_key_press(&newline);
+        assert!(matches!(
+            control,
+            LoopControl::Continue { lines_changed: 0 }
+        ));
+
+        let decision = runtime
+            .scheduler
+            .consume()
+            .expect("newline should schedule render decision");
+        assert!(matches!(decision.semantic, RenderDelta::Full));
+        assert!(matches!(decision.effective, RenderDelta::Full));
     }
 
     #[test]
